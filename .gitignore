@@ -1,0 +1,23 @@
+# Local agent / runtime state
+.tools/
+.codex-mode-lock
+.codex/environments/
+.codex/*.bak.*
+.claude/settings.local.json
+.claude/worktrees/
+.gemini/
+.windsurf/
+.openclaude/
+.openclaude-profile.json
+.cursor/rules-local/
+.superpowers/brainstorm/
+.agents/runtime/
+.agents/state/
+.agents/cache/
+
+# Generated candidates / backups
+*.generated.*
+*.bak.*
+
+# OS / editor
+.DS_Store

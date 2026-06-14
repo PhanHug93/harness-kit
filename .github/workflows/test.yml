@@ -1,0 +1,21 @@
+name: drift-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  drift-test:
+    name: bootstrap drift test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show bash version
+        run: bash --version | head -1
+      - name: Run bootstrap drift test
+        run: bash scripts/test-bootstrap-multi-agent-project.sh

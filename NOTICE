@@ -1,0 +1,11 @@
+agent-bootstrap
+Copyright (c) 2026 Phan Manh Hung
+Licensed under the MIT License (see LICENSE).
+
+Third-party content:
+
+- The `doubt-driven` agent skill emitted by this kit
+  (agent-bootstrap/lib/writers-docs.sh) is adapted from
+  addyosmani/agent-skills (https://github.com/addyosmani/agent-skills),
+  MIT License. The adaptation is paraphrased and carries an inline attribution
+  ("Adapted from addyosmani/agent-skills (MIT)").
