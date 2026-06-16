@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
+  "title": "Agent Bootstrap Status",
+  "type": "object",
+  "required": [
+    "schema",
+    "target",
+    "project",
+    "lock_schema",
+    "bundle_version",
+    "installed_version",
+    "channel",
+    "workflow_preset",
+    "detector_lock_status",
+    "onboarding_status",
+    "pending_generated_candidates",
+    "generated_file_drift"
+  ],
+  "properties": {
+    "schema": { "const": "agent-bootstrap-status/v1" },
+    "target": { "type": "string" },
+    "project": { "type": "string" },
+    "lock_schema": { "type": "string" },
+    "bundle_version": { "type": "string" },
+    "installed_version": { "type": "string" },
+    "channel": { "type": "string" },
+    "workflow_preset": { "enum": ["infra", "full", "missing"] },
+    "detector_lock_status": { "enum": ["match", "drift", "missing"] },
+    "onboarding_status": { "enum": ["filled", "partial", "unfilled", "invalid", "missing", "not-installed"] },
+    "pending_generated_candidates": { "type": "integer", "minimum": 0 },
+    "generated_file_drift": { "enum": ["clean", "stale", "unknown"] }
+  },
+  "additionalProperties": false
+}

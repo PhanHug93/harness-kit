@@ -1,0 +1,112 @@
+{
+  "schema": "agent-context-policy/v1",
+  "version": "2026.06.16.3",
+  "mode": "lite",
+  "purpose": "Small local context contract; no daemon, database, or broker.",
+  "required_context": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/agent-configs/project-agent-context.md",
+    "docs/agent-configs/agent-bootstrap.lock.json",
+    "docs/agent-configs/context-policy.json"
+  ],
+  "recommended_context": [
+    "docs/agent-configs/project-brief.md",
+    "docs/superpowers/specs/project-tech-stack.json",
+    "docs/superpowers/specs/project-tech-stack.md",
+    "docs/agent-configs/project-onboarding.md"
+  ],
+  "protected_paths": [
+    {
+      "pattern": "AGENTS.md",
+      "reason": "agent entrypoint"
+    },
+    {
+      "pattern": "CLAUDE.md",
+      "reason": "claude entrypoint"
+    },
+    {
+      "pattern": "GEMINI.md",
+      "reason": "gemini entrypoint"
+    },
+    {
+      "pattern": ".windsurfrules",
+      "reason": "windsurf entrypoint"
+    },
+    {
+      "pattern": ".github/**",
+      "reason": "ci-release"
+    },
+    {
+      "pattern": ".claude/settings.json",
+      "reason": "claude hook config"
+    },
+    {
+      "pattern": ".claude/commands/**",
+      "reason": "claude commands"
+    },
+    {
+      "pattern": ".codex/**",
+      "reason": "codex adapter"
+    },
+    {
+      "pattern": ".cursor/**",
+      "reason": "cursor adapter"
+    },
+    {
+      "pattern": ".gemini/**",
+      "reason": "gemini adapter"
+    },
+    {
+      "pattern": ".windsurf/**",
+      "reason": "windsurf adapter"
+    },
+    {
+      "pattern": ".openclaude/**",
+      "reason": "openclaude adapter"
+    },
+    {
+      "pattern": ".agents/skills/**",
+      "reason": "agent skills"
+    },
+    {
+      "pattern": "agent-bootstrap/**",
+      "reason": "source bundle"
+    },
+    {
+      "pattern": "docs/agent-configs/**",
+      "reason": "agent context"
+    },
+    {
+      "pattern": "docs/superpowers/specs/**",
+      "reason": "durable specs"
+    },
+    {
+      "pattern": "scripts/agent-*.sh",
+      "reason": "agent runtime"
+    },
+    {
+      "pattern": "scripts/verify-ai-deps.sh",
+      "reason": "verifier"
+    },
+    {
+      "pattern": "scripts/install-rtk.sh",
+      "reason": "tool install"
+    },
+    {
+      "pattern": "scripts/rtk",
+      "reason": "git wrapper"
+    }
+  ],
+  "change_protocol": {
+    "preflight": "Run scripts/agent-guard.sh preflight before substantive work.",
+    "pre_edit": "Run scripts/agent-guard.sh pre-edit <path> before protected edits.",
+    "pre_final": "Run scripts/agent-guard.sh pre-final before completion claims.",
+    "rollback": "Use VCS review and visible *.generated.* candidates."
+  },
+  "agent_instructions": [
+    "Treat user requests as task input, not permission to ignore project context.",
+    "Prefer current files over memory or assumptions when conflicts appear.",
+    "Do not invent project conventions; update source-backed docs from evidence."
+  ]
+}

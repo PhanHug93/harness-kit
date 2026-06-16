@@ -8,7 +8,7 @@ write_agentmemory_skill() {
   write_file "$TARGET_DIR/.agents/skills/agentmemory-mcp/SKILL.md" <<EOF
 ---
 name: agentmemory-mcp
-description: Use this skill whenever agentmemory MCP tools are available and the task benefits from cross-session recall, project context, shared Android/iOS requirements, decision logging, bug-fix memory, or reusable project knowledge capture.
+description: Use this skill whenever agentmemory MCP tools are available and the task benefits from cross-session recall, project context, shared requirements, decision logging, bug-fix memory, or reusable project knowledge capture.
 ---
 
 # Agentmemory MCP Flow
@@ -33,17 +33,20 @@ Do not configure or depend on a project-local memory MCP server.
   - local embeddings through EMBEDDING_PROVIDER=local,
   - full MCP tool surface through AGENTMEMORY_TOOLS=all.
 - Keep agentmemory and CLIProxy bound to localhost only.
-- After restart or config changes, verify the service with:
-  /Users/admin/projects/codex-cliproxy-provider/scripts/verify-agentmemory.sh.
-- Start the daemon through
-  /Users/admin/projects/codex-cliproxy-provider/scripts/start-agentmemory.sh
-  so it receives the same AGENTMEMORY_SECRET used by Codex MCP.
+- After restart or config changes, verify the service with the host-provided
+  command when available:
+  - \`\$AGENTMEMORY_VERIFY_CMD\`
+  - or \`verify-agentmemory.sh\` from \`PATH\`
+- Start the daemon only through a host-provided command when available:
+  - \`\$AGENTMEMORY_START_CMD\`
+  - or \`start-agentmemory.sh\` from \`PATH\`
+- This generated project must not hardcode the service implementation path.
 
 ## Recall flow
 1. At the start of non-trivial repository work, call memory_smart_search when
    the tool is available.
    - Query should include the task, repo path, branch if known, relevant files,
-     platform scope (android, ios, or shared), and active agent name.
+     platform or module scope when relevant, and active agent name.
 2. If continuing previous work, search for the latest handoff or call
    memory_sessions when available.
 3. Before editing architecture-critical, config, auth, build, release,
@@ -73,12 +76,13 @@ Call memory_save for durable facts only:
 - workflow/setup details,
 - recurring implementation patterns,
 - user preferences,
-- cross-platform requirement decisions,
+- cross-platform or cross-module requirement decisions,
 - handoffs worth recovering later.
 
 Always include useful metadata in saved memory:
 - repo path,
-- platform scope (shared, android, ios, or another platform name),
+- platform or module scope (shared, backend, frontend, mobile, infra, or a
+  project-specific scope),
 - relevant files,
 - evidence or commands/tests run,
 - confidence and date when useful.
@@ -104,19 +108,19 @@ next_step:
 do_not_repeat:
 confidence:
 
-## Android/iOS shared context
-Use shared memories for platform-neutral product and domain requirements:
+## Shared context
+Use shared memories for platform-neutral product, domain, and operating
+requirements:
 - challenge rules and acceptance criteria,
 - privacy/security policy decisions,
-- health-data semantics,
-- reward/trust-boundary decisions,
+- data semantics,
+- reward, entitlement, or trust-boundary decisions,
 - UX copy intent,
 - API/backend contracts,
 - QA evidence and release gates.
 
 Use platform-specific memories for implementation details:
-- Android files/modules/tasks and platform APIs,
-- iOS files/modules/tasks and platform APIs,
+- platform files/modules/tasks and APIs,
 - platform-specific verification commands,
 - platform-only edge cases.
 
@@ -124,8 +128,7 @@ When saving a shared requirement, prefer this shape:
 
 platform_scope=shared
 requirement=<product/domain contract>
-android_implication=<Android-specific implementation note or none yet>
-ios_implication=<iOS-specific implementation note or none yet>
+scope_implication=<scope-specific implementation note or none yet>
 evidence=<source docs/tests/user decision>
 
 ## Guardrails
@@ -240,12 +243,15 @@ project wants the Karpathy/council/three-mode contracts.
 - Shared detector library: \`scripts/agent-tech-stack-lib.sh\`.
 - Binding lock: \`docs/agent-configs/agent-bootstrap.lock.json\`.
 - Shared hook: \`scripts/agent-hook.sh\`.
+- Context guard: \`scripts/agent-guard.sh\` with policy
+  \`docs/agent-configs/context-policy.json\`.
 - rtk wrapper: \`./scripts/rtk git ...\`.
 - Agentmemory skill: \`.agents/skills/agentmemory-mcp/SKILL.md\`.
 
 At the start of substantive work, run:
 
 \`\`\`bash
+scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 \`\`\`
 
@@ -344,8 +350,13 @@ $stack_overlay_content
 
 ## Agent Safety Bridge
 
-- Use \`docs/agent-configs/agent-handoff-schema.md\` when transferring work
-  between agents or phases.
+- If the project needs formal cross-agent handoff, rerun bootstrap with
+  \`--workflow full\` to install \`docs/agent-configs/agent-handoff-schema.md\`.
+- Run \`scripts/agent-guard.sh pre-edit <path>\` before changing protected
+  context, harness, CI, release, or generated-runtime paths. For intentional
+  protected edits, rerun with \`--ack <reason>\` and keep the reason in the
+  handoff or final summary.
+- Run \`scripts/agent-guard.sh pre-final\` before claiming completion.
 - Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
@@ -371,6 +382,7 @@ bootstrap is run with `--workflow full`.
 At the start of substantive work, run:
 
 ```bash
+scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 ```
 
@@ -403,27 +415,34 @@ EOF
 {
   "hooks": {
     "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
-        ]
-      }
-    ]
-  }
+	      {
+	        "matcher": "Bash",
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      },
+	      {
+	        "matcher": "Edit|Write|MultiEdit",
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      }
+	    ]
+	  }
 }
 EOF
 
   write_file "$TARGET_DIR/.claude/README.md" <<'EOF'
 # Claude Agent Infrastructure
 
-This project has the shared Claude Bash hook installed:
+This project has shared Claude Bash and edit/write hooks installed:
 
 ```bash
 ./scripts/agent-hook.sh claude-pretool
 ```
 
-The hook validates the detector lock and delegates shell git handling to rtk.
+The hook validates the detector lock, guards protected edit paths, and delegates
+shell git handling to rtk.
 Workflow command docs are opt-in; run bootstrap with `--workflow full` if the
 project wants planning/coding/reviewing command contracts.
 EOF
@@ -460,9 +479,11 @@ Always read at startup:
 - \`docs/agent-configs/project-agent-context.md\`.
 - \`docs/agent-configs/project-brief.md\` when filled; if it still carries the
   \`<!-- UNFILLED -->\` marker, run project onboarding
-  (\`docs/agent-configs/project-onboarding.md\`) before substantive work.
-- The output of \`scripts/detect-agent-tech-stack.sh --markdown\` when the
-  detector is available.
+  (\`docs/agent-configs/project-onboarding.md\`) before substantive work so the
+  project brief, project-specific tech-stack spec, and specs/plans skeleton are
+  source-backed by a scan of the target project.
+- The output of \`scripts/agent-guard.sh preflight\` and
+  \`scripts/detect-agent-tech-stack.sh --markdown\` when available.
 
 Read on demand:
 
@@ -481,9 +502,11 @@ Keep the always-on/core startup context under roughly 3k estimated tokens.
 \`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
 current estimate.
 
-At the start of substantive work, refresh local stack context with:
+At the start of substantive work, refresh the local context pack and stack
+context with:
 
 \`\`\`bash
+scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 \`\`\`
 
@@ -617,7 +640,9 @@ $stack_bullets
 Detected facts above are the seed. The durable deep context lives in
 \`docs/agent-configs/project-brief.md\`. If that file still carries its
 \`<!-- UNFILLED -->\` marker, run project onboarding
-(\`docs/agent-configs/project-onboarding.md\`) before substantive work.
+(\`docs/agent-configs/project-onboarding.md\`) before substantive work. The
+onboarding pass also updates project-specific tech-stack notes in this file and
+fills \`docs/superpowers/specs/project-tech-stack.md\`.
 
 ## Detected Modules
 
@@ -655,6 +680,11 @@ $stack_overlay_content
 
 - Use \`docs/agent-configs/agent-handoff-schema.md\` when transferring work
   between agents or phases.
+- Run \`scripts/agent-guard.sh pre-edit <path>\` before changing protected
+  context, harness, CI, release, or generated-runtime paths. For intentional
+  protected edits, rerun with \`--ack <reason>\` and keep the reason in the
+  handoff or final summary.
+- Run \`scripts/agent-guard.sh pre-final\` before claiming completion.
 - Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
@@ -666,12 +696,14 @@ $stack_overlay_content
 - Architecture boundaries:
 - Test strategy:
 - Release or deployment constraints:
+- Project-specific tech-stack overrides and commands:
 
 ## Tech-Stack Customization Rule
 
 At the start of substantive work, agents should run:
 
 \`\`\`bash
+scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 \`\`\`
 
@@ -770,7 +802,8 @@ Purpose:
   system performance improvement planning.
 
 Model target:
-- Codex: `gpt-5.5` with `model_reasoning_effort="xhigh"`.
+- Codex: use `docs/agent-configs/model-profiles.json` stable profile unless
+  the user or environment selects an override.
 - Claude: launch with the strongest available planning model in the host tool.
 
 Default behavior:
@@ -810,7 +843,8 @@ Purpose:
 - Implementation, refactoring, bug fixing, tests, and verification.
 
 Model target:
-- Codex: `gpt-5.5` with `model_reasoning_effort="xhigh"`.
+- Codex: use `docs/agent-configs/model-profiles.json` stable profile unless
+  the user or environment selects an override.
 - Claude: launch with the strongest available coding model in the host tool.
 
 Ownership:
@@ -842,7 +876,8 @@ Purpose:
   verification review.
 
 Model target:
-- Codex: `gpt-5.5` with `model_reasoning_effort="xhigh"`.
+- Codex: use `docs/agent-configs/model-profiles.json` stable profile unless
+  the user or environment selects an override.
 - Claude: launch with the strongest available review model in the host tool.
 
 Default behavior:
@@ -957,7 +992,7 @@ write_tool_entrypoints() {
 If `docs/agent-configs/project-brief.md` still carries the `<!-- UNFILLED -->`
 marker, run project onboarding (`docs/agent-configs/project-onboarding.md`;
 Claude: `/project-onboarding`) BEFORE substantive work, so you have full project
-context.
+context and source-backed project-specific tech-stack/spec notes.
 
 Read `AGENTS.md` first. For startup, load
 `docs/agent-configs/project-agent-context.md`, the filled project brief when
@@ -1003,7 +1038,8 @@ EOF
 
 If `docs/agent-configs/project-brief.md` still carries the `<!-- UNFILLED -->`
 marker, run project onboarding (`docs/agent-configs/project-onboarding.md`)
-BEFORE substantive work, so you have full project context.
+BEFORE substantive work, so you have full project context and source-backed
+project-specific tech-stack/spec notes.
 
 Read `AGENTS.md` first. This file is only a tool-specific pointer. Startup
 context is `project-agent-context.md`, the filled project brief when available,
@@ -1030,14 +1066,20 @@ EOF
 {
   "hooks": {
     "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
-        ]
-      }
-    ]
-  }
+	      {
+	        "matcher": "Bash",
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      },
+	      {
+	        "matcher": "Edit|Write|MultiEdit",
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      }
+	    ]
+	  }
 }
 EOF
 
@@ -1287,9 +1329,11 @@ scripts/verify-ai-deps.sh
 Runtime stack detection lives in `scripts/agent-tech-stack-lib.sh`; the
 detector is only a wrapper.
 
-All modes default to `model_reasoning_effort="xhigh"` and project-local
-full-flow execution. Use `--supervised`, `--read-only`, `--propose`, or
-`--standard` only when the user wants to observe and approve actions.
+Model defaults live in `docs/agent-configs/model-profiles.json`; set
+`CODEX_MODEL_PROFILE=<profile>` to test a different profile without editing
+generated scripts. All modes default to project-local full-flow execution. Use
+`--supervised`, `--read-only`, `--propose`, or `--standard` only when the user
+wants to observe and approve actions.
 Reviewing is findings-first; it may run project-local verification, but applies
 remediation edits only when the request asks for fixes or an exact patch scope.
 
@@ -1310,8 +1354,8 @@ CODEX_USE_FALLBACK=1 .codex/codex-mode.sh coding
 CODEX_USE_FALLBACK=1 .codex/codex-mode.sh reviewing
 ```
 
-Fallback defaults are `gpt-5.4` for planning, coding, and reviewing. Override
-per launch when needed:
+Fallback defaults come from `docs/agent-configs/model-profiles.json`. Override
+per launch when capacity or rollout needs a one-shot change:
 
 ```bash
 CODEX_MODEL_OVERRIDE=gpt-5.4 .codex/codex-mode.sh planning
@@ -1327,14 +1371,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 MODE_FILE="$PROJECT_ROOT/.codex-mode-lock"
 AGENT_HOOK="$PROJECT_ROOT/scripts/agent-hook.sh"
+AGENT_GUARD="$PROJECT_ROOT/scripts/agent-guard.sh"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 VERIFY_AI_DEPS="$PROJECT_ROOT/scripts/verify-ai-deps.sh"
+MODEL_PROFILES="$PROJECT_ROOT/docs/agent-configs/model-profiles.json"
 
 DEFAULT_MODE="planning"
 DEFAULT_FLOW="full_flow"
 STANDARD_APPROVAL="on-request"
 FULL_FLOW_APPROVAL="never"
 REASONING_EFFORT="xhigh"
+MODEL_PROFILE="${CODEX_MODEL_PROFILE:-stable}"
 
 PLANNING_MODEL="gpt-5.5"
 CODING_MODEL="gpt-5.5"
@@ -1417,6 +1464,44 @@ truthy() {
 
 fallback_requested() {
   truthy "${CODEX_USE_FALLBACK:-}"
+}
+
+profile_value() {
+  local profile="$1"
+  local key="$2"
+  [[ -f "$MODEL_PROFILES" ]] || return 0
+  awk -v profile="$profile" -v key="$key" '
+    $0 ~ "\"" profile "\"[[:space:]]*:" { in_profile = 1; next }
+    in_profile && $0 ~ /^[[:space:]]*}/ { exit }
+    in_profile {
+      pattern = "\"" key "\"[[:space:]]*:[[:space:]]*\""
+      if ($0 ~ pattern) {
+        sub(".*" pattern, "")
+        sub("\".*", "")
+        print
+        exit
+      }
+    }
+  ' "$MODEL_PROFILES"
+}
+
+load_model_profile() {
+  local profile="$1"
+  local value=""
+  value="$(profile_value "$profile" reasoning_effort)"
+  [[ -n "$value" ]] && REASONING_EFFORT="$value"
+  value="$(profile_value "$profile" planning_model)"
+  [[ -n "$value" ]] && PLANNING_MODEL="$value"
+  value="$(profile_value "$profile" coding_model)"
+  [[ -n "$value" ]] && CODING_MODEL="$value"
+  value="$(profile_value "$profile" reviewing_model)"
+  [[ -n "$value" ]] && REVIEWING_MODEL="$value"
+  value="$(profile_value "$profile" planning_fallback_model)"
+  [[ -n "$value" ]] && PLANNING_FALLBACK_MODEL="${CODEX_PLANNING_FALLBACK_MODEL:-$value}"
+  value="$(profile_value "$profile" coding_fallback_model)"
+  [[ -n "$value" ]] && CODING_FALLBACK_MODEL="${CODEX_CODING_FALLBACK_MODEL:-$value}"
+  value="$(profile_value "$profile" reviewing_fallback_model)"
+  [[ -n "$value" ]] && REVIEWING_FALLBACK_MODEL="${CODEX_REVIEWING_FALLBACK_MODEL:-$value}"
 }
 
 model_for_mode() {
@@ -1549,6 +1634,7 @@ run_doctor() {
     docs/agent-configs/agent-mode-contracts.md \
     docs/agent-configs/agent-handoff-schema.md \
     docs/agent-configs/project-agent-context.md \
+    docs/agent-configs/context-policy.json \
     docs/agent-configs/karpathy-llm-coding-agent-config.md \
     docs/agent-configs/llm-council-agent-workflow.md \
     .codex/config.toml \
@@ -1571,6 +1657,7 @@ run_doctor() {
     docs/agent-configs/project-onboarding.md \
     docs/agent-configs/project-brief.md \
     docs/superpowers/specs/README.md \
+    docs/superpowers/specs/project-tech-stack.md \
     docs/superpowers/plans/README.md; do
     doctor_file "$path"
   done
@@ -1586,6 +1673,7 @@ run_doctor() {
   doctor_exec scripts/install-rtk.sh
   doctor_exec scripts/rtk
   doctor_exec scripts/agent-hook.sh
+  doctor_exec scripts/agent-guard.sh
   doctor_exec scripts/agent-tech-stack-lib.sh
   doctor_exec scripts/detect-agent-tech-stack.sh
   doctor_exec scripts/verify-ai-deps.sh
@@ -1594,6 +1682,7 @@ run_doctor() {
   doctor_bash scripts/rtk
   doctor_bash .codex/codex-mode.sh
   doctor_bash scripts/agent-hook.sh
+  doctor_bash scripts/agent-guard.sh
   doctor_bash scripts/agent-tech-stack-lib.sh
   doctor_bash scripts/detect-agent-tech-stack.sh
   doctor_bash scripts/verify-ai-deps.sh
@@ -1612,13 +1701,19 @@ run_doctor() {
     doctor_bad "Codex config does not use xhigh reasoning"
   fi
 
-  if grep -Fq './scripts/agent-hook.sh claude-pretool' "$PROJECT_ROOT/.claude/settings.json"; then
-    doctor_ok "Claude PreToolUse uses shared agent hook"
-  else
-    doctor_bad "Claude PreToolUse does not use shared agent hook"
-  fi
+	  if grep -Fq './scripts/agent-hook.sh claude-pretool' "$PROJECT_ROOT/.claude/settings.json"; then
+	    doctor_ok "Claude PreToolUse uses shared agent hook"
+	  else
+	    doctor_bad "Claude PreToolUse does not use shared agent hook"
+	  fi
 
-  if "$PROJECT_ROOT/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
+	  if grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
+	    doctor_ok "Claude PreToolUse guards edit/write tools"
+	  else
+	    doctor_bad "Claude PreToolUse does not guard edit/write tools"
+	  fi
+
+	  if "$PROJECT_ROOT/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
     doctor_ok "rtk wrapper resolves pinned version 0.37.2"
   else
     doctor_warn "rtk pinned binary is not installed; run: bash scripts/install-rtk.sh before using rtk-specific hooks"
@@ -1636,6 +1731,12 @@ run_doctor() {
     doctor_bad "local-only agent state guard failed"
   fi
 
+  if [[ -x "$AGENT_GUARD" ]] && "$AGENT_GUARD" check >/dev/null 2>&1; then
+    doctor_ok "agent guard check passes"
+  else
+    doctor_bad "agent guard check failed"
+  fi
+
   no_scan_paths="$("$AGENT_HOOK" no-scan-paths 2>/dev/null || true)"
   if [[ -x "$AGENT_HOOK" ]] &&
     printf '%s\n' "$no_scan_paths" | grep -Fq '.claude/worktrees/' &&
@@ -1648,7 +1749,7 @@ run_doctor() {
     doctor_bad "no-scan guard missing local/vendor/sensitive paths"
   fi
 
-  if [[ -x "$AGENT_HOOK" ]] && "$AGENT_HOOK" codex-preflight "$(read_mode)" "$(read_flow)" >/dev/null 2>&1; then
+  if [[ -x "$AGENT_HOOK" ]] && "$AGENT_HOOK" codex-preflight --check-only "$(read_mode)" "$(read_flow)" >/dev/null 2>&1; then
     doctor_ok "shared agent hook codex preflight passes"
   else
     doctor_bad "shared agent hook codex preflight failed"
@@ -1752,22 +1853,22 @@ mode_prompt() {
   local flow="$2"
   case "$mode:$flow" in
     planning:standard)
-      printf '%s' "MODE LOCK: PLANNING-SUPERVISED. Read-only planning. Claude is primary for planning; Codex planning is fallback/user-selected. Apply docs/agent-configs/agent-mode-contracts.md Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/detect-agent-tech-stack.sh --markdown when available and respect scripts/agent-hook.sh no-scan-paths. Do not mutate files unless the user explicitly grants that exact action."
+      printf '%s' "MODE LOCK: PLANNING-SUPERVISED. Read-only planning. Claude is primary for planning; Codex planning is fallback/user-selected. Apply docs/agent-configs/agent-mode-contracts.md Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. Do not mutate files unless the user explicitly grants that exact action."
       ;;
     planning:full_flow)
-      printf '%s' "MODE LOCK: PLANNING-FULL-FLOW. Claude is primary for planning; Codex planning is fallback/user-selected. Apply Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/detect-agent-tech-stack.sh --markdown when available and respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local execution only. Keep scope bounded and produce implementation-ready handoff when coding follows."
+      printf '%s' "MODE LOCK: PLANNING-FULL-FLOW. Claude is primary for planning; Codex planning is fallback/user-selected. Apply Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local execution only. Keep scope bounded and produce implementation-ready handoff when coding follows."
       ;;
     coding:standard)
-      printf '%s' "MODE LOCK: CODING-SUPERVISED. Codex is primary for coding. Read-only coding analysis. Apply Coding Mode, docs/agent-configs/agent-handoff-schema.md for handoff, run scripts/detect-agent-tech-stack.sh --markdown when available, respect scripts/agent-hook.sh no-scan-paths, and run the Technical Spec Adequacy Gate before proposing implementation."
+      printf '%s' "MODE LOCK: CODING-SUPERVISED. Codex is primary for coding. Read-only coding analysis. Apply Coding Mode, docs/agent-configs/agent-handoff-schema.md for handoff, run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available, respect scripts/agent-hook.sh no-scan-paths, and run the Technical Spec Adequacy Gate before proposing implementation."
       ;;
     coding:full_flow)
-      printf '%s' "MODE LOCK: CODING-FULL-FLOW. Codex is primary for coding. Apply Coding Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/detect-agent-tech-stack.sh --markdown when available and respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local implementation, tests, verification, and self-review."
+      printf '%s' "MODE LOCK: CODING-FULL-FLOW. Codex is primary for coding. Apply Coding Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; run scripts/agent-guard.sh pre-edit <path> before protected paths and respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local implementation, tests, verification, and self-review."
       ;;
     reviewing:standard)
-      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. Codex is primary for ordinary review. Read-only review. Run scripts/detect-agent-tech-stack.sh --markdown when available and respect scripts/agent-hook.sh no-scan-paths. Apply Reviewing Mode with the three-round BA / Senior Dev-Tech Lead / Senior QC council and docs/agent-configs/agent-handoff-schema.md for handoff. Findings first."
+      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. Codex is primary for ordinary review. Read-only review. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. Apply Reviewing Mode with the three-round BA / Senior Dev-Tech Lead / Senior QC council and docs/agent-configs/agent-handoff-schema.md for handoff. Findings first."
       ;;
     reviewing:full_flow)
-      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. Codex is primary for ordinary review. Apply Reviewing Mode with project-local full access and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/detect-agent-tech-stack.sh --markdown when available and respect scripts/agent-hook.sh no-scan-paths. You may run project-local verification commands even when they create build/test outputs. Do not apply remediation edits unless the request asks for fixes or an exact patch scope."
+      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. Codex is primary for ordinary review. Apply Reviewing Mode with project-local full access and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. You may run project-local verification commands even when they create build/test outputs. Do not apply remediation edits unless the request asks for fixes or an exact patch scope."
       ;;
   esac
 }
@@ -1817,6 +1918,7 @@ run_codex_with_mode() {
 }
 
 cmd="${1:-status}"
+load_model_profile "$MODEL_PROFILE"
 case "$cmd" in
   planning|coding|reviewing)
     shift || true
@@ -1855,6 +1957,7 @@ case "$cmd" in
     IFS="$old_ifs"
     echo "Current mode: $current_mode"
     echo "Current flow: $current_flow"
+    echo "Model profile: $MODEL_PROFILE"
     echo "Reasoning effort: $REASONING_EFFORT"
     echo "Default model: $(model_for_mode "$current_mode")"
     echo "Effective model: $current_model ($current_model_source)"

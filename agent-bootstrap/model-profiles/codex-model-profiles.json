@@ -1,0 +1,15 @@
+{
+  "schema": "agent-model-profiles/v1",
+  "default_profile": "stable",
+  "profiles": {
+    "stable": {
+      "reasoning_effort": "xhigh",
+      "planning_model": "gpt-5.5",
+      "coding_model": "gpt-5.5",
+      "reviewing_model": "gpt-5.5",
+      "planning_fallback_model": "gpt-5.4",
+      "coding_fallback_model": "gpt-5.4",
+      "reviewing_fallback_model": "gpt-5.4"
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-bootstrap-lock-v1.schema.json",
+  "title": "Agent Bootstrap Lock",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "channel",
+    "project_name",
+    "generated_at",
+    "rtk",
+    "templates",
+    "detector_summary_sha256",
+    "detector_summary"
+  ],
+  "properties": {
+    "schema": { "const": "agent-bootstrap-lock/v1" },
+    "version": { "type": "string" },
+    "channel": { "type": "string" },
+    "project_name": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "rtk": {
+      "type": "object",
+      "required": ["required", "version", "install_command"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "version": { "type": "string" },
+        "install_command": { "type": "string" }
+      }
+    },
+    "templates": {
+      "type": "object",
+      "required": ["base", "overlays", "workflow_preset"],
+      "properties": {
+        "base": { "type": "string" },
+        "overlays": { "type": "array", "items": { "type": "string" } },
+        "workflow_preset": { "enum": ["infra", "full"] }
+      }
+    },
+    "detector_summary_sha256": { "type": "string" },
+    "detector_summary": { "type": "string" }
+  },
+  "additionalProperties": true
+}

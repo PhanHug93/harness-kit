@@ -1,8 +1,8 @@
-# Solo Agent Bootstrap Workflow
+# Solo Multi-Agent Harness Kit Workflow
 
-Goal: one-shot setup of Codex/Claude agent infrastructure when switching to any
-project, without maintaining a source template repo, build step, base64 payload,
-or generated dist artifact.
+Goal: one-shot setup of Codex/Claude multi-agent harness infrastructure when
+switching to any project, without maintaining a source template repo, build
+step, base64 payload, or generated dist artifact.
 
 ## Decision
 
@@ -23,8 +23,27 @@ agent-bootstrap/
 │   ├── writers-runtime.sh
 │   ├── writers-docs.sh
 │   └── onboarding.sh
+├── model-profiles/
+│   └── codex-model-profiles.json
+├── policies/
+│   └── agent-context-policy.json
+├── provenance/
+│   └── rtk-v0.37.2.sha256
+├── schemas/
+│   ├── agent-context-policy-v1.schema.json
+│   ├── agent-bootstrap-lock-v1.schema.json
+│   ├── agent-bootstrap-status-v1.schema.json
+│   ├── agent-bootstrap-verify-report-v1.schema.json
+│   ├── agent-model-profiles-v1.schema.json
+│   └── agent-project-tech-stack-v1.schema.json
+├── templates/
+│   ├── base/
+│   ├── overlays/
+│   └── workflows/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
+├── agent-guard.sh
+├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
 ├── install-rtk.sh
 ├── verify-ai-deps.sh
@@ -46,8 +65,15 @@ $HOME/dev/agent-bootstrap/
 │   ├── writers-runtime.sh
 │   ├── writers-docs.sh
 │   └── onboarding.sh
+├── model-profiles/
+├── policies/
+├── provenance/
+├── schemas/
+├── templates/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
+├── agent-guard.sh
+├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
 ├── install-rtk.sh
 ├── verify-ai-deps.sh
@@ -139,6 +165,23 @@ Refresh lock after intentional stack/module changes:
 agent-refresh
 ```
 
+Lifecycle inspection and upgrade preview:
+
+```bash
+agent-init --status
+agent-init --status --json
+agent-init --first-10
+agent-init --diff
+agent-init --upgrade-plan
+agent-init --apply-candidates
+```
+
+`--diff` materializes a temporary copy of the target, regenerates harness files
+there, normalizes volatile timestamps and temp paths, and prints generated-file
+diffs without mutating the real target.
+`--apply-candidates` promotes the latest reviewed `*.generated.*` candidate for
+each generated path and removes older candidates for that same path.
+
 ## Optional Symlink
 
 If you want a target project to always execute the canonical bootstrap script
@@ -159,12 +202,19 @@ Core infra, installed by default:
 - `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules`, Cursor pointer rules.
 - `docs/agent-configs/project-agent-context.md`.
 - `docs/agent-configs/agent-bootstrap.lock.json`.
+- `docs/agent-configs/model-profiles.json`.
+- `docs/agent-configs/context-policy.json`.
+- `docs/agent-configs/bootstrap-multi-agent-project/schemas/*.schema.json`.
+- `docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256`.
+- `scripts/verify-ai-deps.sh`, which validates the bootstrap lock, model
+  profile catalog, context policy, schema catalog, Agent Guard Lite, and rtk
+  provenance manifest.
 - `.claude/settings.json` and `.claude/README.md`.
 - `scripts/detect-agent-tech-stack.sh`.
 - `scripts/agent-tech-stack-lib.sh`.
 - `scripts/agent-hook.sh`.
+- `scripts/agent-guard.sh`.
 - `scripts/install-rtk.sh` and `scripts/rtk`.
-- `scripts/verify-ai-deps.sh`.
 - local-only `.gitignore` block for agent/runtime state.
 
 With `--workflow full`, it also installs:
@@ -177,12 +227,19 @@ With `--workflow full`, it also installs:
 - `.claude/commands/*.md` for planning/coding/reviewing modes, plus
   `/codex:setup`, `/codex:rescue`, and `/codex:status` bridge commands.
 - `.agents/skills/doubt-driven/SKILL.md` (generic adversarial-review skill).
+- `docs/agent-configs/first-10-minutes.md` (operator path from generation to
+  onboarding readiness).
 - `docs/agent-configs/project-onboarding.md` + `.claude/commands/project-onboarding.md`
   (onboarding procedure and command).
 - `docs/agent-configs/project-brief.md` (empty deep-context brief, filled by
   onboarding).
+- `docs/superpowers/specs/project-tech-stack.md` and
+  `docs/superpowers/specs/project-tech-stack.json` (empty project-specific
+  tech-stack spec plus lightweight machine contract, filled by onboarding).
 - `docs/superpowers/specs/README.md` + `docs/superpowers/plans/README.md`
   (specs/plans skeleton).
+- `scripts/agent-onboarding.sh` (read-only readiness helper with
+  `status`, `next`, and strict `check`).
 
 ## Runtime Detection
 
@@ -197,6 +254,30 @@ scripts/detect-agent-tech-stack.sh --markdown
 Agents should run the detector at the start of substantive work. The generated
 hook compares detector output against `docs/agent-configs/agent-bootstrap.lock.json`
 so stack/module drift becomes explicit.
+
+## Project Onboarding Output
+
+`--workflow full` intentionally generates empty, source-backed context files
+instead of guessing project-specific rules. After bootstrap, an agent should run
+project onboarding to scan the target project and fill:
+
+- `docs/agent-configs/project-brief.md` for durable architecture/domain context,
+- `docs/agent-configs/project-agent-context.md` for project-specific tech-stack
+  overrides, protected paths, generated files, commands, and release constraints,
+- `docs/superpowers/specs/project-tech-stack.md` and
+  `docs/superpowers/specs/project-tech-stack.json` for the verified
+  stack/module map, conventions, source evidence, ownership, and verification
+  matrix,
+- additional `docs/superpowers/specs/<topic>/` files when the scan discovers
+  durable domain, architecture, or workflow decisions.
+
+The readiness contract is computed, not duplicated. `scripts/agent-onboarding.sh
+status` and `next` read the brief plus `project-tech-stack.json` and report what
+is missing; `scripts/agent-onboarding.sh check` exits non-zero until the brief
+has no `UNFILLED` marker, the tech-stack Markdown spec is filled, evidence paths
+point to existing project files, and verification entries have non-empty
+command/purpose/source fields. This gives agents a gate without adding a stale
+status file.
 
 ## Token-Economy Contract
 
@@ -215,6 +296,30 @@ core startup tokens and on-demand full-workflow tokens. The core startup budget
 is 3k estimated tokens; the full-workflow on-demand budget is 6.5k estimated
 tokens. Estimates use a portable heuristic: max(chars/4, words*1.3).
 
+## Agent Guard Lite
+
+The harness includes a file-based enforcement layer instead of a daemon,
+database, or MCP broker:
+
+- `docs/agent-configs/context-policy.json` tracks required context,
+  recommended context, protected path patterns, and the change protocol.
+- `scripts/agent-guard.sh preflight` validates required context and writes
+  `.agents/state/context-pack.json`.
+- `scripts/agent-guard.sh check` validates the same contracts without writing
+  local state; verifier and doctor use this read-only path.
+- `scripts/agent-guard.sh pre-edit <path>` classifies protected context,
+  harness, CI, release, and generated-runtime paths before edits. Protected
+  paths exit non-zero unless the agent reruns with `--ack <reason>`; acknowledged
+  protected edits are logged under `.agents/state/guard-ack.log`.
+- `scripts/agent-guard.sh pre-final` checks that the context pack still matches
+  the current policy and required-context file hashes before an agent claims
+  completion.
+- Generated Claude `Edit`, `Write`, and `MultiEdit` hooks route file paths
+  through the same strict `pre-edit` guard.
+
+The layer does not prevent all agent drift. It creates a small, trackable
+context rail so drift is easier to detect, review, and roll back.
+
 ## Safety
 
 Default behavior is non-destructive:
@@ -232,7 +337,8 @@ Default behavior is non-destructive:
 RTK is required for the harness "ready" state and for token-efficient git
 inspection. Freshly bootstrapped projects may run with warnings before RTK is
 installed, but `doctor` will keep reporting that the pinned wrapper is missing.
-After bootstrap, install it in the target project:
+The generated installer reads expected asset checksums from the generated
+provenance manifest. After bootstrap, install it in the target project:
 
 ```bash
 bash scripts/install-rtk.sh
@@ -248,7 +354,7 @@ bash -n scripts/install-agent-bootstrap-home.sh
 bash -n agent-bootstrap/bootstrap-multi-agent-project.sh
 bash -n agent-bootstrap/install-agent-bootstrap-home.sh
 scripts/test-bootstrap-multi-agent-project.sh
-scripts/verify-ai-deps.sh
+scripts/test-onboarding-fixtures.sh
 ```
 
 When editing `agent-bootstrap/`, keep `VERSION` aligned with
@@ -259,7 +365,11 @@ Validate a generated target project:
 
 ```bash
 scripts/detect-agent-tech-stack.sh --summary
+scripts/agent-guard.sh preflight
+scripts/agent-onboarding.sh status
+scripts/agent-onboarding.sh check
 scripts/verify-ai-deps.sh
+scripts/verify-ai-deps.sh --json
 scripts/agent-hook.sh doctor
 ```
 
@@ -277,8 +387,7 @@ For the solo workflow, these are intentionally skipped:
 - `dist/` artifact management,
 - manifest YAML or per-template manifest generation,
 - lock v2 and per-template versioning,
-- load-bearing template extraction,
-- CHANGELOG and multi-file docs split.
+- load-bearing template extraction beyond the copyable shell bundle.
 
 Those are valid for a public reusable framework. They are unnecessary overhead
 for this solo workflow.

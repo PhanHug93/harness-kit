@@ -17,5 +17,52 @@ jobs:
       - uses: actions/checkout@v4
       - name: Show bash version
         run: bash --version | head -1
+      - name: Install shellcheck on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
       - name: Run bootstrap drift test
         run: bash scripts/test-bootstrap-multi-agent-project.sh
+      - name: Run generated target verifier
+        run: |
+          tmp="$(mktemp -d)"
+          bash scripts/bootstrap-multi-agent-project.sh --target "$tmp" --workflow full
+          cd "$tmp"
+          scripts/verify-ai-deps.sh
+          scripts/verify-ai-deps.sh --json | python3 -m json.tool >/dev/null
+      - name: Run shellcheck if available
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck --external-sources --exclude=SC1090,SC1091,SC2034,SC2154 \
+              scripts/bootstrap-multi-agent-project.sh \
+              scripts/install-agent-bootstrap-home.sh \
+              scripts/test-bootstrap-multi-agent-project.sh \
+              scripts/test-onboarding-fixtures.sh \
+              agent-bootstrap/bootstrap-multi-agent-project.sh \
+              agent-bootstrap/install-agent-bootstrap-home.sh \
+              agent-bootstrap/install-rtk.sh \
+              agent-bootstrap/rtk \
+              agent-bootstrap/agent-hook.sh \
+              agent-bootstrap/agent-guard.sh \
+              agent-bootstrap/verify-ai-deps.sh \
+              agent-bootstrap/lib/core.sh \
+              agent-bootstrap/lib/detect.sh \
+              agent-bootstrap/lib/render.sh \
+              agent-bootstrap/lib/writers-runtime.sh \
+              agent-bootstrap/lib/writers-docs.sh \
+              agent-bootstrap/lib/onboarding.sh
+          else
+            echo "shellcheck not installed; skipping optional shell lint"
+          fi
+      - name: Run shellcheck on generated target if available
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            bash scripts/bootstrap-multi-agent-project.sh --target "$tmp" --workflow full
+            shellcheck --external-sources --exclude=SC1090,SC1091,SC2034,SC2154 \
+              "$tmp"/scripts/*.sh \
+              "$tmp"/.codex/codex-mode.sh
+          else
+            echo "shellcheck not installed; skipping optional generated target shell lint"
+          fi

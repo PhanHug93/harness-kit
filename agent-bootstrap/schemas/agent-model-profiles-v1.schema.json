@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-model-profiles-v1.schema.json",
+  "title": "Agent Model Profiles",
+  "type": "object",
+  "required": ["schema", "default_profile", "profiles"],
+  "properties": {
+    "schema": { "const": "agent-model-profiles/v1" },
+    "default_profile": { "type": "string", "minLength": 1 },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "reasoning_effort",
+          "planning_model",
+          "coding_model",
+          "reviewing_model",
+          "planning_fallback_model",
+          "coding_fallback_model",
+          "reviewing_fallback_model"
+        ],
+        "properties": {
+          "reasoning_effort": { "type": "string", "minLength": 1 },
+          "planning_model": { "type": "string", "minLength": 1 },
+          "coding_model": { "type": "string", "minLength": 1 },
+          "reviewing_model": { "type": "string", "minLength": 1 },
+          "planning_fallback_model": { "type": "string", "minLength": 1 },
+          "coding_fallback_model": { "type": "string", "minLength": 1 },
+          "reviewing_fallback_model": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

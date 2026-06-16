@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RTK_VERSION="0.37.2"
+PROVENANCE_FILE="${ROOT_DIR}/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v${RTK_VERSION}.sha256"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -11,25 +12,31 @@ PLATFORM="${OS}-${ARCH}"
 case "${PLATFORM}" in
   Darwin-arm64)
     ASSET="rtk-aarch64-apple-darwin.tar.gz"
-    SHA256="99e20a59847dedbb64032a3f7985f2fe959fcb9674d8eaf940fc58a189e27eca"
     ;;
   Darwin-x86_64)
     ASSET="rtk-x86_64-apple-darwin.tar.gz"
-    SHA256="4052e7740a87e121f671a2de269b3f015dcc58b6171d6bedb300da7599cb4d94"
     ;;
   Linux-aarch64)
     ASSET="rtk-aarch64-unknown-linux-gnu.tar.gz"
-    SHA256="1d8d7fcca6cb05e1867c08bb4e5aa5f107c037c607131e511b726ae33ac35a47"
     ;;
   Linux-x86_64)
     ASSET="rtk-x86_64-unknown-linux-musl.tar.gz"
-    SHA256="3dfb7a05636a68687ba1c5aa696fa8d5fcb494447ded86d9eb8b88b7100a37c6"
     ;;
   *)
     echo "Unsupported platform: ${PLATFORM}" >&2
     exit 1
     ;;
 esac
+
+if [ ! -f "${PROVENANCE_FILE}" ]; then
+  echo "Missing rtk provenance manifest: ${PROVENANCE_FILE}" >&2
+  exit 1
+fi
+SHA256="$(awk -v asset="${ASSET}" '$2 == asset { print $1 }' "${PROVENANCE_FILE}" | head -n1)"
+if [ -z "${SHA256}" ]; then
+  echo "No checksum for ${ASSET} in ${PROVENANCE_FILE}" >&2
+  exit 1
+fi
 
 DOWNLOAD_URL="https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/${ASSET}"
 INSTALL_DIR="${ROOT_DIR}/.tools/rtk/v${RTK_VERSION}"

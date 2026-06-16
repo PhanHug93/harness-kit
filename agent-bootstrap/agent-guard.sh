@@ -1,0 +1,796 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
+PROJECT_TECH_STACK_FILE="$PROJECT_ROOT/docs/superpowers/specs/project-tech-stack.json"
+CONTEXT_PACK="$PROJECT_ROOT/.agents/state/context-pack.json"
+ACK_LOG="$PROJECT_ROOT/.agents/state/guard-ack.log"
+DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
+
+REQUIRED_CONTEXT=()
+RECOMMENDED_CONTEXT=()
+PROTECTED_PATTERNS=()
+PROTECTED_REASONS=()
+AGENT_INSTRUCTIONS=()
+
+usage() {
+  printf '%s\n' \
+    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final|status|doctor" \
+    "" \
+    "Lite context guard for generated multi-agent harness projects."
+}
+
+fail() {
+  printf 'agent-guard: ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+warn() {
+  printf 'agent-guard: warn: %s\n' "$*" >&2
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "$value"
+}
+
+hash_file() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "$path" <<'PY'
+import hashlib
+import pathlib
+import sys
+print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+  else
+    cksum "$path" | awk '{print $1}'
+  fi
+}
+
+hash_text() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+  else
+    cksum | awk '{print $1}'
+  fi
+}
+
+utc_now() {
+  date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date
+}
+
+is_safe_relative_path() {
+  local value="$1"
+  [[ -n "$value" ]] || return 1
+  [[ "$value" != /* ]] || return 1
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* && "$value" != *$'\t'* ]] || return 1
+  [[ "$value" != *'//'* ]] || return 1
+  [[ "$value" != */ ]] || return 1
+  [[ "$value" != "." && "$value" != ./* && "$value" != */. && "$value" != */./* ]] || return 1
+  [[ "$value" != ".." && "$value" != ../* && "$value" != */.. && "$value" != */../* ]] || return 1
+  return 0
+}
+
+validate_policy_path() {
+  local value="$1"
+  local source="$2"
+  is_safe_relative_path "$value" || fail "unsafe $source path: $value"
+}
+
+collapse_relative_path() {
+  local value="$1"
+  local old_ifs="$IFS"
+  local part
+  local result=""
+  local -a parts=()
+  IFS='/'
+  read -r -a parts <<< "$value"
+  IFS="$old_ifs"
+  local -a output=()
+  for part in "${parts[@]}"; do
+    case "$part" in
+      ""|.)
+        ;;
+      ..)
+        if [[ "${#output[@]}" -eq 0 ]]; then
+          return 1
+        fi
+        unset 'output[${#output[@]}-1]'
+        output=("${output[@]}")
+        ;;
+      *)
+        output+=("$part")
+        ;;
+    esac
+  done
+  for part in "${output[@]}"; do
+    if [[ -z "$result" ]]; then
+      result="$part"
+    else
+      result="$result/$part"
+    fi
+  done
+  [[ -n "$result" ]] || result="."
+  printf '%s' "$result"
+}
+
+canonical_project_abspath() {
+  local raw_path="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$PROJECT_ROOT" "$raw_path" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+raw = pathlib.Path(sys.argv[2])
+candidate = raw if raw.is_absolute() else root / raw
+resolved = candidate.resolve(strict=False)
+try:
+    resolved.relative_to(root)
+except ValueError:
+    print("outside project root", file=sys.stderr)
+    sys.exit(2)
+print(resolved)
+PY
+    return $?
+  fi
+
+  local relpath="$raw_path"
+  case "$raw_path" in
+    "$PROJECT_ROOT")
+      printf '%s' "$PROJECT_ROOT"
+      return 0
+      ;;
+    "$PROJECT_ROOT"/*)
+      relpath="${raw_path#$PROJECT_ROOT/}"
+      ;;
+    /*)
+      printf 'outside project root\n' >&2
+      return 2
+      ;;
+    ./*)
+      relpath="${raw_path#./}"
+      ;;
+  esac
+  relpath="$(collapse_relative_path "$relpath")" || {
+    printf 'outside project root\n' >&2
+    return 2
+  }
+  printf '%s/%s' "$PROJECT_ROOT" "$relpath"
+}
+
+canonical_project_relpath() {
+  local raw_path="$1"
+  local absolute
+  absolute="$(canonical_project_abspath "$raw_path")" || fail "path outside project root: $raw_path"
+  if [[ "$absolute" == "$PROJECT_ROOT" ]]; then
+    printf '.'
+  elif [[ "$absolute" == "$PROJECT_ROOT/"* ]]; then
+    printf '%s' "${absolute#$PROJECT_ROOT/}"
+  else
+    fail "path outside project root: $raw_path"
+  fi
+}
+
+default_required_context() {
+  printf '%s\n' \
+    "AGENTS.md" \
+    "CLAUDE.md" \
+    "docs/agent-configs/project-agent-context.md" \
+    "docs/agent-configs/agent-bootstrap.lock.json" \
+    "docs/agent-configs/context-policy.json"
+}
+
+default_recommended_context() {
+  printf '%s\n' \
+    "docs/agent-configs/project-brief.md" \
+    "docs/superpowers/specs/project-tech-stack.json" \
+    "docs/superpowers/specs/project-tech-stack.md" \
+    "docs/agent-configs/project-onboarding.md"
+}
+
+default_protected_paths() {
+  printf '%s\t%s\n' \
+    "AGENTS.md" "agent entrypoint" \
+    "CLAUDE.md" "claude entrypoint" \
+    "GEMINI.md" "gemini entrypoint" \
+    ".windsurfrules" "windsurf entrypoint" \
+    ".github/**" "ci-release" \
+    ".claude/settings.json" "claude hook config" \
+    ".claude/commands/**" "claude commands" \
+    ".codex/**" "codex adapter" \
+    ".cursor/**" "cursor adapter" \
+    ".gemini/**" "gemini adapter" \
+    ".windsurf/**" "windsurf adapter" \
+    ".openclaude/**" "openclaude adapter" \
+    ".agents/skills/**" "agent skills" \
+    "agent-bootstrap/**" "source bundle" \
+    "docs/agent-configs/**" "agent context" \
+    "docs/superpowers/specs/**" "durable specs" \
+    "scripts/agent-*.sh" "agent runtime" \
+    "scripts/verify-ai-deps.sh" "verifier" \
+    "scripts/install-rtk.sh" "tool install" \
+    "scripts/rtk" "git wrapper"
+}
+
+policy_schema_value() {
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$POLICY_FILE" ]]; then
+    python3 - "$POLICY_FILE" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    doc = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(1)
+print(doc.get("schema", ""))
+PY
+    return $?
+  fi
+  sed -n 's/.*"schema"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$POLICY_FILE" | head -n1
+}
+
+policy_values() {
+  local key="$1"
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$POLICY_FILE" ]]; then
+    python3 - "$POLICY_FILE" "$key" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+doc = json.loads(path.read_text(encoding="utf-8"))
+
+if key in ("required_context", "recommended_context", "agent_instructions"):
+    for item in doc.get(key, []):
+        if isinstance(item, str):
+            print(item)
+elif key == "protected_paths":
+    for item in doc.get(key, []):
+        if isinstance(item, dict):
+            pattern = item.get("pattern")
+            reason = item.get("reason", "")
+            if isinstance(pattern, str):
+                print(f"{pattern}\t{reason}")
+PY
+    return 0
+  fi
+
+  case "$key" in
+    required_context) default_required_context ;;
+    recommended_context) default_recommended_context ;;
+    protected_paths) default_protected_paths ;;
+    agent_instructions) ;;
+    *) return 1 ;;
+  esac
+}
+
+project_contract_values() {
+  local key="$1"
+  [[ -f "$PROJECT_TECH_STACK_FILE" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$PROJECT_TECH_STACK_FILE" "$key" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+key = sys.argv[2]
+try:
+    doc = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+
+reason = "project protected path" if key == "protected_paths" else "project generated file"
+for item in doc.get(key, []):
+    if isinstance(item, str) and item:
+        print(f"{item}\t{reason}")
+PY
+}
+
+add_protected_pattern() {
+  local pattern="$1"
+  local reason="$2"
+  local source="$3"
+  validate_policy_path "$pattern" "$source"
+  PROTECTED_PATTERNS+=("$pattern")
+  PROTECTED_REASONS+=("$reason")
+}
+
+load_policy() {
+  REQUIRED_CONTEXT=()
+  RECOMMENDED_CONTEXT=()
+  PROTECTED_PATTERNS=()
+  PROTECTED_REASONS=()
+  AGENT_INSTRUCTIONS=()
+
+  [[ -f "$POLICY_FILE" ]] || fail "missing context policy: docs/agent-configs/context-policy.json"
+  local schema
+  schema="$(policy_schema_value || true)"
+  [[ "$schema" == "agent-context-policy/v1" ]] ||
+    fail "context policy schema must be agent-context-policy/v1"
+
+  local item line pattern reason
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    validate_policy_path "$item" "context policy required_context"
+    REQUIRED_CONTEXT+=("$item")
+  done < <(policy_values required_context)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    validate_policy_path "$item" "context policy recommended_context"
+    RECOMMENDED_CONTEXT+=("$item")
+  done < <(policy_values recommended_context)
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    pattern="${line%%$'\t'*}"
+    if [[ "$line" == *$'\t'* ]]; then
+      reason="${line#*$'\t'}"
+    else
+      reason=""
+    fi
+    add_protected_pattern "$pattern" "$reason" "context policy protected_paths"
+  done < <(policy_values protected_paths)
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    pattern="${line%%$'\t'*}"
+    reason="${line#*$'\t'}"
+    add_protected_pattern "$pattern" "$reason" "project tech-stack protected_paths"
+  done < <(project_contract_values protected_paths)
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    pattern="${line%%$'\t'*}"
+    reason="${line#*$'\t'}"
+    add_protected_pattern "$pattern" "$reason" "project tech-stack generated_files"
+  done < <(project_contract_values generated_files)
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    AGENT_INSTRUCTIONS+=("$item")
+  done < <(policy_values agent_instructions)
+
+  [[ ${#REQUIRED_CONTEXT[@]} -gt 0 ]] || fail "context policy required_context is empty"
+  [[ ${#PROTECTED_PATTERNS[@]} -gt 0 ]] || fail "context policy protected_paths is empty"
+}
+
+pattern_matches() {
+  local pattern="$1"
+  local path="$2"
+  local prefix
+  case "$pattern" in
+    */\*\*)
+      prefix="${pattern%/\*\*}"
+      [[ "$path" == "$prefix" || "$path" == "$prefix/"* ]]
+      ;;
+    *'*'*|*'?'*|*'['*)
+      case "$path" in
+        $pattern) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      [[ "$path" == "$pattern" ]]
+      ;;
+  esac
+}
+
+protected_reason_for_path() {
+  local path="$1"
+  local index=0
+  while [[ "$index" -lt "${#PROTECTED_PATTERNS[@]}" ]]; do
+    if pattern_matches "${PROTECTED_PATTERNS[$index]}" "$path"; then
+      printf '%s\t%s' "${PROTECTED_PATTERNS[$index]}" "${PROTECTED_REASONS[$index]}"
+      return 0
+    fi
+    index=$((index + 1))
+  done
+  return 1
+}
+
+is_bootstrap_generated_base() {
+  local relpath="$1"
+  case "$relpath" in
+    AGENTS.md|CLAUDE.md|GEMINI.md|.windsurfrules|.gitignore)
+      return 0
+      ;;
+    .cursor/rules/agent-conventions.mdc)
+      return 0
+      ;;
+    .claude/README.md|.claude/settings.json|.claude/commands/*)
+      return 0
+      ;;
+    .codex/*)
+      return 0
+      ;;
+    .agents/skills/*)
+      return 0
+      ;;
+    docs/agent-configs/*|docs/agent-configs/bootstrap-multi-agent-project/*)
+      return 0
+      ;;
+    docs/superpowers/specs/*|docs/superpowers/plans/*)
+      return 0
+      ;;
+    scripts/agent-*.sh|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+pending_bootstrap_generated_candidate() {
+  local candidate rel_candidate base rel_base
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    rel_candidate="${candidate#$PROJECT_ROOT/}"
+    base="${candidate%.generated.*}"
+    rel_base="${base#$PROJECT_ROOT/}"
+    if is_bootstrap_generated_base "$rel_base"; then
+      printf '%s\n' "$rel_candidate"
+      return 0
+    fi
+  done < <(find "$PROJECT_ROOT" \
+    \( -path "$PROJECT_ROOT/.git" -o -path "$PROJECT_ROOT/.tools" -o -path "$PROJECT_ROOT/.gradle" -o -path "$PROJECT_ROOT/build" \) -prune -o \
+    -type f -name '*.generated.*' -print 2>/dev/null || true)
+  return 1
+}
+
+append_ack_log() {
+  local relpath="$1"
+  local pattern="$2"
+  local reason="$3"
+  local ack="$4"
+  mkdir -p "$(dirname "$ACK_LOG")"
+  printf '%s\tpath=%s\tpattern=%s\treason=%s\tack=%s\n' \
+    "$(utc_now)" \
+    "$relpath" \
+    "$pattern" \
+    "$reason" \
+    "$ack" >> "$ACK_LOG"
+}
+
+required_context_json() {
+  local first=true
+  local relpath rel_canonical path status digest
+  printf '['
+  for relpath in "${REQUIRED_CONTEXT[@]}"; do
+    rel_canonical="$(canonical_project_relpath "$relpath")"
+    path="$PROJECT_ROOT/$rel_canonical"
+    if [[ -f "$path" ]]; then
+      status="present"
+      digest="$(hash_file "$path")"
+    else
+      status="missing"
+      digest=""
+    fi
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '{"path":"%s","status":"%s","sha256":"%s"}' \
+      "$(json_escape "$rel_canonical")" \
+      "$(json_escape "$status")" \
+      "$(json_escape "$digest")"
+  done
+  printf ']'
+}
+
+protected_paths_json() {
+  local first=true
+  local index=0
+  printf '['
+  while [[ "$index" -lt "${#PROTECTED_PATTERNS[@]}" ]]; do
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '{"pattern":"%s","reason":"%s"}' \
+      "$(json_escape "${PROTECTED_PATTERNS[$index]}")" \
+      "$(json_escape "${PROTECTED_REASONS[$index]}")"
+    index=$((index + 1))
+  done
+  printf ']'
+}
+
+agent_instructions_sha256() {
+  local instruction
+  for instruction in "${AGENT_INSTRUCTIONS[@]}"; do
+    printf '%s\n' "$instruction"
+  done | hash_text
+}
+
+detector_summary_json() {
+  local summary=""
+  if [[ -x "$DETECTOR" ]]; then
+    summary="$("$DETECTOR" --summary 2>/dev/null || true)"
+  fi
+  printf '"%s"' "$(json_escape "$summary")"
+}
+
+ensure_required_context() {
+  local missing=0
+  local relpath rel_canonical path
+  for relpath in "${REQUIRED_CONTEXT[@]}"; do
+    rel_canonical="$(canonical_project_relpath "$relpath")"
+    path="$PROJECT_ROOT/$rel_canonical"
+    if [[ ! -f "$path" ]]; then
+      warn "missing required context: $rel_canonical"
+      missing=$((missing + 1))
+    fi
+  done
+  if [[ "$missing" -gt 0 ]]; then
+    fail "required context is incomplete"
+  fi
+}
+
+write_context_pack() {
+  local policy_hash
+  policy_hash="$(hash_file "$POLICY_FILE")"
+  mkdir -p "$(dirname "$CONTEXT_PACK")"
+  {
+    printf '{"schema":"agent-context-pack/v1"'
+    printf ',"generated_at":"%s"' "$(json_escape "$(utc_now)")"
+    printf ',"policy_path":"docs/agent-configs/context-policy.json"'
+    printf ',"policy_sha256":"%s"' "$(json_escape "$policy_hash")"
+    printf ',"agent_instructions_sha256":"%s"' "$(json_escape "$(agent_instructions_sha256)")"
+    printf ',"required_context":'
+    required_context_json
+    printf ',"protected_paths":'
+    protected_paths_json
+    printf ',"detector_summary":'
+    detector_summary_json
+    printf '}\n'
+  } > "$CONTEXT_PACK"
+}
+
+check_context_pack_freshness() {
+  [[ -f "$CONTEXT_PACK" ]] || fail "missing context pack; run scripts/agent-guard.sh preflight"
+  command -v python3 >/dev/null 2>&1 ||
+    fail "python3 is required to verify context-pack freshness"
+  local current_policy_hash
+  current_policy_hash="$(hash_file "$POLICY_FILE")"
+  python3 - "$PROJECT_ROOT" "$CONTEXT_PACK" "$current_policy_hash" <<'PY'
+import hashlib
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+pack_path = pathlib.Path(sys.argv[2])
+current_policy_hash = sys.argv[3]
+errors = []
+
+
+def safe_relative(value):
+    if not isinstance(value, str) or not value:
+        return False
+    path = pathlib.PurePosixPath(value)
+    if path.is_absolute():
+        return False
+    if any(part in ("", ".", "..") for part in path.parts):
+        return False
+    if any(ord(ch) < 32 for ch in value):
+        return False
+    return True
+
+
+try:
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"stale context pack: cannot read context pack: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if pack.get("schema") != "agent-context-pack/v1":
+    errors.append("stale context pack: schema is not agent-context-pack/v1")
+if pack.get("policy_sha256") != current_policy_hash:
+    errors.append("stale context pack: context-policy.json changed")
+
+entries = pack.get("required_context")
+if not isinstance(entries, list):
+    errors.append("stale context pack: required_context is missing")
+    entries = []
+
+for entry in entries:
+    if not isinstance(entry, dict):
+        errors.append("stale context pack: required_context entry is not an object")
+        continue
+    rel = entry.get("path")
+    if not safe_relative(rel):
+        errors.append(f"stale context pack: unsafe required context path {rel!r}")
+        continue
+    candidate = (root / rel).resolve(strict=False)
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        errors.append(f"stale context pack: required context escapes project root: {rel}")
+        continue
+    if candidate.is_file():
+        status = "present"
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+    else:
+        status = "missing"
+        digest = ""
+    if status != entry.get("status") or digest != entry.get("sha256"):
+        errors.append(f"stale required context: {rel}")
+
+if errors:
+    for error in errors:
+        print(f"agent-guard: ERROR: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+preflight() {
+  load_policy
+  ensure_required_context
+  write_context_pack
+  printf 'agent-guard: preflight ok (context_pack=.agents/state/context-pack.json)\n'
+}
+
+check_guard() {
+  load_policy
+  ensure_required_context
+  if [[ -f "$CONTEXT_PACK" ]]; then
+    check_context_pack_freshness
+  fi
+  printf 'agent-guard: check ok\n'
+}
+
+pre_edit() {
+  local strict=true
+  local ack=""
+  local raw_path=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict)
+        strict=true
+        shift
+        ;;
+      --advisory)
+        strict=false
+        shift
+        ;;
+      --ack)
+        ack="${2:-}"
+        [[ -n "$ack" ]] || fail "--ack requires text"
+        shift 2
+        ;;
+      --)
+        shift
+        raw_path="${1:-}"
+        shift || true
+        ;;
+      -*)
+        fail "unknown pre-edit option: $1"
+        ;;
+      *)
+        if [[ -n "$raw_path" ]]; then
+          fail "pre-edit accepts exactly one path"
+        fi
+        raw_path="$1"
+        shift
+        ;;
+    esac
+  done
+  [[ -n "$raw_path" ]] || fail "pre-edit requires a path"
+  load_policy
+  ensure_required_context
+  local relpath match pattern reason
+  relpath="$(canonical_project_relpath "$raw_path")"
+  if match="$(protected_reason_for_path "$relpath")"; then
+    pattern="${match%%$'\t'*}"
+    if [[ "$match" == *$'\t'* ]]; then
+      reason="${match#*$'\t'}"
+    else
+      reason=""
+    fi
+    printf 'path=%s protected_path=true pattern=%s reason=%s\n' \
+      "$(json_escape "$relpath")" \
+      "$(json_escape "$pattern")" \
+      "$(json_escape "$reason")"
+    if [[ "$strict" == "true" && -z "$ack" ]]; then
+      fail "protected path requires ack; rerun with: scripts/agent-guard.sh pre-edit --ack <reason> $relpath"
+    fi
+    if [[ "$strict" == "true" && -n "$ack" ]]; then
+      append_ack_log "$relpath" "$pattern" "$reason" "$ack"
+    fi
+  else
+    printf 'path=%s protected_path=false\n' "$(json_escape "$relpath")"
+  fi
+}
+
+context_pack_policy_hash() {
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$CONTEXT_PACK" ]]; then
+    python3 - "$CONTEXT_PACK" <<'PY'
+import json
+import pathlib
+import sys
+doc = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(doc.get("policy_sha256", ""))
+PY
+    return 0
+  fi
+  sed -n 's/.*"policy_sha256":"\([^"]*\)".*/\1/p' "$CONTEXT_PACK" | head -n1
+}
+
+pre_final() {
+  load_policy
+  check_context_pack_freshness
+  local pending_candidate
+  pending_candidate="$(pending_bootstrap_generated_candidate || true)"
+  if [[ -n "$pending_candidate" ]]; then
+    warn "pending generated candidate requires review: $pending_candidate"
+  fi
+  printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
+}
+
+status() {
+  load_policy
+  printf 'policy=docs/agent-configs/context-policy.json\n'
+  printf 'policy_sha256=%s\n' "$(hash_file "$POLICY_FILE")"
+  if [[ -f "$CONTEXT_PACK" ]]; then
+    printf 'context_pack=.agents/state/context-pack.json\n'
+    printf 'context_pack_policy_sha256=%s\n' "$(context_pack_policy_hash)"
+  else
+    printf 'context_pack=missing\n'
+  fi
+  printf 'required_context_count=%s\n' "${#REQUIRED_CONTEXT[@]}"
+  printf 'protected_path_count=%s\n' "${#PROTECTED_PATTERNS[@]}"
+}
+
+case "${1:-}" in
+  preflight)
+    shift || true
+    preflight "$@"
+    ;;
+  check)
+    shift || true
+    check_guard "$@"
+    ;;
+  pre-edit)
+    shift || true
+    pre_edit "$@"
+    ;;
+  pre-final)
+    shift || true
+    pre_final "$@"
+    ;;
+  status)
+    shift || true
+    status "$@"
+    ;;
+  doctor)
+    shift || true
+    check_guard "$@"
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    fail "unknown command: $1"
+    ;;
+esac

@@ -79,7 +79,7 @@ EOF_OVERLAY
 
 write_agent_bootstrap_lock() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
-  local summary hash overlays overlay_json first
+  local summary hash overlays overlay_json first saved_force saved_candidate
   summary="$(detector_summary_for_lock)"
   hash="$(printf '%s' "$summary" | hash_text)"
   overlays="$(selected_template_overlays | sort -u)"
@@ -96,13 +96,13 @@ write_agent_bootstrap_lock() {
   done <<< "$overlays"
   [[ -n "$overlay_json" ]] || overlay_json='"generic"'
 
-  ensure_dir "$(dirname "$lock_file")"
-  if [[ "$DRY_RUN" == "true" ]]; then
-    log "DRY-RUN write $lock_file"
-    return
+  saved_force="$FORCE"
+  saved_candidate="$CANDIDATE_ON_CONFLICT"
+  if [[ "$REFRESH_LOCK" == "true" ]]; then
+    FORCE=true
+    CANDIDATE_ON_CONFLICT=false
   fi
-  backup_existing "$lock_file"
-  cat > "$lock_file" <<EOF_LOCK
+  write_file "$lock_file" <<EOF_LOCK
 {
   "schema": "agent-bootstrap-lock/v1",
   "version": "$AGENT_BOOTSTRAP_VERSION",
@@ -123,6 +123,8 @@ write_agent_bootstrap_lock() {
   "detector_summary": "$(json_escape "$summary")"
 }
 EOF_LOCK
+  FORCE="$saved_force"
+  CANDIDATE_ON_CONFLICT="$saved_candidate"
 }
 
 append_gitignore_block() {
@@ -180,4 +182,5 @@ docs/agent-configs/*.local.md
 .DS_Store
 # <<< multi-agent bootstrap local state <<<
 EOF
+  record_generated_file "$gitignore"
 }

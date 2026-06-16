@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-bootstrap-verify-report-v1.schema.json",
+  "title": "Agent Bootstrap Verify Report",
+  "type": "object",
+  "required": ["schema", "workflow_preset", "summary", "checks"],
+  "properties": {
+    "schema": { "const": "agent-bootstrap-verify-report/v1" },
+    "workflow_preset": { "enum": ["infra", "full"] },
+    "summary": {
+      "type": "object",
+      "required": ["pass", "warn", "fail"],
+      "properties": {
+        "pass": { "type": "integer", "minimum": 0 },
+        "warn": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["status", "label"],
+        "properties": {
+          "status": { "enum": ["pass", "warn", "fail"] },
+          "label": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

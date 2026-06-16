@@ -123,6 +123,7 @@ write_shell_functions() {
 # >>> agent-bootstrap >>>
 export AGENT_BOOTSTRAP_HOME=$export_path
 agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; }
+agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
 # <<< agent-bootstrap <<<
@@ -164,10 +165,30 @@ main() {
   copy_file "bootstrap-multi-agent-project.sh" "bootstrap-multi-agent-project.sh"
   copy_file "agent-tech-stack-lib.sh" "agent-tech-stack-lib.sh"
   copy_file "agent-hook.sh" "agent-hook.sh"
+  copy_file "agent-guard.sh" "agent-guard.sh"
+  copy_file "agent-onboarding.sh" "agent-onboarding.sh"
   copy_file "detect-agent-tech-stack.sh" "detect-agent-tech-stack.sh"
   copy_file "install-rtk.sh" "install-rtk.sh"
   copy_file "rtk" "rtk"
   copy_file "verify-ai-deps.sh" "verify-ai-deps.sh"
+  copy_file "model-profiles/codex-model-profiles.json" "model-profiles/codex-model-profiles.json"
+  copy_file "policies/agent-context-policy.json" "policies/agent-context-policy.json"
+  copy_file "provenance/rtk-v0.37.2.sha256" "provenance/rtk-v0.37.2.sha256"
+  copy_file "schemas/agent-context-policy-v1.schema.json" "schemas/agent-context-policy-v1.schema.json"
+  copy_file "schemas/agent-model-profiles-v1.schema.json" "schemas/agent-model-profiles-v1.schema.json"
+  copy_file "schemas/agent-project-tech-stack-v1.schema.json" "schemas/agent-project-tech-stack-v1.schema.json"
+  copy_file "schemas/agent-bootstrap-lock-v1.schema.json" "schemas/agent-bootstrap-lock-v1.schema.json"
+  copy_file "schemas/agent-bootstrap-status-v1.schema.json" "schemas/agent-bootstrap-status-v1.schema.json"
+  copy_file "schemas/agent-bootstrap-verify-report-v1.schema.json" "schemas/agent-bootstrap-verify-report-v1.schema.json"
+  copy_file "templates/base/README.md" "templates/base/README.md"
+  copy_file "templates/overlays/android_kotlin.md" "templates/overlays/android_kotlin.md"
+  copy_file "templates/overlays/generic.md" "templates/overlays/generic.md"
+  copy_file "templates/overlays/ios_swift.md" "templates/overlays/ios_swift.md"
+  copy_file "templates/overlays/node_js.md" "templates/overlays/node_js.md"
+  copy_file "templates/overlays/python.md" "templates/overlays/python.md"
+  copy_file "templates/workflows/council/README.md" "templates/workflows/council/README.md"
+  copy_file "templates/workflows/karpathy/README.md" "templates/workflows/karpathy/README.md"
+  copy_file "templates/workflows/three-mode/README.md" "templates/workflows/three-mode/README.md"
   copy_file "lib/core.sh" "lib/core.sh"
   copy_file "lib/detect.sh" "lib/detect.sh"
   copy_file "lib/render.sh" "lib/render.sh"
@@ -188,6 +209,7 @@ Add this managed block manually, or rerun with --write-zshrc:
 # >>> agent-bootstrap >>>
 export AGENT_BOOTSTRAP_HOME=$export_path
 agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; }
+agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
 # <<< agent-bootstrap <<<

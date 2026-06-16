@@ -9,6 +9,7 @@ DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 LOCK_FILE="$PROJECT_ROOT/docs/agent-configs/agent-bootstrap.lock.json"
 CODEX_HELPER="$PROJECT_ROOT/.codex/codex-mode.sh"
 VERIFY_AI_DEPS="$PROJECT_ROOT/scripts/verify-ai-deps.sh"
+AGENT_GUARD="$PROJECT_ROOT/scripts/agent-guard.sh"
 
 NO_SCAN_PATHS=(
   ".claude/worktrees/"
@@ -115,7 +116,7 @@ verify_detector_lock() {
   local expected actual summary
   expected="$(lock_value detector_summary_sha256)"
   [[ -n "$expected" ]] || fail "missing detector_summary_sha256 in ${LOCK_FILE#$PROJECT_ROOT/}"
-  summary="$($DETECTOR --summary)"
+  summary="$("$DETECTOR" --summary)"
   actual="$(printf '%s' "$summary" | hash_text)"
   if [[ "$actual" != "$expected" ]]; then
     if [[ "$on_drift" == "warn" ]]; then
@@ -167,8 +168,73 @@ guard_local_state() {
   done
 }
 
+parse_claude_hook_input() {
+  local input="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    HOOK_INPUT="$input" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    sys.exit(1)
+
+tool_name = payload.get("tool_name") or payload.get("tool")
+tool_input = payload.get("tool_input") or payload.get("input") or {}
+if not isinstance(tool_input, dict):
+    tool_input = {}
+file_path = tool_input.get("file_path") or tool_input.get("path") or ""
+if not isinstance(tool_name, str):
+    tool_name = ""
+if not isinstance(file_path, str):
+    file_path = ""
+print(f"{tool_name}\t{file_path}")
+PY
+    return $?
+  fi
+  local tool_name file_path
+  tool_name="$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  file_path="$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+  printf '%s\t%s\n' "$tool_name" "$file_path"
+}
+
+guard_claude_edit_tool() {
+  local edit_path="$1"
+  [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
+  if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
+    "$AGENT_GUARD" pre-edit --strict --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path"
+  else
+    "$AGENT_GUARD" pre-edit --strict "$edit_path"
+  fi
+}
+
 claude_pretool() {
   required_executable "$DETECTOR"
+  required_executable "$AGENT_GUARD"
+  local hook_input=""
+  local parsed=""
+  local tool_name=""
+  local edit_path=""
+  local old_ifs
+  if [[ ! -t 0 ]]; then
+    hook_input="$(cat || true)"
+  fi
+  "$AGENT_GUARD" preflight >/dev/null
+  if [[ -n "$hook_input" ]]; then
+    parsed="$(parse_claude_hook_input "$hook_input" || true)"
+    old_ifs="$IFS"
+    IFS=$'\t'
+    read -r tool_name edit_path <<< "$parsed"
+    IFS="$old_ifs"
+    case "$tool_name" in
+      Edit|Write|MultiEdit)
+        guard_claude_edit_tool "$edit_path"
+        exit 0
+        ;;
+    esac
+  fi
   verify_detector_lock warn
   cd "$PROJECT_ROOT"
   if rtk_available; then
@@ -179,6 +245,11 @@ claude_pretool() {
 }
 
 codex_preflight() {
+  local check_only=false
+  if [[ "${1:-}" == "--check-only" ]]; then
+    check_only=true
+    shift
+  fi
   local mode="${1:-unknown}"
   local flow="${2:-unknown}"
   required_file "$PROJECT_ROOT/AGENTS.md"
@@ -190,7 +261,13 @@ codex_preflight() {
     required_file "$PROJECT_ROOT/.codex/config.toml"
   fi
   required_executable "$DETECTOR"
+  required_executable "$AGENT_GUARD"
   guard_local_state
+  if [[ "$check_only" == "true" ]]; then
+    "$AGENT_GUARD" check >/dev/null
+  else
+    "$AGENT_GUARD" preflight >/dev/null
+  fi
   verify_detector_lock
   echo "agent-hook: codex preflight ok (mode=$mode flow=$flow)" >&2
 }

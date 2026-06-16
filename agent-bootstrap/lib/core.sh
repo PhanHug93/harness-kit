@@ -12,6 +12,20 @@ log() {
   printf '%s\n' "$*"
 }
 
+shell_quote() {
+  printf '%q' "$1"
+}
+
+record_generated_file() {
+  local path="$1"
+  local relpath="$path"
+  [[ -n "${AGENT_BOOTSTRAP_WRITE_LOG:-}" ]] || return 0
+  case "$path" in
+    "$TARGET_DIR"/*) relpath="${path#$TARGET_DIR/}" ;;
+  esac
+  printf '%s\n' "$relpath" >> "$AGENT_BOOTSTRAP_WRITE_LOG"
+}
+
 ensure_dir() {
   local dir="$1"
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -60,6 +74,18 @@ write_file() {
   cat > "$tmp"
   mv "$tmp" "$final_path"
   LAST_WRITTEN_FILE="$final_path"
+  record_generated_file "$final_path"
+}
+
+copy_bundle_file() {
+  local source_rel="$1"
+  local target_path="$2"
+  local source_path="$BUNDLE_DIR/$source_rel"
+  [[ -f "$source_path" ]] || {
+    echo "ERROR: missing bundle file: $source_rel" >&2
+    exit 1
+  }
+  write_file "$target_path" < "$source_path"
 }
 
 make_executable() {

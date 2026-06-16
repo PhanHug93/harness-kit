@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-project-tech-stack-v1.schema.json",
+  "title": "Agent Project Tech Stack",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "last_verified",
+    "stacks",
+    "modules",
+    "architecture_boundaries",
+    "generated_files",
+    "protected_paths",
+    "verification",
+    "conventions",
+    "source_evidence",
+    "open_questions"
+  ],
+  "properties": {
+    "schema": { "const": "agent-project-tech-stack/v1" },
+    "status": { "enum": ["unfilled", "partial", "filled"] },
+    "last_verified": {
+      "type": "object",
+      "required": ["commit", "date"],
+      "properties": {
+        "commit": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "stacks": { "type": "array", "items": { "type": "string" } },
+    "modules": { "type": "array", "items": { "type": "string" } },
+    "architecture_boundaries": { "type": "array", "items": { "type": "string" } },
+    "generated_files": { "type": "array", "items": { "$ref": "#/$defs/relativePathPattern" } },
+    "protected_paths": { "type": "array", "items": { "$ref": "#/$defs/relativePathPattern" } },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "purpose", "source"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "conventions": { "type": "array", "items": { "type": "string" } },
+    "source_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "claim"],
+        "properties": {
+          "path": { "$ref": "#/$defs/sourceEvidencePath" },
+          "claim": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "open_questions": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "relativePathPattern": {
+      "type": "string",
+      "minLength": 1,
+      "allOf": [
+        {
+          "not": {
+            "pattern": "^/"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.\\.($|/)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "(^|/)\\.($|/)"
+          }
+        },
+        {
+          "not": {
+            "pattern": "//"
+          }
+        },
+        {
+          "not": {
+            "pattern": "/$"
+          }
+        },
+        {
+          "not": {
+            "pattern": "[\\u0000-\\u001F]"
+          }
+        }
+      ]
+    },
+    "sourceEvidencePath": {
+      "allOf": [
+        { "$ref": "#/$defs/relativePathPattern" },
+        {
+          "not": {
+            "pattern": "[*?\\[]"
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}
