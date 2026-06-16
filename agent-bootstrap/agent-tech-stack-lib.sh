@@ -297,7 +297,7 @@ agent_detect_tech_stack() {
 agent_print_items() {
   local item
   for item in "$@"; do
-    printf -- '- `%s`\n' "$item"
+    printf -- '- %s\n' "\`$item\`"
   done
 }
 
@@ -312,8 +312,8 @@ agent_print_summary() {
 agent_print_markdown() {
   local root="$1"
   printf '# Detected Agent Tech Stack\n\n'
-  printf 'Detector library version: `%s`\n\n' "$AGENT_TECH_STACK_LIB_VERSION"
-  printf 'Project root: `%s`\n\n' "$root"
+  printf "Detector library version: \`%s\`\n\n" "$AGENT_TECH_STACK_LIB_VERSION"
+  printf "Project root: \`%s\`\n\n" "$root"
   printf '## Tech Stacks\n\n'
   agent_print_items "${AGENT_TECH_STACKS[@]}"
   printf '\n## Gradle Modules\n\n'
@@ -324,5 +324,5 @@ agent_print_markdown() {
     printf '\n## Safety Warnings\n\n'
     agent_print_items "${AGENT_WARNINGS[@]}"
   fi
-  printf '\nDetection is file-signature based. Apply `docs/agent-configs/project-agent-context.md` for repo-specific rules.\n'
+  printf "\nDetection is file-signature based. Apply \`docs/agent-configs/project-agent-context.md\` for repo-specific rules.\n"
 }

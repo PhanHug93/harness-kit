@@ -1571,9 +1571,7 @@ estimate_tokens_for_file() {
     printf '0'
     return 0
   fi
-  set -- $(wc -w -c < "$path")
-  words="$1"
-  chars="$2"
+  read -r words chars < <(wc -w -c < "$path")
   awk -v words="$words" -v chars="$chars" 'BEGIN {
     by_chars = chars / 4
     by_words = words * 1.3

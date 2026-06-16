@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$LIB" ]]; then
-  echo "ERROR: missing tech-stack detection library: ${LIB#$ROOT/}" >&2
+  echo "ERROR: missing tech-stack detection library: ${LIB#"$ROOT"/}" >&2
   exit 1
 fi
 

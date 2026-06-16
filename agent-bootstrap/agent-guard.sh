@@ -156,7 +156,7 @@ PY
       return 0
       ;;
     "$PROJECT_ROOT"/*)
-      relpath="${raw_path#$PROJECT_ROOT/}"
+      relpath="${raw_path#"$PROJECT_ROOT"/}"
       ;;
     /*)
       printf 'outside project root\n' >&2
@@ -180,7 +180,7 @@ canonical_project_relpath() {
   if [[ "$absolute" == "$PROJECT_ROOT" ]]; then
     printf '.'
   elif [[ "$absolute" == "$PROJECT_ROOT/"* ]]; then
-    printf '%s' "${absolute#$PROJECT_ROOT/}"
+    printf '%s' "${absolute#"$PROJECT_ROOT"/}"
   else
     fail "path outside project root: $raw_path"
   fi
@@ -383,10 +383,8 @@ pattern_matches() {
       [[ "$path" == "$prefix" || "$path" == "$prefix/"* ]]
       ;;
     *'*'*|*'?'*|*'['*)
-      case "$path" in
-        $pattern) return 0 ;;
-        *) return 1 ;;
-      esac
+      # shellcheck disable=SC2053 # Project policy patterns intentionally use shell globs.
+      [[ "$path" == $pattern ]]
       ;;
     *)
       [[ "$path" == "$pattern" ]]
@@ -425,7 +423,7 @@ is_bootstrap_generated_base() {
     .agents/skills/*)
       return 0
       ;;
-    docs/agent-configs/*|docs/agent-configs/bootstrap-multi-agent-project/*)
+    docs/agent-configs/*)
       return 0
       ;;
     docs/superpowers/specs/*|docs/superpowers/plans/*)
@@ -444,9 +442,9 @@ pending_bootstrap_generated_candidate() {
   local candidate rel_candidate base rel_base
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    rel_candidate="${candidate#$PROJECT_ROOT/}"
+    rel_candidate="${candidate#"$PROJECT_ROOT"/}"
     base="${candidate%.generated.*}"
-    rel_base="${base#$PROJECT_ROOT/}"
+    rel_base="${base#"$PROJECT_ROOT"/}"
     if is_bootstrap_generated_base "$rel_base"; then
       printf '%s\n' "$rel_candidate"
       return 0

@@ -21,7 +21,7 @@ record_generated_file() {
   local relpath="$path"
   [[ -n "${AGENT_BOOTSTRAP_WRITE_LOG:-}" ]] || return 0
   case "$path" in
-    "$TARGET_DIR"/*) relpath="${path#$TARGET_DIR/}" ;;
+    "$TARGET_DIR"/*) relpath="${path#"$TARGET_DIR"/}" ;;
   esac
   printf '%s\n' "$relpath" >> "$AGENT_BOOTSTRAP_WRITE_LOG"
 }
@@ -101,7 +101,7 @@ make_executable() {
 format_bullets() {
   local item
   for item in "$@"; do
-    printf -- '- `%s`\n' "$item"
+    printf -- '- %s\n' "\`$item\`"
   done
 }
 

@@ -88,7 +88,7 @@ copy_file() {
   mkdir -p "$(dirname "$dest_path")"
   if [[ -f "$dest_path" ]] && ! cmp -s "$src_path" "$dest_path"; then
     cp -p "$dest_path" "$dest_path.bak.$STAMP"
-    log "backup ${dest_path#$DEST_DIR/}.bak.$STAMP"
+    log "backup ${dest_path#"$DEST_DIR"/}.bak.$STAMP"
   fi
   cp -p "$src_path" "$dest_path"
   log "copied $dest_name"

@@ -44,16 +44,14 @@ need_same_file() {
   local expected="$1"
   local actual="$2"
   local label="$3"
-  cmp -s "$expected" "$actual" || fail "$label drifted from ${expected#$ROOT_DIR/}"
+  cmp -s "$expected" "$actual" || fail "$label drifted from ${expected#"$ROOT_DIR"/}"
 }
 
 estimate_tokens_for_file() {
   local file="$1"
   local words
   local chars
-  set -- $(wc -w -c < "$file")
-  words="$1"
-  chars="$2"
+  read -r words chars < <(wc -w -c < "$file")
   awk -v words="$words" -v chars="$chars" 'BEGIN {
     by_chars = chars / 4
     by_words = words * 1.3
@@ -61,9 +59,9 @@ estimate_tokens_for_file() {
   }'
 }
 
-[[ -x "$BOOTSTRAP" ]] || fail "missing executable bootstrap script: ${BOOTSTRAP#$ROOT_DIR/}"
-[[ -x "$HOME_INSTALLER" ]] || fail "missing executable home installer: ${HOME_INSTALLER#$ROOT_DIR/}"
-[[ -x "$ONBOARDING_EVAL" ]] || fail "missing executable onboarding fixture eval: ${ONBOARDING_EVAL#$ROOT_DIR/}"
+[[ -x "$BOOTSTRAP" ]] || fail "missing executable bootstrap script: ${BOOTSTRAP#"$ROOT_DIR"/}"
+[[ -x "$HOME_INSTALLER" ]] || fail "missing executable home installer: ${HOME_INSTALLER#"$ROOT_DIR"/}"
+[[ -x "$ONBOARDING_EVAL" ]] || fail "missing executable onboarding fixture eval: ${ONBOARDING_EVAL#"$ROOT_DIR"/}"
 [[ -x "$BOOTSTRAP_BUNDLE/bootstrap-multi-agent-project.sh" ]] || fail "missing bundled bootstrap script"
 [[ -x "$BOOTSTRAP_BUNDLE/install-agent-bootstrap-home.sh" ]] || fail "missing bundled home installer"
 [[ -f "$BOOTSTRAP_BUNDLE/VERSION" ]] || fail "missing bundled VERSION"
@@ -102,7 +100,7 @@ for root_runtime_snapshot in \
     fail "root scripts must not carry generated runtime snapshots: scripts/$root_runtime_snapshot"
 done
 
-bash "$ONBOARDING_EVAL" >$TMP_DIR/out/onboarding-fixtures.out
+bash "$ONBOARDING_EVAL" >"$TMP_DIR"/out/onboarding-fixtures.out
 need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "onboarding-fixtures: ok" "onboarding fixture eval"
 need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "filled golden contracts: 3" "onboarding fixture filled contract eval"
 
@@ -118,7 +116,7 @@ need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
 
 CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
-AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >$TMP_DIR/out/bootstrap-home-install.out
+AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
 [[ -x "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" ]] || fail "canonical installer did not export bootstrap script"
 [[ -x "$CANONICAL_DIR/agent-hook.sh" ]] || fail "canonical installer did not export agent hook snapshot"
 [[ -x "$CANONICAL_DIR/agent-onboarding.sh" ]] || fail "canonical installer did not export agent onboarding snapshot"
@@ -164,8 +162,8 @@ for canonical_file in \
   lib/onboarding.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
-need_contains "$(cat $TMP_DIR/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
-need_contains "$(cat $TMP_DIR/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
+need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
+need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
 
 # --- Bundle inventory cross-check (guard the three independent file enumerations) ---
 # installer copy_file dest names MUST equal the canonical_file loop list; the MANIFEST
@@ -178,8 +176,8 @@ inv_canonical="$(awk '
   grab { line=$0; sub(/;[[:space:]]*do.*/,"",line); gsub(/\\/,"",line); gsub(/[[:space:]]/,"",line);
          if (line!="") print line; if ($0 ~ /;[[:space:]]*do/) grab=0 }
 ' "$ROOT_DIR/scripts/test-bootstrap-multi-agent-project.sh" | sort -u || true)"
-inv_manifest="$(grep -E '^\| `[^`]+`' "$BOOTSTRAP_BUNDLE/MANIFEST.md" \
-  | sed -E 's/^\| `([^`]+)`.*/\1/' | sort -u || true)"
+inv_manifest="$(grep -E "^\\| \`[^\`]+\`" "$BOOTSTRAP_BUNDLE/MANIFEST.md" \
+  | sed -E "s/^\\| \`([^\`]+)\`.*/\\1/" | sort -u || true)"
 inv_expected_manifest="$(printf '%s\ninstall-agent-bootstrap-home.sh\n' "$inv_installer" | sort -u)"
 inv_diff_ic="$(diff <(printf '%s\n' "$inv_installer") <(printf '%s\n' "$inv_canonical") || true)"
 [[ -z "$inv_diff_ic" ]] || fail "bundle inventory drift: installer copy_file set (<) != drift-test canonical_file loop (>):
@@ -213,15 +211,15 @@ EOF_MANIFEST
 
 (
   cd "$TMP_DIR"
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >$TMP_DIR/out/bootstrap-smoke.out
-  if ! scripts/agent-hook.sh claude-pretool >$TMP_DIR/out/bootstrap-fresh-claude-hook.out 2>$TMP_DIR/out/bootstrap-fresh-claude-hook.err; then
-    fail "fresh checkout Claude hook failed before rtk install: $(cat $TMP_DIR/out/bootstrap-fresh-claude-hook.err)"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-smoke.out
+  if ! scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
+    fail "fresh checkout Claude hook failed before rtk install: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
   fi
-  need_contains "$(cat $TMP_DIR/out/bootstrap-fresh-claude-hook.err)" "pinned rtk binary is not installed" "fresh checkout Claude hook warning"
-  if ! .codex/codex-mode.sh doctor >$TMP_DIR/out/bootstrap-fresh-codex-doctor.out 2>$TMP_DIR/out/bootstrap-fresh-codex-doctor.err; then
-    fail "fresh checkout Codex doctor failed before rtk install: $(cat $TMP_DIR/out/bootstrap-fresh-codex-doctor.err)"
+  need_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "pinned rtk binary is not installed" "fresh checkout Claude hook warning"
+  if ! .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.out 2>"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err; then
+    fail "fresh checkout Codex doctor failed before rtk install: $(cat "$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err)"
   fi
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --refresh-lock >$TMP_DIR/out/bootstrap-refresh-lock.out
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --refresh-lock >"$TMP_DIR"/out/bootstrap-refresh-lock.out
   need_contains "$(cat docs/agent-configs/agent-bootstrap.lock.json)" '"workflow_preset": "full"' "refresh-lock preserved workflow preset"
   mkdir -p .tools/rtk/v0.37.2 .tools/bin
   cat > .tools/rtk/v0.37.2/rtk <<'EOF_FAKE_RTK'
@@ -268,7 +266,7 @@ EOF_FAKE_RTK
 
 ROOT_DIRECT_DIR="$FIXTURE_DIR/root-direct"
 mkdir -p "$ROOT_DIRECT_DIR"
-bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >$TMP_DIR/out/bootstrap-root-direct.out
+bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-root-direct.out
 [[ -f "$ROOT_DIRECT_DIR/AGENTS.md" ]] || fail "root bootstrap wrapper did not generate AGENTS.md"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/project-onboarding.md" ]] || fail "root bootstrap wrapper did not generate onboarding procedure"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/first-10-minutes.md" ]] || fail "root bootstrap wrapper did not generate first 10 minutes guide"
@@ -342,7 +340,7 @@ root_missing_gitignore_diff="$(bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --d
 need_contains "$root_missing_gitignore_diff" "--- .gitignore" "root diff missing generated gitignore"
 root_missing_gitignore_status="$(bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --status --json)"
 need_contains "$root_missing_gitignore_status" '"generated_file_drift":"stale"' "root status missing generated gitignore drift"
-bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --force --no-backup --workflow full >$TMP_DIR/out/bootstrap-root-direct-restore.out
+bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --force --no-backup --workflow full >"$TMP_DIR"/out/bootstrap-root-direct-restore.out
 root_upgrade_plan="$(bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --upgrade-plan)"
 need_contains "$root_upgrade_plan" "Upgrade plan" "root upgrade plan header"
 need_contains "$root_upgrade_plan" "bundle_version=$bundle_version" "root upgrade plan bundle version"
@@ -350,11 +348,11 @@ need_contains "$root_upgrade_plan" "workflow_preset=full" "root upgrade plan wor
 
 cmp -s "$SHARED_LIB" "$TMP_DIR/scripts/agent-tech-stack-lib.sh" || fail "generated tech-stack lib drifted from source lib"
 while IFS= read -r source_template; do
-  relative_template="${source_template#$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/}"
+  relative_template="${source_template#"$ROOT_DIR"/docs/agent-configs/bootstrap-multi-agent-project/templates/}"
   need_same_file "$source_template" "$BOOTSTRAP_BUNDLE/templates/$relative_template" "bundle template $relative_template"
 done < <(find "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" -type f | sort)
 while IFS= read -r bundle_template; do
-  relative_template="${bundle_template#$BOOTSTRAP_BUNDLE/templates/}"
+  relative_template="${bundle_template#"$BOOTSTRAP_BUNDLE"/templates/}"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
 done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f | sort)
 for runtime_snapshot in \
@@ -388,7 +386,7 @@ need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Always read at startup" "AGENTS cor
 need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Read on demand" "AGENTS lazy context disclosure"
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
 need_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read on demand" "CLAUDE lazy context disclosure"
-need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" 'Read `AGENTS.md` first, then apply:' "CLAUDE must not eagerly load all workflow docs"
+need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"
 startup_tokens=$(( \
   $(estimate_tokens_for_file "$TMP_DIR/AGENTS.md") + \
   $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-agent-context.md") + \
@@ -460,20 +458,20 @@ need_contains "$ios_summary" "watch_os" "watchOS detector"
 need_contains "$ios_summary" "xcodebuild test -scheme <scheme>" "iOS build/test candidate"
 need_contains "$ios_summary" "swift test" "Swift package test candidate"
 
-(cd "$TMP_DIR" && scripts/agent-hook.sh codex-preflight reviewing full_flow >$TMP_DIR/out/bootstrap-preflight.out)
-(cd "$TMP_DIR" && scripts/agent-guard.sh preflight >$TMP_DIR/out/bootstrap-agent-guard-preflight.out)
-(cd "$TMP_DIR" && scripts/agent-guard.sh pre-edit --advisory agent-bootstrap/lib/render.sh >$TMP_DIR/out/bootstrap-agent-guard-pre-edit.out)
-(cd "$TMP_DIR" && scripts/agent-onboarding.sh status >$TMP_DIR/out/bootstrap-onboarding-status.out)
-(cd "$TMP_DIR" && scripts/agent-onboarding.sh next >$TMP_DIR/out/bootstrap-onboarding-next.out)
-if (cd "$TMP_DIR" && scripts/agent-onboarding.sh check >$TMP_DIR/out/bootstrap-onboarding-check.out 2>$TMP_DIR/out/bootstrap-onboarding-check.err); then
+(cd "$TMP_DIR" && scripts/agent-hook.sh codex-preflight reviewing full_flow >"$TMP_DIR"/out/bootstrap-preflight.out)
+(cd "$TMP_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-agent-guard-preflight.out)
+(cd "$TMP_DIR" && scripts/agent-guard.sh pre-edit --advisory agent-bootstrap/lib/render.sh >"$TMP_DIR"/out/bootstrap-agent-guard-pre-edit.out)
+(cd "$TMP_DIR" && scripts/agent-onboarding.sh status >"$TMP_DIR"/out/bootstrap-onboarding-status.out)
+(cd "$TMP_DIR" && scripts/agent-onboarding.sh next >"$TMP_DIR"/out/bootstrap-onboarding-next.out)
+if (cd "$TMP_DIR" && scripts/agent-onboarding.sh check >"$TMP_DIR"/out/bootstrap-onboarding-check.out 2>"$TMP_DIR"/out/bootstrap-onboarding-check.err); then
   fail "fresh generated onboarding check unexpectedly passed"
 fi
-(cd "$TMP_DIR" && .codex/codex-mode.sh doctor >$TMP_DIR/out/bootstrap-codex-doctor.out)
-(cd "$TMP_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-verify.out)
-(cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json >$TMP_DIR/out/bootstrap-verify.json)
-(cd "$TMP_DIR" && scripts/agent-hook.sh claude-pretool >$TMP_DIR/out/bootstrap-claude-hook.out 2>$TMP_DIR/out/bootstrap-claude-hook.err)
+(cd "$TMP_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-codex-doctor.out)
+(cd "$TMP_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-verify.out)
+(cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json >"$TMP_DIR"/out/bootstrap-verify.json)
+(cd "$TMP_DIR" && scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-claude-hook.err)
 
-if ! grep -Fq "Pass:" $TMP_DIR/out/bootstrap-verify.out; then
+if ! grep -Fq "Pass:" "$TMP_DIR"/out/bootstrap-verify.out; then
   fail "generated verifier did not print summary"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-codex-doctor.out")" "project brief is unfilled" "Codex doctor project brief readiness warning"
@@ -502,29 +500,29 @@ fi
 
 GUARD_DIR="$FIXTURE_DIR/guard-regressions"
 mkdir -p "$GUARD_DIR"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$GUARD_DIR" --workflow full >$TMP_DIR/out/bootstrap-guard-regressions.out
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >$TMP_DIR/out/bootstrap-guard-regressions-preflight.out)
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$GUARD_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-guard-regressions.out
+	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-regressions-preflight.out)
 	rm -f "$GUARD_DIR/.agents/state/context-pack.json"
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >$TMP_DIR/out/bootstrap-guard-prefinal-missing.out 2>$TMP_DIR/out/bootstrap-guard-prefinal-missing.err); then
+	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.err); then
 	  fail "agent guard pre-final passed without context pack"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-prefinal-missing.err")" "missing context pack" "pre-final missing context pack error"
 	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
 
 	printf '\nQA drift marker\n' >> "$GUARD_DIR/AGENTS.md"
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >$TMP_DIR/out/bootstrap-guard-prefinal-drift.out 2>$TMP_DIR/out/bootstrap-guard-prefinal-drift.err); then
+	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.err); then
 	  fail "agent guard pre-final passed after required context drift"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-prefinal-drift.err")" "stale" "pre-final required context drift error"
 (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
 
-dotdot_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit docs/../AGENTS.md) 2>&1 || true)"
+dotdot_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit docs/../AGENTS.md) 2>&1 || true)"
 need_contains "$dotdot_guard_out" "path=AGENTS.md" "pre-edit normalizes dotdot path"
 need_contains "$dotdot_guard_out" "protected_path=true" "pre-edit protects dotdot-normalized path"
-abs_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit "$GUARD_DIR/AGENTS.md") 2>&1 || true)"
+abs_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit "$GUARD_DIR/AGENTS.md") 2>&1 || true)"
 need_contains "$abs_guard_out" "path=AGENTS.md" "pre-edit normalizes project absolute path"
 need_contains "$abs_guard_out" "protected_path=true" "pre-edit protects absolute project path"
-if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit ../outside.txt >$TMP_DIR/out/bootstrap-guard-path-escape.out 2>$TMP_DIR/out/bootstrap-guard-path-escape.err); then
+if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit ../outside.txt >"$TMP_DIR"/out/bootstrap-guard-path-escape.out 2>"$TMP_DIR"/out/bootstrap-guard-path-escape.err); then
   fail "agent guard pre-edit allowed path escaping project root"
 fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-path-escape.err")" "outside project root" "pre-edit path escape error"
@@ -538,7 +536,7 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["protected_paths"][0]["pattern"] = "./AGENTS.md"
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >$TMP_DIR/out/bootstrap-guard-dot-pattern.out 2>$TMP_DIR/out/bootstrap-guard-dot-pattern.err); then
+	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-dot-pattern.out 2>"$TMP_DIR"/out/bootstrap-guard-dot-pattern.err); then
 	  fail "agent guard accepted dot-segment protected path pattern"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-dot-pattern.err")" "unsafe" "dot-segment protected path pattern error"
@@ -554,22 +552,22 @@ path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
 	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
 
-	foo_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/foo.sh) 2>&1 || true)"
+	foo_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/foo.sh) 2>&1 || true)"
 	need_contains "$foo_guard_out" "protected_path=false" "pre-edit does not overmatch scripts/agent-*.sh"
-	hook_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/agent-hook.sh) 2>&1 || true)"
+	hook_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/agent-hook.sh) 2>&1 || true)"
 need_contains "$hook_guard_out" "protected_path=true" "pre-edit matches scripts/agent-*.sh"
-codex_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .codex/codex-mode.sh) 2>&1 || true)"
+codex_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .codex/codex-mode.sh) 2>&1 || true)"
 need_contains "$codex_guard_out" "protected_path=true" "pre-edit protects Codex adapter"
-claude_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .claude/settings.json) 2>&1 || true)"
+claude_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .claude/settings.json) 2>&1 || true)"
 need_contains "$claude_guard_out" "protected_path=true" "pre-edit protects Claude adapter"
-gemini_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit GEMINI.md) 2>&1 || true)"
+gemini_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit GEMINI.md) 2>&1 || true)"
 need_contains "$gemini_guard_out" "protected_path=true" "pre-edit protects Gemini adapter"
 
-if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict AGENTS.md >$TMP_DIR/out/bootstrap-guard-strict.out 2>$TMP_DIR/out/bootstrap-guard-strict.err); then
+if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict.out 2>"$TMP_DIR"/out/bootstrap-guard-strict.err); then
   fail "agent guard strict pre-edit allowed protected path without acknowledgement"
 fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-strict.err")" "ack" "strict pre-edit ack guidance"
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict --ack reviewed AGENTS.md >$TMP_DIR/out/bootstrap-guard-strict-ack.out)
+	(cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict --ack reviewed AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict-ack.out)
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-strict-ack.out")" "protected_path=true" "strict pre-edit ack still classifies protected path"
 	need_contains "$(cat "$GUARD_DIR/.agents/state/guard-ack.log")" "path=AGENTS.md" "strict pre-edit ack audit log"
 
@@ -585,33 +583,33 @@ doc["generated_files"] = ["generated/openapi/**"]
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
 	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
-	project_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret/config.yml) 2>&1 || true)"
+	project_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret/config.yml) 2>&1 || true)"
 	need_contains "$project_guard_out" "protected_path=true" "pre-edit consumes project-specific protected paths"
-	project_exact_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret) 2>&1 || true)"
+	project_exact_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret) 2>&1 || true)"
 	need_contains "$project_exact_guard_out" "protected_path=true" "pre-edit matches project-specific recursive path root"
-	project_neighbor_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secrecy/config.yml) 2>&1 || true)"
+	project_neighbor_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secrecy/config.yml) 2>&1 || true)"
 	need_contains "$project_neighbor_guard_out" "protected_path=false" "pre-edit does not overmatch project-specific protected path neighbor"
-	generated_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi/client.ts) 2>&1 || true)"
+	generated_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi/client.ts) 2>&1 || true)"
 	need_contains "$generated_guard_out" "protected_path=true" "pre-edit consumes project-specific generated files"
-	generated_neighbor_guard_out="$((cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi2/client.ts) 2>&1 || true)"
+	generated_neighbor_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi2/client.ts) 2>&1 || true)"
 	need_contains "$generated_neighbor_guard_out" "protected_path=false" "pre-edit does not overmatch project-specific generated file neighbor"
 
 	printf '{"tool_name":"Edit","tool_input":{"file_path":"AGENTS.md"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-protected.json"
-	if (cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >$TMP_DIR/out/bootstrap-claude-edit-protected.out 2>$TMP_DIR/out/bootstrap-claude-edit-protected.err); then
+	if (cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-protected.out 2>"$TMP_DIR"/out/bootstrap-claude-edit-protected.err); then
 	  fail "Claude edit hook allowed protected path without acknowledgement"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-protected.err")" "ack" "Claude edit hook protected ack guidance"
-	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >$TMP_DIR/out/bootstrap-claude-edit-ack.out)
+	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-ack.out)
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-ack.out")" "protected_path=true" "Claude edit hook ack still classifies protected path"
 	printf '{"tool_name":"Write","tool_input":{"file_path":"src/main.txt"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json"
-	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >$TMP_DIR/out/bootstrap-claude-edit-unprotected.out)
+	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-unprotected.out)
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-unprotected.out")" "protected_path=false" "Claude edit hook allows unprotected path"
 
 	rm -rf "$GUARD_DIR/.agents/state"
-	(cd "$GUARD_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-guard-verify-readonly.out)
+	(cd "$GUARD_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-guard-verify-readonly.out)
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-verify-readonly.out")" "agent guard check passes" "generated verifier uses read-only agent guard check"
 [[ ! -e "$GUARD_DIR/.agents/state/context-pack.json" ]] || fail "generated verifier created context-pack side effect"
-(cd "$GUARD_DIR" && .codex/codex-mode.sh doctor >$TMP_DIR/out/bootstrap-guard-doctor-readonly.out)
+(cd "$GUARD_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-guard-doctor-readonly.out)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-doctor-readonly.out")" "agent guard check passes" "Codex doctor uses read-only agent guard check"
 [[ ! -e "$GUARD_DIR/.agents/state/context-pack.json" ]] || fail "Codex doctor created context-pack side effect"
 
@@ -639,14 +637,14 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["required_context"].append("../outside-secret")
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >$TMP_DIR/out/bootstrap-guard-policy-traversal.out 2>$TMP_DIR/out/bootstrap-guard-policy-traversal.err); then
+	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-policy-traversal.out 2>"$TMP_DIR"/out/bootstrap-guard-policy-traversal.err); then
 	  fail "agent guard accepted context policy path outside project root"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-policy-traversal.err")" "unsafe" "context policy traversal error"
 
 	SCHEMA_EXTRA_DIR="$FIXTURE_DIR/schema-extra"
 	mkdir -p "$SCHEMA_EXTRA_DIR"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$SCHEMA_EXTRA_DIR" --workflow full >$TMP_DIR/out/bootstrap-schema-extra.out
+	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$SCHEMA_EXTRA_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-schema-extra.out
 	python3 - "$SCHEMA_EXTRA_DIR/docs/agent-configs/context-policy.json" <<'PY'
 import json
 import pathlib
@@ -657,14 +655,14 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["unexpected_extra"] = True
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$SCHEMA_EXTRA_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-schema-extra-verify.out 2>$TMP_DIR/out/bootstrap-schema-extra-verify.err); then
+	if (cd "$SCHEMA_EXTRA_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-schema-extra-verify.out 2>"$TMP_DIR"/out/bootstrap-schema-extra-verify.err); then
 	  fail "generated verifier accepted extra context-policy property"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-schema-extra-verify.out")" "bootstrap JSON contracts failed validation" "context policy additional property validation"
 
 	TECH_PATH_DIR="$FIXTURE_DIR/tech-path-contract"
 	mkdir -p "$TECH_PATH_DIR"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TECH_PATH_DIR" --workflow full >$TMP_DIR/out/bootstrap-tech-path.out
+	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TECH_PATH_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-tech-path.out
 	python3 - "$TECH_PATH_DIR/docs/superpowers/specs/project-tech-stack.json" <<'PY'
 import json
 import pathlib
@@ -675,7 +673,7 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["protected_paths"] = ["../outside"]
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$TECH_PATH_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-tech-path-verify.out 2>$TMP_DIR/out/bootstrap-tech-path-verify.err); then
+	if (cd "$TECH_PATH_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-tech-path-verify.out 2>"$TMP_DIR"/out/bootstrap-tech-path-verify.err); then
 	  fail "generated verifier accepted unsafe project tech-stack protected path"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-tech-path-verify.out")" "project tech-stack contract failed validation" "project tech-stack protected path validation"
@@ -690,37 +688,37 @@ doc["protected_paths"] = []
 doc["generated_files"] = ["../outside-generated"]
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$TECH_PATH_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-tech-generated-path-verify.out 2>$TMP_DIR/out/bootstrap-tech-generated-path-verify.err); then
+	if (cd "$TECH_PATH_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-tech-generated-path-verify.out 2>"$TMP_DIR"/out/bootstrap-tech-generated-path-verify.err); then
 	  fail "generated verifier accepted unsafe project tech-stack generated file path"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-tech-generated-path-verify.out")" "project tech-stack contract failed validation" "project tech-stack generated file path validation"
 
 	CANDIDATE_SCOPE_DIR="$FIXTURE_DIR/candidate-scope"
 	mkdir -p "$CANDIDATE_SCOPE_DIR"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_SCOPE_DIR" --workflow full >$TMP_DIR/out/bootstrap-candidate-scope.out
+	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_SCOPE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-scope.out
 	mkdir -p "$CANDIDATE_SCOPE_DIR/src"
 	printf 'base api\n' > "$CANDIDATE_SCOPE_DIR/src/api"
 	printf 'project generated source\n' > "$CANDIDATE_SCOPE_DIR/src/api.generated.ts"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_SCOPE_DIR" --apply-candidates >$TMP_DIR/out/bootstrap-candidate-scope-apply.out
+	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_SCOPE_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-candidate-scope-apply.out
 	[[ "$(cat "$CANDIDATE_SCOPE_DIR/src/api")" == "base api" ]] || fail "--apply-candidates rewrote non-bootstrap src/api base file"
 	[[ "$(cat "$CANDIDATE_SCOPE_DIR/src/api.generated.ts")" == "project generated source" ]] || fail "--apply-candidates moved non-bootstrap generated source file"
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-apply.out")" "src/api.generated.ts" "--apply-candidates output"
 	candidate_scope_status="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_SCOPE_DIR" --status --json)"
 	need_contains "$candidate_scope_status" '"pending_generated_candidates":0' "--status ignores non-bootstrap generated source"
-	(cd "$CANDIDATE_SCOPE_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-candidate-scope-verify.out)
+	(cd "$CANDIDATE_SCOPE_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-candidate-scope-verify.out)
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-verify.out")" "pending generated candidate requires review" "verifier ignores non-bootstrap generated source"
-	(cd "$CANDIDATE_SCOPE_DIR" && scripts/agent-guard.sh preflight >/dev/null && scripts/agent-guard.sh pre-final >$TMP_DIR/out/bootstrap-candidate-scope-prefinal.out 2>$TMP_DIR/out/bootstrap-candidate-scope-prefinal.err)
+	(cd "$CANDIDATE_SCOPE_DIR" && scripts/agent-guard.sh preflight >/dev/null && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.out 2>"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.err)
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-prefinal.err")" "pending generated candidate requires review" "pre-final ignores non-bootstrap generated source"
 
 	CANDIDATE_DIR="$FIXTURE_DIR/candidate-visibility"
 	mkdir -p "$CANDIDATE_DIR"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >$TMP_DIR/out/bootstrap-candidate-first.out
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >$TMP_DIR/out/bootstrap-candidate-second.out
+	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-first.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-second.out
 [[ -n "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "re-run did not create generated candidates"
 need_not_contains "$(cat "$CANDIDATE_DIR/.gitignore")" "*.generated.*" "generated candidates must not be ignored"
-(cd "$CANDIDATE_DIR" && scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-candidate-verify.out)
+(cd "$CANDIDATE_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-candidate-verify.out)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-verify.out")" "pending generated candidate" "generated verifier pending candidate warning"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --apply-candidates >$TMP_DIR/out/bootstrap-apply-candidates.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-apply-candidates.out
 need_contains "$(cat "$TMP_DIR/out/bootstrap-apply-candidates.out")" "Applied generated candidate" "apply-candidates output"
 [[ -z "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "--apply-candidates left generated candidates behind"
 candidate_status_after_apply="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --status --json)"
@@ -729,7 +727,7 @@ need_contains "$candidate_status_after_apply" '"generated_file_drift":"clean"' "
 
 STALE_SKIP_DIR="$FIXTURE_DIR/stale-skip-existing"
 mkdir -p "$STALE_SKIP_DIR"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STALE_SKIP_DIR" --workflow full >$TMP_DIR/out/bootstrap-stale-first.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STALE_SKIP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-stale-first.out
 python3 - "$STALE_SKIP_DIR/docs/agent-configs/agent-bootstrap.lock.json" <<'PY'
 import json
 import pathlib
@@ -741,7 +739,7 @@ doc["version"] = "1900.01.01.0"
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
 printf 'custom stale agents\n' > "$STALE_SKIP_DIR/AGENTS.md"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STALE_SKIP_DIR" --workflow full --skip-existing >$TMP_DIR/out/bootstrap-stale-skip.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STALE_SKIP_DIR" --workflow full --skip-existing >"$TMP_DIR"/out/bootstrap-stale-skip.out
 stale_status="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STALE_SKIP_DIR" --status --json)"
 need_contains "$stale_status" '"installed_version":"1900.01.01.0"' "--skip-existing must not bump installed lock version"
 need_contains "$stale_status" '"generated_file_drift":"stale"' "--status must report stale generated files"
@@ -751,14 +749,14 @@ SKIP_DIR="$FIXTURE_DIR/skip-existing"
 mkdir -p "$SKIP_DIR"
 printf 'custom-ignore\n' > "$SKIP_DIR/.gitignore"
 printf 'custom agents\n' > "$SKIP_DIR/AGENTS.md"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$SKIP_DIR" --workflow full --skip-existing >$TMP_DIR/out/bootstrap-skip-existing.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$SKIP_DIR" --workflow full --skip-existing >"$TMP_DIR"/out/bootstrap-skip-existing.out
 [[ "$(cat "$SKIP_DIR/.gitignore")" == "custom-ignore" ]] || fail "--skip-existing mutated existing .gitignore"
 [[ -z "$(find "$SKIP_DIR" -name '.gitignore.bak.*' -print -quit)" ]] || fail "--skip-existing backed up existing .gitignore"
 
 ZSHRC_DIR="$FIXTURE_DIR/zshrc-quote"
 WEIRD_HOME="$ZSHRC_DIR/home with \" quote and dollar \$X"
 mkdir -p "$ZSHRC_DIR"
-AGENT_BOOTSTRAP_HOME="$WEIRD_HOME" "$HOME_INSTALLER" --no-git --write-zshrc --zshrc "$ZSHRC_DIR/zshrc" >$TMP_DIR/out/bootstrap-zshrc.out
+AGENT_BOOTSTRAP_HOME="$WEIRD_HOME" "$HOME_INSTALLER" --no-git --write-zshrc --zshrc "$ZSHRC_DIR/zshrc" >"$TMP_DIR"/out/bootstrap-zshrc.out
 bash -n "$ZSHRC_DIR/zshrc" || fail "managed shell block is not shell-parseable for quoted home path"
 if command -v zsh >/dev/null 2>&1; then
   zsh -n "$ZSHRC_DIR/zshrc" || fail "managed zsh block is not zsh-parseable for quoted home path"
@@ -766,7 +764,7 @@ fi
 
 WEIRD_TARGET_DIR="$FIXTURE_DIR/target with ' quote and dollar \$X"
 mkdir -p "$WEIRD_TARGET_DIR"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$WEIRD_TARGET_DIR" --project-name "quoted project" --workflow full >$TMP_DIR/out/bootstrap-weird-target.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$WEIRD_TARGET_DIR" --project-name "quoted project" --workflow full >"$TMP_DIR"/out/bootstrap-weird-target.out
 weird_status_json="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$WEIRD_TARGET_DIR" --status --json)"
 need_contains "$weird_status_json" '"schema":"agent-bootstrap-status/v1"' "weird target status json schema"
 need_contains "$weird_status_json" '"project":"quoted project"' "weird target explicit project name"
@@ -776,13 +774,13 @@ if command -v python3 >/dev/null 2>&1; then
 fi
 weird_diff="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$WEIRD_TARGET_DIR" --diff)"
 need_contains "$weird_diff" "No generated-file differences." "weird target diff clean"
-(cd "$WEIRD_TARGET_DIR" && scripts/verify-ai-deps.sh --json >$TMP_DIR/out/bootstrap-weird-target-verify.json)
+(cd "$WEIRD_TARGET_DIR" && scripts/verify-ai-deps.sh --json >"$TMP_DIR"/out/bootstrap-weird-target-verify.json)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-weird-target-verify.json")" '"fail":0' "weird target verifier json fail count"
 
 QUOTED_PROJECT_DIR="$FIXTURE_DIR/quoted-json-project"
 QUOTED_PROJECT_NAME='project "quoted" and backslash \ name'
 mkdir -p "$QUOTED_PROJECT_DIR"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$QUOTED_PROJECT_DIR" --project-name "$QUOTED_PROJECT_NAME" --workflow full >$TMP_DIR/out/bootstrap-quoted-project.out
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$QUOTED_PROJECT_DIR" --project-name "$QUOTED_PROJECT_NAME" --workflow full >"$TMP_DIR"/out/bootstrap-quoted-project.out
 quoted_status_json="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$QUOTED_PROJECT_DIR" --status --json)"
 if command -v python3 >/dev/null 2>&1; then
   python3 -c 'import json, sys; expected = sys.argv[1]; actual = json.loads(sys.argv[2])["project"]; raise SystemExit(0 if actual == expected else f"project name mismatch: expected {expected!r}, got {actual!r}")' \
@@ -810,7 +808,7 @@ EOF_INFRA_MANIFEST
 
 (
   cd "$INFRA_DIR"
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$INFRA_DIR" >$TMP_DIR/out/bootstrap-infra.out
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$INFRA_DIR" >"$TMP_DIR"/out/bootstrap-infra.out
   mkdir -p .tools/rtk/v0.37.2 .tools/bin
   cp "$TMP_DIR/.tools/rtk/v0.37.2/rtk" .tools/rtk/v0.37.2/rtk
   chmod +x .tools/rtk/v0.37.2/rtk
@@ -818,9 +816,9 @@ EOF_INFRA_MANIFEST
   bash -n scripts/agent-hook.sh
   bash -n scripts/agent-guard.sh
   bash -n scripts/verify-ai-deps.sh
-  scripts/agent-guard.sh preflight >$TMP_DIR/out/bootstrap-infra-agent-guard.out
-  scripts/agent-hook.sh codex-preflight planning standard >$TMP_DIR/out/bootstrap-infra-preflight.out
-  scripts/verify-ai-deps.sh >$TMP_DIR/out/bootstrap-infra-verify.out
+  scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-infra-agent-guard.out
+  scripts/agent-hook.sh codex-preflight planning standard >"$TMP_DIR"/out/bootstrap-infra-preflight.out
+  scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-infra-verify.out
 )
 
 [[ ! -e "$INFRA_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" ]] || fail "infra-only bootstrap installed Karpathy workflow"

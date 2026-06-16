@@ -116,7 +116,7 @@ is_bootstrap_generated_base() {
     .agents/skills/*)
       return 0
       ;;
-    docs/agent-configs/*|docs/agent-configs/bootstrap-multi-agent-project/*)
+    docs/agent-configs/*)
       return 0
       ;;
     docs/superpowers/specs/*|docs/superpowers/plans/*)
@@ -135,9 +135,9 @@ pending_bootstrap_generated_candidate() {
   local candidate rel_candidate base rel_base
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    rel_candidate="${candidate#$ROOT_DIR/}"
+    rel_candidate="${candidate#"$ROOT_DIR"/}"
     base="${candidate%.generated.*}"
-    rel_base="${base#$ROOT_DIR/}"
+    rel_base="${base#"$ROOT_DIR"/}"
     if is_bootstrap_generated_base "$rel_base"; then
       printf '%s\n' "$rel_candidate"
       return 0
@@ -171,9 +171,7 @@ estimate_tokens_for_file() {
     printf '0'
     return 0
   fi
-  set -- $(wc -w -c < "$path")
-  words="$1"
-  chars="$2"
+  read -r words chars < <(wc -w -c < "$path")
   awk -v words="$words" -v chars="$chars" 'BEGIN {
     by_chars = chars / 4
     by_words = words * 1.3

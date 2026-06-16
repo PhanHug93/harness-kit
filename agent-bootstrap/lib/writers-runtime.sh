@@ -200,7 +200,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "$LIB" ]]; then
-  echo "ERROR: missing tech-stack detection library: ${LIB#$ROOT/}" >&2
+  echo "ERROR: missing tech-stack detection library: ${LIB#"$ROOT"/}" >&2
   exit 1
 fi
 
@@ -318,11 +318,11 @@ fail() {
 }
 
 required_file() {
-  [[ -f "$1" ]] || fail "missing required file: ${1#$PROJECT_ROOT/}"
+  [[ -f "$1" ]] || fail "missing required file: ${1#"$PROJECT_ROOT"/}"
 }
 
 required_executable() {
-  [[ -x "$1" ]] || fail "missing executable file: ${1#$PROJECT_ROOT/}"
+  [[ -x "$1" ]] || fail "missing executable file: ${1#"$PROJECT_ROOT"/}"
 }
 
 rtk_available() {
@@ -349,7 +349,7 @@ verify_detector_lock() {
   required_file "$LOCK_FILE"
   local expected actual summary
   expected="$(lock_value detector_summary_sha256)"
-  [[ -n "$expected" ]] || fail "missing detector_summary_sha256 in ${LOCK_FILE#$PROJECT_ROOT/}"
+  [[ -n "$expected" ]] || fail "missing detector_summary_sha256 in ${LOCK_FILE#"$PROJECT_ROOT"/}"
   summary="$("$DETECTOR" --summary)"
   actual="$(printf '%s' "$summary" | hash_text)"
   if [[ "$actual" != "$expected" ]]; then
@@ -668,7 +668,7 @@ is_bootstrap_generated_base() {
     .agents/skills/*)
       return 0
       ;;
-    docs/agent-configs/*|docs/agent-configs/bootstrap-multi-agent-project/*)
+    docs/agent-configs/*)
       return 0
       ;;
     docs/superpowers/specs/*|docs/superpowers/plans/*)
@@ -687,9 +687,9 @@ pending_bootstrap_generated_candidate() {
   local candidate rel_candidate base rel_base
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
-    rel_candidate="${candidate#$ROOT_DIR/}"
+    rel_candidate="${candidate#"$ROOT_DIR"/}"
     base="${candidate%.generated.*}"
-    rel_base="${base#$ROOT_DIR/}"
+    rel_base="${base#"$ROOT_DIR"/}"
     if is_bootstrap_generated_base "$rel_base"; then
       printf '%s\n' "$rel_candidate"
       return 0
@@ -723,9 +723,7 @@ estimate_tokens_for_file() {
     printf '0'
     return 0
   fi
-  set -- $(wc -w -c < "$path")
-  words="$1"
-  chars="$2"
+  read -r words chars < <(wc -w -c < "$path")
   awk -v words="$words" -v chars="$chars" 'BEGIN {
     by_chars = chars / 4
     by_words = words * 1.3

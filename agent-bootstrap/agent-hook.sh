@@ -84,11 +84,11 @@ fail() {
 }
 
 required_file() {
-  [[ -f "$1" ]] || fail "missing required file: ${1#$PROJECT_ROOT/}"
+  [[ -f "$1" ]] || fail "missing required file: ${1#"$PROJECT_ROOT"/}"
 }
 
 required_executable() {
-  [[ -x "$1" ]] || fail "missing executable file: ${1#$PROJECT_ROOT/}"
+  [[ -x "$1" ]] || fail "missing executable file: ${1#"$PROJECT_ROOT"/}"
 }
 
 rtk_available() {
@@ -115,7 +115,7 @@ verify_detector_lock() {
   required_file "$LOCK_FILE"
   local expected actual summary
   expected="$(lock_value detector_summary_sha256)"
-  [[ -n "$expected" ]] || fail "missing detector_summary_sha256 in ${LOCK_FILE#$PROJECT_ROOT/}"
+  [[ -n "$expected" ]] || fail "missing detector_summary_sha256 in ${LOCK_FILE#"$PROJECT_ROOT"/}"
   summary="$("$DETECTOR" --summary)"
   actual="$(printf '%s' "$summary" | hash_text)"
   if [[ "$actual" != "$expected" ]]; then

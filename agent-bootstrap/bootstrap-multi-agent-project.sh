@@ -251,7 +251,7 @@ pending_generated_candidate_count() (
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
     base="${candidate%.generated.*}"
-    rel_base="${base#$TARGET_DIR/}"
+    rel_base="${base#"$TARGET_DIR"/}"
     if grep -Fxq "$rel_base" "$allowed_list"; then
       count=$((count + 1))
     fi
@@ -513,8 +513,8 @@ apply_generated_candidates() (
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
     base="${candidate%.generated.*}"
-    rel_candidate="${candidate#$TARGET_DIR/}"
-    rel_base="${base#$TARGET_DIR/}"
+    rel_candidate="${candidate#"$TARGET_DIR"/}"
+    rel_base="${base#"$TARGET_DIR"/}"
     if ! grep -Fxq "$rel_base" "$allowed_list"; then
       continue
     fi
