@@ -206,9 +206,9 @@ Core infra, installed by default:
 - `docs/agent-configs/context-policy.json`.
 - `docs/agent-configs/bootstrap-multi-agent-project/schemas/*.schema.json`.
 - `docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256`.
-- `scripts/verify-ai-deps.sh`, which validates the bootstrap lock, model
-  profile catalog, context policy, schema catalog, Agent Guard Lite, and rtk
-  provenance manifest.
+- `scripts/verify-ai-deps.sh`, which performs manual contract validation for the
+  bootstrap lock, model profile catalog, context policy, schema catalog metadata,
+  Agent Guard Lite, and rtk provenance manifest.
 - `.claude/settings.json` and `.claude/README.md`.
 - `scripts/detect-agent-tech-stack.sh`.
 - `scripts/agent-tech-stack-lib.sh`.
@@ -298,8 +298,8 @@ tokens. Estimates use a portable heuristic: max(chars/4, words*1.3).
 
 ## Agent Guard Lite
 
-The harness includes a file-based enforcement layer instead of a daemon,
-database, or MCP broker:
+The harness includes a file-based guardrail instead of a daemon, database, or
+MCP broker:
 
 - `docs/agent-configs/context-policy.json` tracks required context,
   recommended context, protected path patterns, and the change protocol.
@@ -318,7 +318,8 @@ database, or MCP broker:
   through the same strict `pre-edit` guard.
 
 The layer does not prevent all agent drift. It creates a small, trackable
-context rail so drift is easier to detect, review, and roll back.
+context rail so drift is easier to detect, review, and roll back. It is not a
+security boundary for arbitrary Bash commands.
 
 ## Safety
 
@@ -337,8 +338,10 @@ Default behavior is non-destructive:
 RTK is required for the harness "ready" state and for token-efficient git
 inspection. Freshly bootstrapped projects may run with warnings before RTK is
 installed, but `doctor` will keep reporting that the pinned wrapper is missing.
-The generated installer reads expected asset checksums from the generated
-provenance manifest. After bootstrap, install it in the target project:
+The RTK version is intentionally hard-pinned for stable, reproducible kit
+behavior. The generated installer reads expected asset checksums from the
+generated provenance manifest and rejects checksum drift. After bootstrap,
+install it in the target project:
 
 ```bash
 bash scripts/install-rtk.sh

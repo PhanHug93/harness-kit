@@ -59,6 +59,171 @@ estimate_tokens_for_file() {
   }'
 }
 
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    fail "missing sha256sum or shasum"
+  fi
+}
+
+current_rtk_asset() {
+  local platform
+  platform="$(uname -s)-$(uname -m)"
+  case "$platform" in
+    Darwin-arm64) printf '%s\n' "rtk-aarch64-apple-darwin.tar.gz" ;;
+    Darwin-x86_64) printf '%s\n' "rtk-x86_64-apple-darwin.tar.gz" ;;
+    Linux-aarch64) printf '%s\n' "rtk-aarch64-unknown-linux-gnu.tar.gz" ;;
+    Linux-x86_64) printf '%s\n' "rtk-x86_64-unknown-linux-musl.tar.gz" ;;
+    *) fail "unsupported RTK fixture platform: $platform" ;;
+  esac
+}
+
+assert_json_escape_handles_control_chars() {
+  # shellcheck source=/dev/null
+  source "$BOOTSTRAP_BUNDLE/lib/core.sh"
+  local escaped
+  escaped="$(json_escape $'tab\tcr\rnewline\nquote"slash\\')"
+  printf '{"value":"%s"}\n' "$escaped" | python3 -m json.tool >"$TMP_DIR/out/json-escape-control.json" ||
+    fail "json_escape must produce parseable JSON for control characters"
+  need_contains "$(cat "$TMP_DIR/out/json-escape-control.json")" "tab\\tcr\\rnewline" "json_escape control character escaping"
+}
+
+assert_hash_text_uses_sha256_without_crc32_fallback() {
+  # shellcheck source=/dev/null
+  source "$BOOTSTRAP_BUNDLE/lib/core.sh"
+  local fakebin actual expected
+  fakebin="$FIXTURE_DIR/hash-tools"
+  mkdir -p "$fakebin"
+  ln -s "$(command -v python3)" "$fakebin/python3"
+  ln -s "$(command -v awk)" "$fakebin/awk"
+  cat > "$fakebin/cksum" <<'EOF_FAKE_CKSUM'
+#!/bin/sh
+cat >/dev/null
+printf '%s\n' "1234567890 3"
+EOF_FAKE_CKSUM
+  chmod +x "$fakebin/cksum"
+  expected="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  actual="$(printf 'abc' | PATH="$fakebin" hash_text 2>"$TMP_DIR/out/hash-text-no-crc32.err")" ||
+    fail "hash_text must compute sha256 without falling back to CRC32: $(cat "$TMP_DIR/out/hash-text-no-crc32.err")"
+  [[ "$actual" == "$expected" ]] || fail "hash_text produced unexpected digest without sha tools: $actual"
+}
+
+write_fake_curl() {
+  local fakebin="$1"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/curl" <<'EOF_FAKE_CURL'
+#!/usr/bin/env bash
+set -euo pipefail
+
+has_proto=false
+has_proto_redir=false
+output=""
+url=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --proto)
+      shift
+      [[ "${1:-}" == "=https" ]] || { echo "unexpected --proto value: ${1:-}" >&2; exit 44; }
+      has_proto=true
+      ;;
+    --proto-redir)
+      shift
+      [[ "${1:-}" == "=https" ]] || { echo "unexpected --proto-redir value: ${1:-}" >&2; exit 45; }
+      has_proto_redir=true
+      ;;
+    -o)
+      shift
+      output="${1:-}"
+      ;;
+    https://*)
+      url="$1"
+      ;;
+  esac
+  shift || true
+done
+
+[[ "$has_proto" == "true" ]] || { echo "missing --proto '=https'" >&2; exit 40; }
+[[ "$has_proto_redir" == "true" ]] || { echo "missing --proto-redir '=https'" >&2; exit 41; }
+[[ "$url" == https://github.com/rtk-ai/rtk/releases/download/v0.37.2/* ]] ||
+  { echo "unexpected RTK URL: $url" >&2; exit 42; }
+[[ -n "$output" ]] || { echo "missing -o output path" >&2; exit 43; }
+
+printf '%s\n' "$url" >> "${FAKE_CURL_LOG:?}"
+cp "${FAKE_RTK_ARCHIVE:?}" "$output"
+EOF_FAKE_CURL
+  chmod +x "$fakebin/curl"
+}
+
+make_fixture_rtk_archive() {
+  local archive="$1"
+  local build_dir="$FIXTURE_DIR/rtk-archive-build"
+  rm -rf "$build_dir"
+  mkdir -p "$build_dir"
+  cat > "$build_dir/rtk" <<'EOF_FIXTURE_RTK'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  --version)
+    printf '%s\n' "rtk 0.37.2"
+    ;;
+  *)
+    printf '%s\n' "fixture rtk"
+    ;;
+esac
+EOF_FIXTURE_RTK
+  chmod +x "$build_dir/rtk"
+  (cd "$build_dir" && tar -czf "$archive" rtk)
+}
+
+test_pinned_rtk_installer_fixture() {
+  local asset archive checksum fakebin curl_log install_dir bad_dir
+  asset="$(current_rtk_asset)"
+  archive="$FIXTURE_DIR/$asset"
+  make_fixture_rtk_archive "$archive"
+  checksum="$(sha256_file "$archive")"
+  fakebin="$FIXTURE_DIR/fake-curl-bin"
+  curl_log="$TMP_DIR/out/fake-curl.log"
+  : > "$curl_log"
+  write_fake_curl "$fakebin"
+
+  install_dir="$FIXTURE_DIR/rtk-install-ok"
+  mkdir -p "$install_dir"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$install_dir" --workflow full >"$TMP_DIR/out/rtk-install-ok-bootstrap.out"
+  printf '%s %s\n' "$checksum" "$asset" \
+    > "$install_dir/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
+
+  (cd "$install_dir" &&
+    PATH="$fakebin:$PATH" \
+    FAKE_RTK_ARCHIVE="$archive" \
+    FAKE_CURL_LOG="$curl_log" \
+    scripts/install-rtk.sh >"$TMP_DIR/out/rtk-install-ok.out" 2>"$TMP_DIR/out/rtk-install-ok.err")
+
+  [[ -x "$install_dir/.tools/rtk/v0.37.2/rtk" ]] || fail "pinned RTK installer did not install executable"
+  [[ -L "$install_dir/.tools/bin/rtk" ]] || fail "pinned RTK installer did not create wrapper symlink"
+  need_contains "$(cat "$TMP_DIR/out/rtk-install-ok.out")" "Installed pinned rtk v0.37.2" "pinned RTK install output"
+  need_contains "$(cat "$curl_log")" "/v0.37.2/$asset" "pinned RTK download URL"
+
+  bad_dir="$FIXTURE_DIR/rtk-install-bad-checksum"
+  mkdir -p "$bad_dir"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$bad_dir" --workflow full >"$TMP_DIR/out/rtk-install-bad-bootstrap.out"
+  printf '%064d %s\n' 0 "$asset" \
+    > "$bad_dir/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
+  if (cd "$bad_dir" &&
+    PATH="$fakebin:$PATH" \
+    FAKE_RTK_ARCHIVE="$archive" \
+    FAKE_CURL_LOG="$curl_log" \
+    scripts/install-rtk.sh >"$TMP_DIR/out/rtk-install-bad.out" 2>"$TMP_DIR/out/rtk-install-bad.err"); then
+    fail "pinned RTK installer accepted checksum mismatch"
+  fi
+  need_contains "$(cat "$TMP_DIR/out/rtk-install-bad.err")" "Checksum mismatch" "pinned RTK checksum mismatch rejection"
+}
+
+command -v python3 >/dev/null 2>&1 || fail "python3 is required for bootstrap contract tests"
 [[ -x "$BOOTSTRAP" ]] || fail "missing executable bootstrap script: ${BOOTSTRAP#"$ROOT_DIR"/}"
 [[ -x "$HOME_INSTALLER" ]] || fail "missing executable home installer: ${HOME_INSTALLER#"$ROOT_DIR"/}"
 [[ -x "$ONBOARDING_EVAL" ]] || fail "missing executable onboarding fixture eval: ${ONBOARDING_EVAL#"$ROOT_DIR"/}"
@@ -85,7 +250,12 @@ need_contains "$design_doc" "agent-init --apply-candidates" "design doc candidat
 need_contains "$design_doc" "scripts/test-onboarding-fixtures.sh" "design doc onboarding fixture validation"
 need_contains "$design_doc" "agent-guard.sh" "design doc agent guard runtime"
 need_contains "$design_doc" "context-policy.json" "design doc context policy contract"
-need_contains "$(cat "$ROOT_DIR/README.md")" "multi-agent harness kit" "root README harness kit positioning"
+root_readme="$(cat "$ROOT_DIR/README.md")"
+need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
+need_contains "$root_readme" "rtk is intentionally hard-pinned" "root README RTK pinning intent"
+need_contains "$root_readme" "not a security boundary" "root README Agent Guard boundary"
+need_contains "$root_readme" "manual contract validation" "root README schema enforcement wording"
+need_contains "$root_readme" "excludes tool-specific wrappers" "root README token budget boundary"
 
 for root_runtime_snapshot in \
   agent-hook.sh \
@@ -114,6 +284,8 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
+assert_json_escape_handles_control_chars
+assert_hash_text_uses_sha256_without_crc32_fallback
 
 CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
 AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
@@ -164,6 +336,7 @@ need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_fi
 done
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
+test_pinned_rtk_installer_fixture
 
 # --- Bundle inventory cross-check (guard the three independent file enumerations) ---
 # installer copy_file dest names MUST equal the canonical_file loop list; the MANIFEST

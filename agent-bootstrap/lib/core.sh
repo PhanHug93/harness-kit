@@ -129,15 +129,31 @@ hash_text() {
     sha256sum | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
-    cksum | awk '{print $1}'
+    echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
+    return 1
   fi
 }
 
 json_escape() {
+  if command -v python3 >/dev/null 2>&1; then
+    JSON_ESCAPE_VALUE="$1" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps(os.environ.get("JSON_ESCAPE_VALUE", ""), ensure_ascii=False)[1:-1], end="")
+PY
+    return
+  fi
   local value="$1"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
+  value="${value//$'\b'/\\b}"
+  value="${value//$'\f'/\\f}"
   value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
   printf '%s' "$value"
 }

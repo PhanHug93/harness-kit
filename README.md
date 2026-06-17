@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.16.5`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.17.1`).
 
 ## What it generates
 
@@ -38,7 +38,9 @@ source ~/.zshrc
 
 Runtime requirements are intentionally ordinary: Bash, `python3`, Git, and a
 SHA-256 tool (`sha256sum` or `shasum`). Installing `rtk` is handled by the
-generated `scripts/install-rtk.sh`.
+generated `scripts/install-rtk.sh`. rtk is intentionally hard-pinned to the
+bundle's audited version so generated projects stay stable instead of drifting
+with upstream latest releases.
 
 Apply to a project:
 
@@ -91,7 +93,9 @@ promotion.
 The generated startup context is progressive: agents read a small always-on core
 first and load heavier docs/skills on demand. The generated `doctor` and verifier
 report an estimated token budget for the always-on core (target ≤3000) so harness
-context cost stays visible before it becomes a recurring per-session tax.
+context cost stays visible before it becomes a recurring per-session tax. The
+reported core is `AGENTS.md`, `project-agent-context.md`, and the project brief;
+it excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`.
 
 ## Onboarding contract
 
@@ -114,7 +118,15 @@ until rerun with `--ack <reason>` and records the acknowledgement locally, and
 `pre-final` catches stale context-pack or required-context drift before a
 completion claim. Generated Claude hooks route `Edit`/`Write`/`MultiEdit`
 through the same path-aware guard. It is a thin enforcement layer, not a daemon
-or broker.
+or broker, and not a security boundary for arbitrary Bash commands.
+
+## Contracts and schemas
+
+Generated targets include a JSON schema catalog for humans and external tooling.
+The built-in verifier performs manual contract validation for the bootstrap lock,
+model profiles, context policy, project tech-stack contract, schema catalog
+metadata, and rtk provenance manifest; it does not require or invoke a generic
+JSON Schema engine at runtime.
 
 Model defaults are data, not script edits: generated Codex helpers read
 `docs/agent-configs/model-profiles.json`, while `CODEX_MODEL_OVERRIDE`,

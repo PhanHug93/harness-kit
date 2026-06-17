@@ -441,8 +441,9 @@ This project has shared Claude Bash and edit/write hooks installed:
 ./scripts/agent-hook.sh claude-pretool
 ```
 
-The hook validates the detector lock, guards protected edit paths, and delegates
-shell git handling to rtk.
+The hook validates the detector lock, guards protected Edit/Write/MultiEdit
+paths, and delegates shell git handling to rtk. It is not a security boundary
+for arbitrary Bash commands.
 Workflow command docs are opt-in; run bootstrap with `--workflow full` if the
 project wants planning/coding/reviewing command contracts.
 EOF
@@ -500,7 +501,8 @@ Read on demand:
 
 Keep the always-on/core startup context under roughly 3k estimated tokens.
 \`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
-current estimate.
+current estimate. This core estimate excludes tool-specific wrappers such as
+\`CLAUDE.md\` and \`GEMINI.md\`.
 
 At the start of substantive work, refresh the local context pack and stack
 context with:
@@ -1113,6 +1115,10 @@ in `docs/agent-configs/project-agent-context.md`. Handoffs use
 
 Claude model selection is host-controlled. Keep the same mode contract if the
 selected model is unavailable.
+
+The shared Claude hook guards Edit/Write/MultiEdit paths before protected file
+edits and delegates shell git handling to the pinned rtk wrapper. It is not a
+security boundary for arbitrary Bash commands.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/planning.md" <<'EOF'

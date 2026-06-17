@@ -61,7 +61,9 @@ scripts/agent-onboarding.sh next
 
 Runtime requirements are Bash, `python3`, Git, and a SHA-256 tool
 (`sha256sum` or `shasum`). The generated `scripts/install-rtk.sh` handles the
-pinned `rtk` download and checksum verification.
+pinned `rtk` download and checksum verification. The rtk version is hard-pinned
+on purpose so the kit stays reproducible across machines and future upstream
+releases.
 
 Inspect an existing target before upgrading:
 
@@ -101,11 +103,12 @@ available, and guard/detector output first. The guard reads
 `context-policy.json` as a machine contract; `check` is read-only for doctor and
 verifier, while `preflight` intentionally refreshes `.agents/state/context-pack.json`.
 Protected `pre-edit --ack` decisions are logged under `.agents/state/`, and
-generated Claude edit/write hooks route file edits through the same guard. Mode
-contracts, handoff schema, council workflow, Karpathy workflow, and skills are
-read on demand. Generated doctor
-and verifier commands report estimated token budgets so context drift is
-visible before it becomes a recurring per-session cost.
+generated Claude edit/write hooks route file edits through the same guard. This
+is a file-edit guardrail, not a security boundary for arbitrary Bash commands.
+Mode contracts, handoff schema, council workflow, Karpathy workflow, and skills
+are read on demand. Generated doctor and verifier commands report estimated
+token budgets for the shared core context so context drift is visible before it
+becomes a recurring per-session cost.
 The first 10 minutes path is executable: `--first-10` prints the operator path,
 `scripts/agent-onboarding.sh next` prints the current missing onboarding pieces,
 and `scripts/agent-onboarding.sh check` is the strict readiness gate. The strict
@@ -125,10 +128,12 @@ changes.
 
 Schema and provenance artifacts are copied into generated targets under
 `docs/agent-configs/bootstrap-multi-agent-project/{schemas,provenance}/`.
-The generated verifier checks the bootstrap lock, model profile catalog,
-schema catalog, and rtk checksum manifest as live contracts. The generated rtk
-installer resolves expected release checksums from the provenance manifest
-before extracting a downloaded asset.
+The generated verifier uses manual contract validation for the bootstrap lock,
+model profile catalog, context policy, project tech-stack contract, schema
+catalog metadata, and rtk checksum manifest. The schema files are published
+reference schemas for external tooling rather than a generic runtime JSON Schema
+engine. The generated rtk installer resolves expected release checksums from the
+provenance manifest before extracting a downloaded asset.
 
 Project onboarding is the intended second step after `--workflow full`: an
 agent scans the target project, fills `docs/agent-configs/project-brief.md`,

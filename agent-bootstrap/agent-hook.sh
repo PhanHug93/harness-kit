@@ -100,8 +100,11 @@ hash_text() {
     sha256sum | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
-    cksum | awk '{print $1}'
+    echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
+    return 1
   fi
 }
 

@@ -11,6 +11,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RTK_VERSION="0.37.2"
+# Runtime snapshot: run from generated target projects as scripts/install-rtk.sh.
+# Source/canonical bundle copies do not carry the generated docs/agent-configs tree.
 PROVENANCE_FILE="${ROOT_DIR}/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v${RTK_VERSION}.sha256"
 
 OS="$(uname -s)"
@@ -54,7 +56,7 @@ LINK_PATH="${ROOT_DIR}/.tools/bin/rtk"
 
 mkdir -p "${INSTALL_DIR}" "${ROOT_DIR}/.tools/bin"
 if command -v curl >/dev/null 2>&1; then
-  curl -fL "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
+  curl --proto '=https' --proto-redir '=https' -fL "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
 elif command -v wget >/dev/null 2>&1; then
   wget -O "${ARCHIVE_PATH}" "${DOWNLOAD_URL}"
 else
@@ -75,6 +77,18 @@ if [ "${ACTUAL_SHA256}" != "${SHA256}" ]; then
   exit 1
 fi
 
+ARCHIVE_MEMBERS="$(tar -tzf "${ARCHIVE_PATH}")"
+# Pinned rtk v0.37.2 archives contain exactly one top-level binary. When
+# bumping RTK, verify upstream archive layout and update this policy if needed.
+case "${ARCHIVE_MEMBERS}" in
+  "rtk"|"./rtk")
+    ;;
+  *)
+    echo "Unexpected rtk archive contents:" >&2
+    printf '%s\n' "${ARCHIVE_MEMBERS}" >&2
+    exit 1
+    ;;
+esac
 tar -xzf "${ARCHIVE_PATH}" -C "${INSTALL_DIR}"
 chmod +x "${BIN_PATH}"
 ln -sfn "../rtk/v${RTK_VERSION}/rtk" "${LINK_PATH}"
@@ -334,8 +348,11 @@ hash_text() {
     sha256sum | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
-    cksum | awk '{print $1}'
+    echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
+    return 1
   fi
 }
 
@@ -584,10 +601,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 json_escape() {
+  if command -v python3 >/dev/null 2>&1; then
+    JSON_ESCAPE_VALUE="$1" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps(os.environ.get("JSON_ESCAPE_VALUE", ""), ensure_ascii=False)[1:-1], end="")
+PY
+    return
+  fi
   local value="$1"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
+  value="${value//$'\b'/\\b}"
+  value="${value//$'\f'/\\f}"
   value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
   printf '%s' "$value"
 }
 
@@ -705,8 +735,11 @@ hash_text() {
     sha256sum | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
-    cksum | awk '{print $1}'
+    echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
+    return 1
   fi
 }
 
