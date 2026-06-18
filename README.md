@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.2`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.3`).
 
 ## What it generates
 
@@ -71,6 +71,17 @@ agent-init --diff
 agent-init --upgrade-plan
 agent-init --apply-candidates
 ```
+
+One-shot safe upgrade from another machine/project:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.18.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+```
+
+The one-shot path installs the pinned release into `$HOME/dev/agent-bootstrap`,
+creates `codex/upgrade-harness-kit` in the target Git repo, generates
+non-destructive `*.generated.*` candidates, and leaves candidate application to
+review unless `--apply-candidates` is passed.
 
 One-off without the shell function:
 

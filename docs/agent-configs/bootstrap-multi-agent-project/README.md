@@ -183,6 +183,16 @@ agent-init --upgrade-plan
 agent-init --apply-candidates
 ```
 
+One-shot safe upgrade for an old project on another machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.18.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+```
+
+That script installs the pinned harness release, creates
+`codex/upgrade-harness-kit`, runs the generator without `--force`, and leaves
+`*.generated.*` candidates visible for review.
+
 `--diff` materializes a temporary copy of the target, regenerates harness files
 there, normalizes volatile timestamps and temp paths, and prints generated-file
 diffs without mutating the real target.

@@ -421,6 +421,7 @@ for canonical_file in \
   VERSION \
   MANIFEST.md \
   bootstrap-multi-agent-project.sh \
+  harness-kit-one-shot-upgrade.sh \
   agent-bootstrap-update.sh \
   agent-tech-stack-lib.sh \
   agent-hook.sh \

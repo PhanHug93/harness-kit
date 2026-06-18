@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.06.18.2`
+Version: `2026.06.18.3`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -19,6 +19,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | File | Role | Drift Rule |
 |---|---|---|
 | `bootstrap-multi-agent-project.sh` | Bootstrap generator for target projects. | Source of truth for generated project files. |
+| `harness-kit-one-shot-upgrade.sh` | One-shot safe installer/upgrader for old projects on another machine. | Must match canonical home export. |
 | `agent-bootstrap-update.sh` | Git-backed updater for canonical home and target upgrade planning. | Must match canonical home export. |
 | `install-agent-bootstrap-home.sh` | Exports this bundle into `$AGENT_BOOTSTRAP_HOME`. | Must copy every other file listed in this manifest; it does not copy itself. |
 | `README.md` | Operator guide for the copyable bundle. | Must match canonical home export. |

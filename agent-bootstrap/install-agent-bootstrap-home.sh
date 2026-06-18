@@ -303,6 +303,7 @@ main() {
   copy_file "VERSION" "VERSION"
   copy_file "MANIFEST.md" "MANIFEST.md"
   copy_file "bootstrap-multi-agent-project.sh" "bootstrap-multi-agent-project.sh"
+  copy_file "harness-kit-one-shot-upgrade.sh" "harness-kit-one-shot-upgrade.sh"
   copy_file "agent-bootstrap-update.sh" "agent-bootstrap-update.sh"
   copy_file "agent-tech-stack-lib.sh" "agent-tech-stack-lib.sh"
   copy_file "agent-hook.sh" "agent-hook.sh"

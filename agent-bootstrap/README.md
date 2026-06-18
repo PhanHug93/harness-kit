@@ -81,6 +81,16 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --apply-candidates
 ```
 
+One-shot safe upgrade for an old project on another laptop:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.18.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+```
+
+This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
+target Git repo onto `codex/upgrade-harness-kit`, runs the full generator without
+`--force`, and leaves `*.generated.*` candidates visible for review.
+
 For a one-off copy, you can also copy this entire `agent-bootstrap/` directory
 to another machine or project and run `install-agent-bootstrap-home.sh` from
 inside the copied directory.
