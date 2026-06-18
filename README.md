@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.17.1`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.1`).
 
 ## What it generates
 
@@ -61,6 +61,9 @@ The same guidance is available later with `agent-init --first-10` (or
 Inspect or upgrade an existing target:
 
 ```bash
+agent-update --check
+agent-update --self-update
+agent-upgrade --plan
 agent-init --status
 agent-init --status --json
 agent-init --first-10
@@ -135,7 +138,7 @@ one-shot capacity or migration handling.
 
 ## Repo layout
 
-- `agent-bootstrap/` — the copyable bundle: thin entrypoint, sourced `lib/*.sh`,
+- `agent-bootstrap/` — the copyable bundle: thin entrypoint, updater, sourced `lib/*.sh`,
   runtime snapshots, templates, schemas, `VERSION`, `MANIFEST.md`. Copy this
   whole folder to apply the kit elsewhere; the entrypoint sources `lib/`, so
   never copy the script alone.

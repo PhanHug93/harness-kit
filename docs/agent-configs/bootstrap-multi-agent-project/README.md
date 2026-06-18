@@ -15,6 +15,7 @@ agent-bootstrap/
 ├── VERSION
 ├── MANIFEST.md
 ├── bootstrap-multi-agent-project.sh
+├── agent-bootstrap-update.sh
 ├── install-agent-bootstrap-home.sh
 ├── lib/
 │   ├── core.sh
@@ -58,6 +59,7 @@ $HOME/dev/agent-bootstrap/
 ├── VERSION
 ├── MANIFEST.md
 ├── bootstrap-multi-agent-project.sh
+├── agent-bootstrap-update.sh
 ├── lib/
 │   ├── core.sh
 │   ├── detect.sh
@@ -142,6 +144,8 @@ export AGENT_BOOTSTRAP_HOME="$HOME/dev/agent-bootstrap"
 agent-init()    { bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "$PWD" "$@"; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
+agent-update()  { bash "$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "$AGENT_BOOTSTRAP_HOME" "$@"; }
+agent-upgrade() { agent-update --target "$PWD" --plan "$@"; }
 ```
 
 ## Daily Workflow
@@ -168,6 +172,9 @@ agent-refresh
 Lifecycle inspection and upgrade preview:
 
 ```bash
+agent-update --check
+agent-update --self-update
+agent-upgrade --plan
 agent-init --status
 agent-init --status --json
 agent-init --first-10

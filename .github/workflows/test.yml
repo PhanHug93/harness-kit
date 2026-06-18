@@ -40,6 +40,7 @@ jobs:
               scripts/test-bootstrap-multi-agent-project.sh \
               scripts/test-onboarding-fixtures.sh \
               agent-bootstrap/bootstrap-multi-agent-project.sh \
+              agent-bootstrap/agent-bootstrap-update.sh \
               agent-bootstrap/install-agent-bootstrap-home.sh \
               agent-bootstrap/install-rtk.sh \
               agent-bootstrap/rtk \

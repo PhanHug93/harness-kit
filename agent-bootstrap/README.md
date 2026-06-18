@@ -13,6 +13,8 @@ Inventory and drift rules: see `MANIFEST.md`.
 - `VERSION` and `MANIFEST.md` — bundle version, inventory, and drift contract.
 - `bootstrap-multi-agent-project.sh` — thin entrypoint that generates agent
   config into a target project or worktree.
+- `agent-bootstrap-update.sh` — Git-backed updater for checking published tags,
+  refreshing `$AGENT_BOOTSTRAP_HOME`, and delegating target upgrade plans.
 - `lib/` — sourced libraries (`core`, `detect`, `render`, `writers-runtime`,
   `writers-docs`, `onboarding`) that the entrypoint sources at runtime. The
   entrypoint REQUIRES this directory beside it — copy the whole bundle, never
@@ -68,6 +70,9 @@ releases.
 Inspect an existing target before upgrading:
 
 ```bash
+agent-update --check
+agent-update --self-update
+agent-upgrade --plan
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --status
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --status --json
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --first-10
@@ -96,6 +101,10 @@ Lifecycle commands are explicit: `--status --json` reports generated-file drift,
 latest reviewed bootstrap candidate for each generated path while removing older
 candidates for that same path. Candidate promotion is scoped to the generated-file
 allowlist, so unrelated project files matching `*.generated.*` are not touched.
+The Git-backed updater adds the upstream step: `agent-update --check` compares
+the canonical home with the latest published `vYYYY.MM.DD.N` tag,
+`agent-update --self-update` refreshes the canonical home from that tag, and
+`agent-upgrade --plan` runs the target upgrade plan with the refreshed bundle.
 
 Generated full-workflow projects keep startup context progressive: agents load
 `AGENTS.md`, `project-agent-context.md`, a filled `project-brief.md` when

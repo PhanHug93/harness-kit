@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BOOTSTRAP="$ROOT_DIR/scripts/bootstrap-multi-agent-project.sh"
 HOME_INSTALLER="$ROOT_DIR/scripts/install-agent-bootstrap-home.sh"
+UPDATE_SCRIPT="$ROOT_DIR/agent-bootstrap/agent-bootstrap-update.sh"
 ONBOARDING_EVAL="$ROOT_DIR/scripts/test-onboarding-fixtures.sh"
 BOOTSTRAP_BUNDLE="$ROOT_DIR/agent-bootstrap"
 SHARED_LIB="$ROOT_DIR/agent-bootstrap/agent-tech-stack-lib.sh"
@@ -110,6 +111,121 @@ EOF_FAKE_CKSUM
   actual="$(printf 'abc' | PATH="$fakebin" hash_text 2>"$TMP_DIR/out/hash-text-no-crc32.err")" ||
     fail "hash_text must compute sha256 without falling back to CRC32: $(cat "$TMP_DIR/out/hash-text-no-crc32.err")"
   [[ "$actual" == "$expected" ]] || fail "hash_text produced unexpected digest without sha tools: $actual"
+}
+
+mutate_bundle_version_for_fixture() {
+  local bundle_dir="$1"
+  local version="$2"
+  local current_version
+  current_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
+  printf '%s\n' "$version" > "$bundle_dir/VERSION"
+  python3 - "$bundle_dir" "$version" "$current_version" <<'PY'
+import pathlib
+import sys
+
+bundle = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+current_version = sys.argv[3]
+
+entrypoint = bundle / "bootstrap-multi-agent-project.sh"
+text = entrypoint.read_text(encoding="utf-8")
+text = text.replace(
+    f'AGENT_BOOTSTRAP_VERSION="{current_version}"',
+    f'AGENT_BOOTSTRAP_VERSION="{version}"',
+)
+entrypoint.write_text(text, encoding="utf-8")
+
+manifest = bundle / "MANIFEST.md"
+text = manifest.read_text(encoding="utf-8")
+text = text.replace(f"Version: `{current_version}`", f"Version: `{version}`")
+manifest.write_text(text, encoding="utf-8")
+PY
+}
+
+test_git_driven_harness_update_lifecycle() {
+  local update_repo old_version latest_version old_checkout old_home target_dir check_json plan_out apply_out
+  update_repo="$FIXTURE_DIR/git-update-source"
+  old_version="1900.01.01.1"
+  latest_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
+  old_checkout="$FIXTURE_DIR/git-update-old-checkout"
+  old_home="$FIXTURE_DIR/git-update-home"
+  target_dir="$FIXTURE_DIR/git-update-target"
+  mkdir -p "$update_repo" "$old_checkout" "$target_dir"
+
+  git -C "$update_repo" init >/dev/null
+  git -C "$update_repo" config user.email "bootstrap-test@example.invalid"
+  git -C "$update_repo" config user.name "Bootstrap Test"
+
+  cp -R "$BOOTSTRAP_BUNDLE" "$update_repo/agent-bootstrap"
+  mutate_bundle_version_for_fixture "$update_repo/agent-bootstrap" "$old_version"
+  git -C "$update_repo" add agent-bootstrap
+  git -C "$update_repo" commit -m "fixture old harness" >/dev/null
+  git -C "$update_repo" tag -a "v$old_version" -m "fixture old harness $old_version"
+
+  rm -rf "$update_repo/agent-bootstrap"
+  cp -R "$BOOTSTRAP_BUNDLE" "$update_repo/agent-bootstrap"
+  git -C "$update_repo" add agent-bootstrap
+  git -C "$update_repo" commit -m "fixture latest harness" >/dev/null
+  git -C "$update_repo" tag -a "v$latest_version" -m "fixture latest harness $latest_version"
+
+  git -C "$update_repo" archive "v$old_version" | tar -x -C "$old_checkout"
+  AGENT_BOOTSTRAP_HOME="$old_home" \
+    "$old_checkout/agent-bootstrap/install-agent-bootstrap-home.sh" --repo "$update_repo" --no-git \
+    >"$TMP_DIR/out/git-update-install-old.out"
+  [[ "$(sed -n '1p' "$old_home/VERSION")" == "$old_version" ]] || fail "fixture old home did not install old version"
+  [[ -x "$old_home/agent-bootstrap-update.sh" ]] || fail "canonical home did not export updater"
+
+  bash "$old_home/bootstrap-multi-agent-project.sh" --target "$target_dir" --workflow full \
+    >"$TMP_DIR/out/git-update-target-old.out"
+
+  check_json="$(bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --check --json)"
+  python3 - "$check_json" "$old_version" "$latest_version" <<'PY'
+import json
+import sys
+
+doc = json.loads(sys.argv[1])
+old_version = sys.argv[2]
+latest_version = sys.argv[3]
+
+assert doc["schema"] == "agent-bootstrap-update-status/v1", doc
+assert doc["current_version"] == old_version, doc
+assert doc["latest_version"] == latest_version, doc
+assert doc["latest_tag"] == f"v{latest_version}", doc
+assert doc["update_available"] is True, doc
+PY
+
+  bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --self-update \
+    >"$TMP_DIR/out/git-update-self-update.out"
+  [[ "$(sed -n '1p' "$old_home/VERSION")" == "$latest_version" ]] || fail "self-update did not refresh canonical home VERSION"
+  need_contains "$(cat "$old_home/SOURCE.json")" "\"repo_url\": \"$update_repo\"" "canonical source metadata repo"
+  need_contains "$(cat "$old_home/SOURCE.json")" "\"installed_version\": \"$latest_version\"" "canonical source metadata version"
+  python3 - "$old_home/SOURCE.json" "$(git -C "$update_repo" rev-list -n 1 "v$latest_version")" <<'PY'
+import json
+import sys
+
+doc = json.loads(open(sys.argv[1], "r", encoding="utf-8").read())
+expected_commit = sys.argv[2]
+assert doc["installed_commit"] == expected_commit, doc
+PY
+
+  printf '%s\n' "9999.01.01.1" > "$old_home/VERSION"
+  bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --self-update \
+    >"$TMP_DIR/out/git-update-self-update-no-downgrade.out"
+  [[ "$(sed -n '1p' "$old_home/VERSION")" == "9999.01.01.1" ]] ||
+    fail "self-update downgraded a canonical home that was newer than the latest remote tag"
+  need_contains "$(cat "$TMP_DIR/out/git-update-self-update-no-downgrade.out")" "already at or ahead of" "self-update no-downgrade output"
+  printf '%s\n' "$latest_version" > "$old_home/VERSION"
+
+  plan_out="$(bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --target "$target_dir" --plan)"
+  need_contains "$plan_out" "Update status" "project upgrade update status header"
+  need_contains "$plan_out" "Upgrade plan" "project upgrade delegated plan"
+  need_contains "$plan_out" "installed_version=$old_version" "project upgrade old installed version"
+  need_contains "$plan_out" "bundle_version=$latest_version" "project upgrade new bundle version"
+
+  apply_out="$(bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --target "$target_dir" --apply)"
+  need_contains "$apply_out" "Generated multi-agent files." "project upgrade delegated apply"
+  [[ -n "$(find "$target_dir" -name '*.generated.*' -print -quit)" ]] ||
+    fail "project upgrade apply should leave visible generated candidates for review"
 }
 
 write_fake_curl() {
@@ -226,16 +342,20 @@ test_pinned_rtk_installer_fixture() {
 command -v python3 >/dev/null 2>&1 || fail "python3 is required for bootstrap contract tests"
 [[ -x "$BOOTSTRAP" ]] || fail "missing executable bootstrap script: ${BOOTSTRAP#"$ROOT_DIR"/}"
 [[ -x "$HOME_INSTALLER" ]] || fail "missing executable home installer: ${HOME_INSTALLER#"$ROOT_DIR"/}"
+[[ -x "$UPDATE_SCRIPT" ]] || fail "missing executable updater script: ${UPDATE_SCRIPT#"$ROOT_DIR"/}"
 [[ -x "$ONBOARDING_EVAL" ]] || fail "missing executable onboarding fixture eval: ${ONBOARDING_EVAL#"$ROOT_DIR"/}"
 [[ -x "$BOOTSTRAP_BUNDLE/bootstrap-multi-agent-project.sh" ]] || fail "missing bundled bootstrap script"
 [[ -x "$BOOTSTRAP_BUNDLE/install-agent-bootstrap-home.sh" ]] || fail "missing bundled home installer"
+[[ -x "$BOOTSTRAP_BUNDLE/agent-bootstrap-update.sh" ]] || fail "missing bundled updater script"
 [[ -f "$BOOTSTRAP_BUNDLE/VERSION" ]] || fail "missing bundled VERSION"
 [[ -f "$BOOTSTRAP_BUNDLE/MANIFEST.md" ]] || fail "missing bundled MANIFEST.md"
 bash -n "$BOOTSTRAP"
 bash -n "$HOME_INSTALLER"
+bash -n "$UPDATE_SCRIPT"
 bash -n "$ONBOARDING_EVAL"
 bash -n "$BOOTSTRAP_BUNDLE/bootstrap-multi-agent-project.sh"
 bash -n "$BOOTSTRAP_BUNDLE/install-agent-bootstrap-home.sh"
+bash -n "$BOOTSTRAP_BUNDLE/agent-bootstrap-update.sh"
 need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Run generated target verifier" "CI generated target verifier gate"
 need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Install shellcheck on Ubuntu" "CI deterministic Ubuntu shellcheck install"
 need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Run shellcheck if available" "CI shellcheck gate"
@@ -290,6 +410,7 @@ assert_hash_text_uses_sha256_without_crc32_fallback
 CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
 AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
 [[ -x "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" ]] || fail "canonical installer did not export bootstrap script"
+[[ -x "$CANONICAL_DIR/agent-bootstrap-update.sh" ]] || fail "canonical installer did not export updater script"
 [[ -x "$CANONICAL_DIR/agent-hook.sh" ]] || fail "canonical installer did not export agent hook snapshot"
 [[ -x "$CANONICAL_DIR/agent-onboarding.sh" ]] || fail "canonical installer did not export agent onboarding snapshot"
 [[ -x "$CANONICAL_DIR/verify-ai-deps.sh" ]] || fail "canonical installer did not export verifier snapshot"
@@ -300,6 +421,7 @@ for canonical_file in \
   VERSION \
   MANIFEST.md \
   bootstrap-multi-agent-project.sh \
+  agent-bootstrap-update.sh \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
   agent-guard.sh \
@@ -335,8 +457,11 @@ for canonical_file in \
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
+need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-update()" "canonical installer update shell snippet"
+need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-upgrade()" "canonical installer upgrade shell snippet"
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
 test_pinned_rtk_installer_fixture
+test_git_driven_harness_update_lifecycle
 
 # --- Bundle inventory cross-check (guard the three independent file enumerations) ---
 # installer copy_file dest names MUST equal the canonical_file loop list; the MANIFEST

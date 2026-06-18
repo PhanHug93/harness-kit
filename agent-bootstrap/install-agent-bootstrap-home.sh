@@ -8,6 +8,9 @@ WRITE_ZSHRC=false
 DRY_RUN=false
 INIT_HISTORY=true
 ZSHRC_PATH="${ZSHRC:-${HOME}/.zshrc}"
+SOURCE_REPO_URL=""
+SOURCE_REF=""
+SOURCE_COMMIT=""
 
 usage() {
   cat <<'HELP'
@@ -22,6 +25,9 @@ Options:
   --write-zshrc   Install/update the managed shell functions in ~/.zshrc.
   --zshrc FILE    Shell rc file to update with --write-zshrc.
   --no-git        Do not initialize local history in the canonical directory.
+  --repo URL      Source Git repository URL/path for update metadata.
+  --ref REF       Source Git ref/tag for update metadata.
+  --commit SHA    Source Git commit for update metadata.
   --dry-run       Print planned actions without writing.
   -h, --help      Show this help.
 HELP
@@ -33,6 +39,89 @@ fail() { printf 'agent-bootstrap-home: ERROR: %s\n' "$*" >&2; exit 1; }
 
 shell_quote() {
   printf '%q' "$1"
+}
+
+read_source_json_value() {
+  local key="$1"
+  local file="$BUNDLE_DIR/SOURCE.json"
+  [[ -f "$file" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$file" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path = sys.argv[1]
+key = sys.argv[2]
+
+try:
+    doc = json.loads(open(path, "r", encoding="utf-8").read())
+except Exception:
+    sys.exit(0)
+
+value = doc.get(key, "")
+if isinstance(value, str):
+    print(value)
+PY
+}
+
+source_root() {
+  cd "$BUNDLE_DIR/.." && pwd -P
+}
+
+detect_source_repo_url() {
+  if [[ -n "$SOURCE_REPO_URL" ]]; then
+    printf '%s\n' "$SOURCE_REPO_URL"
+    return 0
+  fi
+  local inherited
+  inherited="$(read_source_json_value repo_url)"
+  if [[ -n "$inherited" ]]; then
+    printf '%s\n' "$inherited"
+    return 0
+  fi
+  local root
+  root="$(source_root)"
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$root" config --get remote.origin.url || true
+  fi
+}
+
+detect_source_ref() {
+  if [[ -n "$SOURCE_REF" ]]; then
+    printf '%s\n' "$SOURCE_REF"
+    return 0
+  fi
+  local inherited
+  inherited="$(read_source_json_value installed_ref)"
+  if [[ -n "$inherited" ]]; then
+    printf '%s\n' "$inherited"
+    return 0
+  fi
+  local root
+  root="$(source_root)"
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$root" describe --tags --exact-match 2>/dev/null ||
+      git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null ||
+      true
+  fi
+}
+
+detect_source_commit() {
+  if [[ -n "$SOURCE_COMMIT" ]]; then
+    printf '%s\n' "$SOURCE_COMMIT"
+    return 0
+  fi
+  local inherited
+  inherited="$(read_source_json_value installed_commit)"
+  if [[ -n "$inherited" ]]; then
+    printf '%s\n' "$inherited"
+    return 0
+  fi
+  local root
+  root="$(source_root)"
+  if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$root" rev-parse HEAD 2>/dev/null || true
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +141,18 @@ while [[ $# -gt 0 ]]; do
     --no-git)
       INIT_HISTORY=false
       shift
+      ;;
+    --repo)
+      SOURCE_REPO_URL="${2:?missing value for --repo}"
+      shift 2
+      ;;
+    --ref)
+      SOURCE_REF="${2:?missing value for --ref}"
+      shift 2
+      ;;
+    --commit)
+      SOURCE_COMMIT="${2:?missing value for --commit}"
+      shift 2
       ;;
     --dry-run)
       DRY_RUN=true
@@ -126,6 +227,8 @@ agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh"
 agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
+agent-update()  { bash "\$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "\$AGENT_BOOTSTRAP_HOME" "\$@"; }
+agent-upgrade() { agent-update --target "\$PWD" --plan "\$@"; }
 # <<< agent-bootstrap <<<
 EOF_ZSHRC
 
@@ -153,6 +256,43 @@ init_history() {
   fi
 }
 
+write_source_metadata() {
+  local repo_url ref commit version metadata_file
+  metadata_file="$DEST_DIR/SOURCE.json"
+  repo_url="$(detect_source_repo_url)"
+  ref="$(detect_source_ref)"
+  commit="$(detect_source_commit)"
+  version="$(sed -n '1p' "$BUNDLE_DIR/VERSION")"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "would write SOURCE.json"
+    return 0
+  fi
+
+  command -v python3 >/dev/null 2>&1 || {
+    warn "python3 is unavailable; skipped SOURCE.json metadata"
+    return 0
+  }
+
+  python3 - "$metadata_file" "$repo_url" "$ref" "$commit" "$version" "$STAMP" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+doc = {
+    "schema": "agent-bootstrap-source/v1",
+    "repo_url": sys.argv[2],
+    "installed_ref": sys.argv[3],
+    "installed_commit": sys.argv[4],
+    "installed_version": sys.argv[5],
+    "updated_at": sys.argv[6],
+}
+path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+PY
+  log "wrote SOURCE.json"
+}
+
 main() {
   log "canonical directory: $DEST_DIR"
   if [[ "$DRY_RUN" != true ]]; then
@@ -163,6 +303,7 @@ main() {
   copy_file "VERSION" "VERSION"
   copy_file "MANIFEST.md" "MANIFEST.md"
   copy_file "bootstrap-multi-agent-project.sh" "bootstrap-multi-agent-project.sh"
+  copy_file "agent-bootstrap-update.sh" "agent-bootstrap-update.sh"
   copy_file "agent-tech-stack-lib.sh" "agent-tech-stack-lib.sh"
   copy_file "agent-hook.sh" "agent-hook.sh"
   copy_file "agent-guard.sh" "agent-guard.sh"
@@ -195,6 +336,7 @@ main() {
   copy_file "lib/writers-runtime.sh" "lib/writers-runtime.sh"
   copy_file "lib/writers-docs.sh" "lib/writers-docs.sh"
   copy_file "lib/onboarding.sh" "lib/onboarding.sh"
+  write_source_metadata
   init_history
 
   if [[ "$WRITE_ZSHRC" == true ]]; then
@@ -212,6 +354,8 @@ agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh"
 agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
+agent-update()  { bash "\$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "\$AGENT_BOOTSTRAP_HOME" "\$@"; }
+agent-upgrade() { agent-update --target "\$PWD" --plan "\$@"; }
 # <<< agent-bootstrap <<<
 
 Then run: source "$ZSHRC_PATH"
