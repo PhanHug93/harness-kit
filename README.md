@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.1`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.2`).
 
 ## What it generates
 

@@ -32,6 +32,10 @@ Do not configure or depend on a project-local memory MCP server.
   - CLIProxy OpenAI-compatible API on 127.0.0.1:8317,
   - local embeddings through EMBEDDING_PROVIDER=local,
   - full MCP tool surface through AGENTMEMORY_TOOLS=all.
+- The @agentmemory/mcp shim exposes the full 53-tool surface only when
+  AGENTMEMORY_URL reaches a running agentmemory server. If no server is
+  reachable, it falls back to 7 tools and extended features such as actions,
+  leases, sentinels, routines, and mesh sync are not available.
 - Keep agentmemory and CLIProxy bound to localhost only.
 - After restart or config changes, verify the service with the host-provided
   command when available:
@@ -40,7 +44,36 @@ Do not configure or depend on a project-local memory MCP server.
 - Start the daemon only through a host-provided command when available:
   - \`\$AGENTMEMORY_START_CMD\`
   - or \`start-agentmemory.sh\` from \`PATH\`
+- To enable the upstream Codex integration and native action skills when the
+  host has not already done so:
+  - \`agentmemory connect codex --with-hooks\`
+  - \`npx skills add rohitg00/agentmemory -y\`
 - This generated project must not hardcode the service implementation path.
+
+## Full feature routing
+- Memories tab / durable knowledge: use memory_save, memory_smart_search,
+  memory_sessions, memory_file_history, memory_audit, and
+  memory_governance_delete according to the rules below.
+- Actions tab / follow-up work items: use memory_action_create when a user asks
+  to create, track, or save an action, TODO, blocked follow-up, revisit item, or
+  dependency. Include title, description, priority, project, tags, parentId, and
+  requires when known.
+- Action lifecycle updates: use memory_action_update to mark actions active,
+  done, blocked, cancelled, reprioritized, or completed with a result.
+- Planning the next unit of work: use memory_frontier or memory_next when
+  available to find unblocked actions instead of searching memories.
+- Upstream native skills such as /remember, /recall, /recap, /handoff, /forget,
+  /commit-context, /commit-history, and /session-history help agents choose the
+  right memory workflow when those skills are installed. They do not replace
+  Actions tab work-item tools.
+
+When the user specifically says "save this to Actions", "lưu vào tab actions",
+or asks for an actionable follow-up, do not silently call memory_save. First
+check whether memory_action_create is available. If it is available, create an
+action. If it is missing, say that the current MCP surface is the limited
+fallback, explain that Actions tab requires the running agentmemory server /
+full 53-tool proxy, and give the host setup commands above. Do not invent a
+\`memory_action_*\` call that the current tool list does not expose.
 
 ## Recall flow
 1. At the start of non-trivial repository work, call memory_smart_search when
