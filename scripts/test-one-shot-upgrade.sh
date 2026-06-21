@@ -27,14 +27,111 @@ need_contains() {
 
 [[ -x "$ONE_SHOT" ]] || fail "missing executable one-shot upgrader: ${ONE_SHOT#"$ROOT_DIR"/}"
 bash -n "$ONE_SHOT"
+version="$(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION")"
 
 help_out="$("$ONE_SHOT" --help)"
 need_contains "$help_out" "Usage: harness-kit-one-shot-upgrade.sh" "one-shot help usage"
 need_contains "$help_out" "--source-dir DIR" "one-shot help source-dir option"
 need_contains "$help_out" "--skip-verify" "one-shot help skip-verify option"
 need_contains "$help_out" "--apply-candidates" "one-shot help apply-candidates option"
+need_contains "$help_out" "Defaults to v$version." "one-shot help default ref matches bundle version"
 
-version="$(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION")"
+diff_fail_source="$TMP_ROOT/diff-fail-source"
+diff_fail_home="$TMP_ROOT/diff-fail-home"
+diff_fail_target="$TMP_ROOT/diff-fail-target"
+mkdir -p "$diff_fail_source/agent-bootstrap" "$diff_fail_target"
+printf '%s\n' "$version" > "$diff_fail_source/agent-bootstrap/VERSION"
+cat > "$diff_fail_source/agent-bootstrap/install-agent-bootstrap-home.sh" <<'EOF_DIFF_FAIL_INSTALLER'
+#!/usr/bin/env bash
+set -euo pipefail
+home=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --home)
+      home="${2:?missing --home value}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[[ -n "$home" ]] || { echo "missing --home" >&2; exit 2; }
+mkdir -p "$home"
+cat > "$home/bootstrap-multi-agent-project.sh" <<'EOF_FAKE_BOOTSTRAP'
+#!/usr/bin/env bash
+set -euo pipefail
+target=""
+action="generate"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target)
+      target="${2:?missing --target value}"
+      shift 2
+      ;;
+    --status)
+      action="status"
+      shift
+      ;;
+    --upgrade-plan)
+      action="upgrade-plan"
+      shift
+      ;;
+    --diff)
+      action="diff"
+      shift
+      ;;
+    --workflow)
+      shift 2
+      ;;
+    --json|--apply-candidates)
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+case "$action" in
+  status)
+    printf '%s\n' '{"schema":"agent-bootstrap-status/v1","generated_file_drift":"unknown"}'
+    ;;
+  upgrade-plan)
+    printf '%s\n' "Upgrade plan"
+    ;;
+  diff)
+    printf '%s\n' "fixture diff failure" >&2
+    exit 64
+    ;;
+  generate)
+    mkdir -p "$target/docs/agent-configs"
+    printf '%s\n' "{}" > "$target/docs/agent-configs/agent-bootstrap.lock.json"
+    printf '%s\n' "Generated multi-agent files."
+    ;;
+esac
+EOF_FAKE_BOOTSTRAP
+chmod +x "$home/bootstrap-multi-agent-project.sh"
+printf '%s\n' "fixture" > "$home/VERSION"
+EOF_DIFF_FAIL_INSTALLER
+chmod +x "$diff_fail_source/agent-bootstrap/install-agent-bootstrap-home.sh"
+git -C "$diff_fail_target" init -b main >/dev/null
+git -C "$diff_fail_target" config user.email "one-shot@example.invalid"
+git -C "$diff_fail_target" config user.name "One Shot Test"
+printf '# Diff Failure Target\n' > "$diff_fail_target/README.md"
+git -C "$diff_fail_target" add README.md
+git -C "$diff_fail_target" commit -m "seed diff failure target" >/dev/null
+if ! diff_fail_out="$("$ONE_SHOT" \
+  --source-dir "$diff_fail_source" \
+  --target "$diff_fail_target" \
+  --home "$diff_fail_home" \
+  --branch codex/test-one-shot-diff-failure \
+  --skip-verify 2>&1)"; then
+  fail "one-shot should continue after informational diff failure:
+$diff_fail_out"
+fi
+need_contains "$diff_fail_out" "WARN: generated diff preview failed; continuing" "one-shot non-fatal diff warning"
+need_contains "$diff_fail_out" "Generated multi-agent files." "one-shot generated after diff failure"
+
 home_dir="$TMP_ROOT/home"
 target_dir="$TMP_ROOT/target"
 mkdir -p "$target_dir"

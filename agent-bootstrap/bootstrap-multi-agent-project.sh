@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.06.18.3"
+AGENT_BOOTSTRAP_VERSION="2026.06.21.2"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -252,7 +252,7 @@ pending_generated_candidate_count() (
     [[ -n "$candidate" ]] || continue
     base="${candidate%.generated.*}"
     rel_base="${base#"$TARGET_DIR"/}"
-    if grep -Fxq "$rel_base" "$allowed_list"; then
+    if grep -Fxq "$rel_base" "$allowed_list" && ! bootstrap_user_owned_file_is_filled "$base"; then
       count=$((count + 1))
     fi
   done < "$candidate_list"
@@ -364,29 +364,20 @@ print_status() {
 copy_target_for_diff() {
   local dest="$1"
   mkdir -p "$dest"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a \
-      --exclude '.git/' \
-      --exclude '.tools/' \
-      --exclude '.gradle/' \
-      --exclude 'build/' \
-      --exclude '*/build/' \
-      --exclude 'node_modules/' \
-      --exclude 'Pods/' \
-      --exclude 'vendor/' \
-      "$TARGET_DIR/" "$dest/"
-    return 0
-  fi
 
   (
     cd "$TARGET_DIR"
     find . \
-      \( -path './.git' -o -path './.tools' -o -path './.gradle' -o -path './build' -o -path './node_modules' -o -path './Pods' -o -path './vendor' \) -prune -o \
-      -type f -print
+      \( -type d \( -name .git -o -name .tools -o -name .gradle -o -name build -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+      \( -type f -o -type l \) -print
   ) | while IFS= read -r relpath; do
     relpath="${relpath#./}"
     mkdir -p "$dest/$(dirname "$relpath")"
-    cp -p "$TARGET_DIR/$relpath" "$dest/$relpath"
+    if [[ -L "$TARGET_DIR/$relpath" ]]; then
+      cp -Pp "$TARGET_DIR/$relpath" "$dest/$relpath"
+    else
+      cp -p "$TARGET_DIR/$relpath" "$dest/$relpath"
+    fi
   done
 }
 
@@ -439,6 +430,9 @@ print_generated_diff() (
 
   sort -u "$write_log" | while IFS= read -r relpath; do
     [[ -n "$relpath" ]] || continue
+    if bootstrap_user_owned_file_is_filled "$TARGET_DIR/$relpath"; then
+      continue
+    fi
     old_sanitized="$tmp_root/old.$$"
     new_sanitized="$tmp_root/new.$$"
     if [[ -f "$TARGET_DIR/$relpath" ]]; then
@@ -516,6 +510,10 @@ apply_generated_candidates() (
     rel_candidate="${candidate#"$TARGET_DIR"/}"
     rel_base="${base#"$TARGET_DIR"/}"
     if ! grep -Fxq "$rel_base" "$allowed_list"; then
+      continue
+    fi
+    if bootstrap_user_owned_file_is_filled "$base"; then
+      printf 'Skipped user-owned generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
       continue
     fi
     applied_any=true
@@ -671,6 +669,7 @@ main() {
   if workflow_enabled; then
     write_doubt_driven_skill
     write_project_onboarding
+    write_task_journal_doc
     write_tool_entrypoints
     write_codex_files
   else

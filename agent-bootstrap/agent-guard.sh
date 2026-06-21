@@ -759,6 +759,7 @@ pre_final() {
     warn "pending generated candidate requires review: $pending_candidate"
   fi
   printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
+  printf 'agent-guard: note — for a long or multi-step task, ensure the active journal (docs/superpowers/plans/*/journal.md) carries an up-to-date entry.\n'
 }
 
 status() {

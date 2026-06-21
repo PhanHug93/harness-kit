@@ -789,12 +789,13 @@ check_context_budget() {
     docs/agent-configs/agent-mode-contracts.md \
     docs/agent-configs/agent-handoff-schema.md \
     docs/agent-configs/karpathy-llm-coding-agent-config.md \
-    docs/agent-configs/llm-council-agent-workflow.md)"
+    docs/agent-configs/llm-council-agent-workflow.md \
+    docs/agent-configs/task-journal.md)"
 
-  if [[ "$core_tokens" -le 3000 ]]; then
-    ok "core startup context estimate: ${core_tokens} tokens (budget 3000)"
+  if [[ "$core_tokens" -le 4000 ]]; then
+    ok "core startup context estimate: ${core_tokens} tokens (budget 4000)"
   else
-    warn "core startup context estimate: ${core_tokens} tokens exceeds budget 3000"
+    warn "core startup context estimate: ${core_tokens} tokens exceeds budget 4000"
   fi
 
   if [[ "$full_tokens" -le 6500 ]]; then
@@ -1235,6 +1236,7 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   docs/agent-configs/agent-handoff-schema.md \
   docs/agent-configs/karpathy-llm-coding-agent-config.md \
   docs/agent-configs/llm-council-agent-workflow.md \
+  docs/agent-configs/task-journal.md \
   docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/karpathy/README.md \
   docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/council/README.md \
   docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/three-mode/README.md \
@@ -1435,7 +1437,11 @@ fi
 if [[ -x "$ROOT_DIR/scripts/test-bootstrap-multi-agent-project.sh" ]]; then
   if [[ "${AGENT_BOOTSTRAP_SKIP_SMOKE:-}" == "1" ]]; then
     warn "portable bootstrap integration smoke test skipped to avoid recursion"
-  elif AGENT_BOOTSTRAP_SKIP_SMOKE=1 "$ROOT_DIR/scripts/test-bootstrap-multi-agent-project.sh" >/dev/null 2>&1; then
+  elif [[ ! -t 0 ]]; then
+    warn "portable bootstrap integration smoke test skipped in non-interactive shell"
+  elif ! command -v timeout >/dev/null 2>&1; then
+    warn "portable bootstrap integration smoke test skipped because timeout is unavailable"
+  elif AGENT_BOOTSTRAP_SKIP_SMOKE=1 timeout 120 "$ROOT_DIR/scripts/test-bootstrap-multi-agent-project.sh" </dev/null >/dev/null 2>&1; then
     ok "portable bootstrap integration smoke test passes"
   else
     bad "portable bootstrap integration smoke test failed"

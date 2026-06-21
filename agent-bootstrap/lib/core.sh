@@ -42,6 +42,84 @@ backup_existing() {
   fi
 }
 
+bootstrap_relpath_for() {
+  local path="$1"
+  case "$path" in
+    "$TARGET_DIR"/*) printf '%s\n' "${path#"$TARGET_DIR"/}" ;;
+    *) printf '%s\n' "$path" ;;
+  esac
+}
+
+is_bootstrap_user_owned_relpath() {
+  local relpath="$1"
+  case "$relpath" in
+    docs/agent-configs/project-agent-context.md|\
+    docs/agent-configs/project-brief.md|\
+    docs/superpowers/specs/project-tech-stack.md|\
+    docs/superpowers/specs/project-tech-stack.json)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+bootstrap_user_owned_file_is_unfilled() {
+  local path="$1"
+  local relpath
+  [[ -f "$path" ]] || return 1
+  relpath="$(bootstrap_relpath_for "$path")"
+  case "$relpath" in
+    docs/agent-configs/project-brief.md|docs/superpowers/specs/project-tech-stack.md)
+      grep -Fq '<!-- UNFILLED -->' "$path"
+      ;;
+    docs/superpowers/specs/project-tech-stack.json)
+      if command -v python3 >/dev/null 2>&1; then
+        [[ "$(
+          python3 - "$path" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        print(json.load(handle).get("status", ""))
+except Exception:
+    print("")
+PY
+        )" == "unfilled" ]]
+      else
+        grep -Eq '"status"[[:space:]]*:[[:space:]]*"unfilled"' "$path"
+      fi
+      ;;
+    docs/agent-configs/project-agent-context.md)
+      grep -Fq '<!-- UNFILLED -->' "$path"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+bootstrap_user_owned_file_is_filled() {
+  local path="$1"
+  local relpath
+  [[ -f "$path" ]] || return 1
+  relpath="$(bootstrap_relpath_for "$path")"
+  is_bootstrap_user_owned_relpath "$relpath" || return 1
+  ! bootstrap_user_owned_file_is_unfilled "$path"
+}
+
+write_user_owned_file() {
+  local path="$1"
+  if [[ -f "$path" && "$FORCE" != "true" ]] && bootstrap_user_owned_file_is_filled "$path"; then
+    log "User-owned file preserved: $path"
+    cat >/dev/null
+    return 0
+  fi
+  write_file "$path"
+}
+
 write_file() {
   local path="$1"
   local final_path="$path"

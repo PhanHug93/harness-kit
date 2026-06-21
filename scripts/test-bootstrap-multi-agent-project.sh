@@ -10,8 +10,12 @@ BOOTSTRAP_BUNDLE="$ROOT_DIR/agent-bootstrap"
 SHARED_LIB="$ROOT_DIR/agent-bootstrap/agent-tech-stack-lib.sh"
 TMP_DIR="$(mktemp -d)"
 FIXTURE_DIR="$(mktemp -d)"
+EXTRA_CLEANUP_FILES=()
 
 cleanup() {
+  if [[ ${#EXTRA_CLEANUP_FILES[@]} -gt 0 ]]; then
+    rm -f "${EXTRA_CLEANUP_FILES[@]}"
+  fi
   rm -rf "$TMP_DIR"
   rm -rf "$FIXTURE_DIR"
 }
@@ -46,6 +50,22 @@ need_same_file() {
   local actual="$2"
   local label="$3"
   cmp -s "$expected" "$actual" || fail "$label drifted from ${expected#"$ROOT_DIR"/}"
+}
+
+make_failing_rsync() {
+  local fakebin="$1"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/rsync" <<'EOF_FAKE_RSYNC'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' "openrsync: protocol version 29"
+  exit 0
+fi
+printf '%s\n' "openrsync: mkstempsock: Invalid argument" >&2
+exit 23
+EOF_FAKE_RSYNC
+  chmod +x "$fakebin/rsync"
 }
 
 estimate_tokens_for_file() {
@@ -491,22 +511,59 @@ inv_diff_am="$(diff <(printf '%s\n' "$inv_actual") <(printf '%s\n' "$inv_manifes
 [[ -z "$inv_diff_am" ]] || fail "bundle inventory drift: actual bundle files (<) != MANIFEST Source Roles set (>):
 $inv_diff_am"
 
-mkdir -p "$TMP_DIR/app/src/main/AndroidManifest" "$TMP_DIR/wear/src/main/AndroidManifest"
+mkdir -p "$TMP_DIR/app/src/main/AndroidManifest" "$TMP_DIR/wear/src/main/AndroidManifest" "$TMP_DIR/wear-api/src/main/kotlin" "$TMP_DIR/feature/app/src/main/AndroidManifest"
 cat > "$TMP_DIR/settings.gradle.kts" <<'EOF_SETTINGS'
 pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
 dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
 rootProject.name = "bootstrap-smoke"
-include(":app", ":wear")
+include(":app", ":wear", ":wear-api", ":feature:app")
 EOF_SETTINGS
 cat > "$TMP_DIR/build.gradle.kts" <<'EOF_BUILD'
 plugins {
     id("com.android.application") version "8.5.0" apply false
     id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+    id("org.jetbrains.kotlin.jvm") version "1.9.24" apply false
 }
 EOF_BUILD
+cat > "$TMP_DIR/app/build.gradle.kts" <<'EOF_APP_BUILD'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "example.bootstrap"
+    compileSdk = 35
+    flavorDimensions += "env"
+    productFlavors {
+        create("prod") {
+            dimension = "env"
+        }
+    }
+}
+EOF_APP_BUILD
+cat > "$TMP_DIR/wear-api/build.gradle.kts" <<'EOF_WEAR_API_BUILD'
+plugins {
+    id("org.jetbrains.kotlin.jvm")
+}
+EOF_WEAR_API_BUILD
+cat > "$TMP_DIR/feature/app/build.gradle.kts" <<'EOF_FEATURE_APP_BUILD'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "example.bootstrap.feature"
+    compileSdk = 35
+}
+EOF_FEATURE_APP_BUILD
 cat > "$TMP_DIR/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_MANIFEST'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" />
 EOF_MANIFEST
+cat > "$TMP_DIR/feature/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_FEATURE_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_FEATURE_MANIFEST
 
 (
   cd "$TMP_DIR"
@@ -634,6 +691,10 @@ need_contains "$root_first_10" "First 10 Minutes" "root first 10 header"
 need_contains "$root_first_10" "scripts/agent-onboarding.sh next" "root first 10 onboarding next"
 root_diff="$(bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --diff)"
 need_contains "$root_diff" "No generated-file differences." "root diff clean target"
+OPENRSYNC_BIN="$FIXTURE_DIR/openrsync-bin"
+make_failing_rsync "$OPENRSYNC_BIN"
+root_diff_openrsync="$(PATH="$OPENRSYNC_BIN:$PATH" bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --diff)"
+need_contains "$root_diff_openrsync" "No generated-file differences." "root diff falls back when openrsync is present but unusable"
 rm -f "$ROOT_DIRECT_DIR/.gitignore"
 root_missing_gitignore_diff="$(bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --diff)"
 need_contains "$root_missing_gitignore_diff" "--- .gitignore" "root diff missing generated gitignore"
@@ -645,15 +706,92 @@ need_contains "$root_upgrade_plan" "Upgrade plan" "root upgrade plan header"
 need_contains "$root_upgrade_plan" "bundle_version=$bundle_version" "root upgrade plan bundle version"
 need_contains "$root_upgrade_plan" "workflow_preset=full" "root upgrade plan workflow"
 
+USER_OWNED_DIR="$FIXTURE_DIR/user-owned-filled"
+mkdir -p "$USER_OWNED_DIR"
+bash "$BOOTSTRAP" --target "$USER_OWNED_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-user-owned-initial.out
+cat > "$USER_OWNED_DIR/docs/agent-configs/project-brief.md" <<'EOF_FILLED_BRIEF'
+# Project Brief
+
+Last verified: abc123 / 2026-06-18
+
+Filled project context that must survive harness upgrades.
+EOF_FILLED_BRIEF
+cat > "$USER_OWNED_DIR/docs/agent-configs/project-agent-context.md" <<'EOF_FILLED_CONTEXT'
+# Project Agent Context
+
+Repo-specific rules filled by the project owner.
+EOF_FILLED_CONTEXT
+cat > "$USER_OWNED_DIR/docs/superpowers/specs/project-tech-stack.md" <<'EOF_FILLED_TECH_MD'
+# Project Tech Stack Spec
+
+Last verified: abc123 / 2026-06-18
+
+Filled stack evidence that must not be replaced by the empty template.
+EOF_FILLED_TECH_MD
+cat > "$USER_OWNED_DIR/docs/superpowers/specs/project-tech-stack.json" <<'EOF_FILLED_TECH_JSON'
+{
+  "schema": "agent-project-tech-stack/v1",
+  "status": "filled",
+  "last_verified": {
+    "commit": "abc123",
+    "date": "2026-06-18"
+  },
+  "stacks": ["android_kotlin"],
+  "modules": [":app"],
+  "architecture_boundaries": ["Keep filled context."],
+  "generated_files": ["docs/agent-configs/bootstrap-multi-agent-project/templates/**"],
+  "protected_paths": ["docs/agent-configs/project-brief.md"],
+  "verification": [
+    {
+      "command": "./gradlew :app:testProdDebugUnitTest",
+      "purpose": "Project unit tests",
+      "source": "settings.gradle.kts"
+    }
+  ],
+  "conventions": ["Do not overwrite filled onboarding docs."],
+  "source_evidence": [
+    {
+      "path": "docs/agent-configs/project-brief.md",
+      "claim": "Filled project brief exists."
+    }
+  ],
+  "open_questions": []
+}
+EOF_FILLED_TECH_JSON
+bash "$BOOTSTRAP" --target "$USER_OWNED_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-user-owned-upgrade.out
+for user_owned_candidate in \
+  "$USER_OWNED_DIR/docs/agent-configs/project-brief.md.generated."* \
+  "$USER_OWNED_DIR/docs/agent-configs/project-agent-context.md.generated."* \
+  "$USER_OWNED_DIR/docs/superpowers/specs/project-tech-stack.md.generated."* \
+  "$USER_OWNED_DIR/docs/superpowers/specs/project-tech-stack.json.generated."*; do
+  [[ ! -e "$user_owned_candidate" ]] ||
+    fail "filled user-owned file should not get generated candidate: ${user_owned_candidate#"$USER_OWNED_DIR"/}"
+done
+user_owned_status="$(bash "$BOOTSTRAP" --target "$USER_OWNED_DIR" --status --json)"
+need_contains "$user_owned_status" '"generated_file_drift":"clean"' "filled user-owned docs are not actionable generated drift"
+cat > "$USER_OWNED_DIR/docs/agent-configs/project-brief.md.generated.20990101-000000" <<'EOF_EMPTY_BRIEF_CANDIDATE'
+# Project Brief
+
+<!-- UNFILLED -->
+EOF_EMPTY_BRIEF_CANDIDATE
+user_owned_apply="$(bash "$BOOTSTRAP" --target "$USER_OWNED_DIR" --apply-candidates)"
+need_contains "$user_owned_apply" "Skipped user-owned generated candidate docs/agent-configs/project-brief.md.generated.20990101-000000" "filled user-owned apply guard"
+need_contains "$(cat "$USER_OWNED_DIR/docs/agent-configs/project-brief.md")" "Filled project context" "filled user-owned brief preserved by apply-candidates"
+
 cmp -s "$SHARED_LIB" "$TMP_DIR/scripts/agent-tech-stack-lib.sh" || fail "generated tech-stack lib drifted from source lib"
+source_template_bak="$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md.bak.test-$$"
+bundle_template_generated="$BOOTSTRAP_BUNDLE/templates/base/README.md.generated.test-$$"
+printf '%s\n' "temporary backup must be ignored by drift tests" > "$source_template_bak"
+printf '%s\n' "temporary generated candidate must be ignored by drift tests" > "$bundle_template_generated"
+EXTRA_CLEANUP_FILES+=("$source_template_bak" "$bundle_template_generated")
 while IFS= read -r source_template; do
   relative_template="${source_template#"$ROOT_DIR"/docs/agent-configs/bootstrap-multi-agent-project/templates/}"
   need_same_file "$source_template" "$BOOTSTRAP_BUNDLE/templates/$relative_template" "bundle template $relative_template"
-done < <(find "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" -type f | sort)
+done < <(find "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
 while IFS= read -r bundle_template; do
   relative_template="${bundle_template#"$BOOTSTRAP_BUNDLE"/templates/}"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
-done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f | sort)
+done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
 for runtime_snapshot in \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
@@ -698,7 +836,7 @@ startup_tokens=$(( \
   $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-agent-context.md") + \
   $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-brief.md") \
 ))
-[[ "$startup_tokens" -le 3000 ]] || fail "core startup context too large: ${startup_tokens} estimated tokens"
+[[ "$startup_tokens" -le 4000 ]] || fail "core startup context too large: ${startup_tokens} estimated tokens"
 [[ -f "$TMP_DIR/docs/agent-configs/project-onboarding.md" ]] || fail "full bootstrap did not generate onboarding procedure"
 [[ -f "$TMP_DIR/docs/agent-configs/first-10-minutes.md" ]] || fail "full bootstrap did not generate first 10 minutes guide"
 [[ -f "$TMP_DIR/.claude/commands/project-onboarding.md" ]] || fail "full bootstrap did not generate onboarding command"
@@ -724,7 +862,14 @@ need_contains "$(cat "$TMP_DIR/AGENTS.md")" "project-brief.md" "AGENTS startup r
 
 summary="$(cd "$TMP_DIR" && scripts/detect-agent-tech-stack.sh --summary)"
 need_contains "$summary" "tech_stacks=android_kotlin wear_os" "tech stack summary"
-need_contains "$summary" "modules=:app :wear" "module summary"
+need_contains "$summary" "modules=:app :feature:app :wear :wear-api" "module summary"
+need_contains "$summary" ":wear-api" "wear-api module summary"
+need_contains "$summary" ":feature:app" "nested Gradle module summary"
+need_contains "$summary" "./gradlew :app:testProdDebugUnitTest" "flavored app unit test command"
+need_contains "$summary" "./gradlew :app:assembleProdDebug" "flavored app assemble command"
+need_contains "$summary" "./gradlew :wear-api:test" "non-Android module test command"
+need_contains "$summary" "./gradlew :feature:app:testDebugUnitTest" "nested Android module unit test command"
+need_contains "$summary" "./gradlew :feature:app:assembleDebug" "nested Android module assemble command"
 need_contains "$summary" "tech_stack_lib_version=" "library version summary"
 
 mkdir -p "$FIXTURE_DIR/node-tooling"
@@ -773,6 +918,14 @@ if (cd "$TMP_DIR" && scripts/agent-onboarding.sh check >"$TMP_DIR"/out/bootstrap
   fail "fresh generated onboarding check unexpectedly passed"
 fi
 (cd "$TMP_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-codex-doctor.out)
+cat > "$TMP_DIR/scripts/test-bootstrap-multi-agent-project.sh" <<'EOF_GENERATED_SMOKE_PROBE'
+#!/usr/bin/env bash
+printf '%s\n' "smoke probe should not run without an interactive tty" >&2
+exit 42
+EOF_GENERATED_SMOKE_PROBE
+chmod +x "$TMP_DIR/scripts/test-bootstrap-multi-agent-project.sh"
+(cd "$TMP_DIR" && scripts/verify-ai-deps.sh </dev/null >"$TMP_DIR"/out/bootstrap-verify-noninteractive.out)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-verify-noninteractive.out")" "portable bootstrap integration smoke test skipped in non-interactive shell" "generated verifier non-interactive smoke skip"
 (cd "$TMP_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-verify.out)
 (cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json >"$TMP_DIR"/out/bootstrap-verify.json)
 (cd "$TMP_DIR" && scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-claude-hook.err)
@@ -795,6 +948,9 @@ need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "bootstrap JSON contr
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "project tech-stack contract validates" "generated verifier project tech-stack contract validation"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"schema":"agent-bootstrap-verify-report/v1"' "generated verifier json schema"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"fail":0' "generated verifier json fail count"
+on_demand_tokens="$(sed -n 's/.*on-demand full workflow context estimate: \([0-9][0-9]*\) tokens.*/\1/p' "$TMP_DIR/out/bootstrap-verify.json" | head -1)"
+[[ -n "$on_demand_tokens" ]] || fail "generated verifier JSON did not report on-demand context estimate"
+[[ "$on_demand_tokens" -le 6100 ]] || fail "on-demand workflow context too close to budget: ${on_demand_tokens} estimated tokens"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-agent-guard-preflight.out")" "agent-guard: preflight ok" "agent guard preflight output"
 [[ -f "$TMP_DIR/.agents/state/context-pack.json" ]] || fail "agent guard did not write context pack"
 need_contains "$(cat "$TMP_DIR/.agents/state/context-pack.json")" '"schema":"agent-context-pack/v1"' "agent guard context pack schema"

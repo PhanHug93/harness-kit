@@ -117,6 +117,89 @@ agent_has_detected_module() {
   return 1
 }
 
+agent_gradle_module_dir() {
+  local root="$1"
+  local module="$2"
+  local rel="${module#:}"
+  # Bash replacement syntax: replace Gradle path separators with directories.
+  rel="${rel//://}"
+  printf '%s/%s' "$root" "$rel"
+}
+
+agent_gradle_module_file_contains() {
+  local root="$1"
+  local module="$2"
+  local regex="$3"
+  local module_dir
+  module_dir="$(agent_gradle_module_dir "$root" "$module")"
+  grep -Eq "$regex" "$module_dir/build.gradle" "$module_dir/build.gradle.kts" 2>/dev/null
+}
+
+agent_gradle_module_has_build_file() {
+  local root="$1"
+  local module="$2"
+  local module_dir
+  module_dir="$(agent_gradle_module_dir "$root" "$module")"
+  [[ -f "$module_dir/build.gradle" || -f "$module_dir/build.gradle.kts" ]]
+}
+
+agent_gradle_module_has_android_signal() {
+  local root="$1"
+  local module="$2"
+  local module_dir
+  module_dir="$(agent_gradle_module_dir "$root" "$module")"
+  [[ -d "$module_dir" ]] || return 1
+  if agent_gradle_module_file_contains "$root" "$module" 'com\.android\.(application|library)'; then
+    return 0
+  fi
+  [[ -n "$(agent_find_name "$module_dir" 5 AndroidManifest.xml)" ]]
+}
+
+agent_android_module_variant_prefix() {
+  local root="$1"
+  local module="$2"
+  if agent_gradle_module_file_contains "$root" "$module" 'create\("prod"\)|prod[[:space:]]*[{]'; then
+    printf '%s' "Prod"
+  fi
+}
+
+agent_add_gradle_module_verification_commands() {
+  local root="$1"
+  local android_project="$2"
+  local module module_prefix added_any=false
+
+  if [[ ${#AGENT_MODULES[@]} -gt 0 ]]; then
+    for module in "${AGENT_MODULES[@]}"; do
+      case "$module" in
+        ""|"No Gradle modules detected") continue ;;
+      esac
+      if [[ "$android_project" == "true" ]] && agent_gradle_module_has_android_signal "$root" "$module"; then
+        module_prefix="$(agent_android_module_variant_prefix "$root" "$module")"
+        if [[ -n "$module_prefix" ]]; then
+          agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew $module:test${module_prefix}DebugUnitTest"
+          agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew $module:assemble${module_prefix}Debug"
+        else
+          agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew $module:testDebugUnitTest"
+          agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew $module:assembleDebug"
+        fi
+        added_any=true
+      elif agent_gradle_module_has_build_file "$root" "$module"; then
+        agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew $module:test"
+        added_any=true
+      fi
+    done
+  fi
+
+  if [[ "$added_any" != "true" ]]; then
+    if [[ "$android_project" == "true" ]]; then
+      agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew test"
+      agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew assembleDebug"
+    else
+      agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew test"
+    fi
+  fi
+}
+
 agent_detect_gradle_modules() {
   local root="$1"
   local settings_file=""
@@ -133,7 +216,7 @@ agent_detect_gradle_modules() {
     [[ -n "$module" ]] && agent_add_unique AGENT_MODULES "$module"
   done < <(
     grep -E '^[[:space:]]*include[[:space:]]*(\(|[[:space:]])' "$settings_file" 2>/dev/null |
-      grep -Eo ':[A-Za-z0-9_.-]+' |
+      grep -Eo ':[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)*' |
       sort -u
   )
 }
@@ -151,15 +234,14 @@ agent_detect_tech_stack() {
     else
       agent_add_unique AGENT_TECH_STACKS "android_java"
     fi
-    agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew test"
-    agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew assembleDebug"
+    agent_add_gradle_module_verification_commands "$root" true
   elif agent_has_file "$root" "settings.gradle" || agent_has_file "$root" "settings.gradle.kts" || agent_has_file "$root" "build.gradle" || agent_has_file "$root" "build.gradle.kts"; then
     if agent_any_named_file_contains "$root" 4 'org\.jetbrains\.kotlin|kotlin\("jvm"\)|kotlin\("multiplatform"\)' "build.gradle" "build.gradle.kts"; then
       agent_add_unique AGENT_TECH_STACKS "kotlin_gradle"
     else
       agent_add_unique AGENT_TECH_STACKS "java_gradle"
     fi
-    agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew test"
+    agent_add_gradle_module_verification_commands "$root" false
   fi
 
   if [[ -d "$root/wear" || -d "$root/wear-api" ]]; then
