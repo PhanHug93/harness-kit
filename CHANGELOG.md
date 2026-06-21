@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026.06.21.2 — Journal clarity + budget headroom
+
+- Made every generated mode contract, Claude command, Council/Karpathy
+  procedure, task-journal doc, and Codex mode seed name the concrete per-task
+  journal target (`docs/superpowers/plans/<topic>/journal.md`) while using
+  `docs/agent-configs/task-journal.md` only as the schema/guidance document.
+- Slimmed generated methodology docs without removing close-out requirements,
+  restoring full-workflow on-demand context headroom; the integration test now
+  fails if the estimate regresses above 6100 tokens.
+- Preserved filled onboarding/context files during harness upgrades:
+  `project-agent-context.md`, `project-brief.md`, and project tech-stack docs no
+  longer receive empty generated candidates once filled, and
+  `--apply-candidates` skips stale empty candidates for those files.
+- Made generated diff previews portable on macOS by using a `cp`/`find` copy
+  path instead of depending on Apple `openrsync`; one-shot upgrades now treat
+  diff preview failures as warnings and continue to generate candidates.
+- Hardened generated verifier smoke checks for non-interactive runs: CI-style
+  stdin skips the recursive bootstrap smoke, and interactive smoke uses
+  `timeout` when available.
+- Ignored `.bak.*` and `.generated.*` template leftovers in drift comparisons,
+  raised the default core startup budget to 4000 tokens, and restored
+  module-aware Gradle verification candidates for detected modules/flavors.
+
+## 2026.06.21.1 — Operationalize methodology + unified task-journal
+
+- Operationalized the three work-modes (Planning, Coding, Reviewing) and the
+  Council and Karpathy methodologies into runnable procedures, each closing out
+  by appending a structured entry to a durable, git-tracked task journal.
+- Added the task-journal working-memory doc (`docs/agent-configs/task-journal.md`):
+  a Layer 1, append-only, per-task record (`docs/superpowers/plans/<topic>/journal.md`)
+  that survives context compaction, with a conditional bridge to Layer 2
+  long-term memory (`memory_save`/`lesson_save`) at decided/done close-out.
+- Added `/council` and `/karpathy` commands and per-mode "Output" close-out
+  blocks in the mode contracts; documented the journal in the plans scaffold
+  README and added an AGENTS.md resume pointer plus AGENTS.md/CLAUDE.md
+  on-demand listings.
+- Reached Codex parity: the journal step is seeded into all six `codex-mode.sh`
+  mode prompts, and the journal doc plus the new commands are registered in the
+  doctor budget and file lists.
+- Added the task-journal doc to the recommended-context policy, an advisory
+  journal reminder to `agent-guard.sh` pre-final, and reduced the vestigial
+  council/karpathy/three-mode workflow template stubs to one-line pointers.
+
 ## 2026.06.16.5 — Semantic adversarial onboarding hardening
 
 - Hardened `scripts/agent-onboarding.sh check` so `filled` cannot pass when

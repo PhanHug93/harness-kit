@@ -120,7 +120,7 @@ Fill every section of `docs/agent-configs/project-brief.md` and remove its
 Finish by running `scripts/agent-onboarding.sh check`.
 EOF_CMD
 
-  write_file "$TARGET_DIR/docs/agent-configs/project-brief.md" <<'EOF_BRIEF'
+  write_user_owned_file "$TARGET_DIR/docs/agent-configs/project-brief.md" <<'EOF_BRIEF'
 # Project Brief
 
 <!-- UNFILLED -->
@@ -170,7 +170,7 @@ cite real files and commands rather than guesses. Keep the paired
 tooling checks.
 EOF_SPECS
 
-  write_file "$TARGET_DIR/docs/superpowers/specs/project-tech-stack.md" <<'EOF_TECH_STACK_SPEC'
+  write_user_owned_file "$TARGET_DIR/docs/superpowers/specs/project-tech-stack.md" <<'EOF_TECH_STACK_SPEC'
 # Project Tech Stack Spec
 
 <!-- UNFILLED -->
@@ -195,7 +195,7 @@ Last verified: <commit-sha> / <date>
 ## Open questions
 EOF_TECH_STACK_SPEC
 
-  write_file "$TARGET_DIR/docs/superpowers/specs/project-tech-stack.json" <<'EOF_TECH_STACK_CONTRACT'
+  write_user_owned_file "$TARGET_DIR/docs/superpowers/specs/project-tech-stack.json" <<'EOF_TECH_STACK_CONTRACT'
 {
   "schema": "agent-project-tech-stack/v1",
   "status": "unfilled",
@@ -221,5 +221,13 @@ EOF_TECH_STACK_CONTRACT
 Implementation plans live here, one folder per topic:
 `docs/superpowers/plans/<topic>/`. Each plan breaks a spec into bite-sized,
 verifiable tasks. Reference the plan path from commits/PRs for traceability.
+
+## Task journal
+
+Each task keeps a working-memory journal at `<topic>/journal.md` — append-only,
+one entry per mode step, following the schema in
+`docs/agent-configs/task-journal.md`. It survives context compaction and is the
+task's durable decision record. Keep entries concise; the journal stays in place
+when the task lands.
 EOF_PLANS
 }

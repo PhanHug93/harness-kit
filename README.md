@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.18.3`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.21.2`).
 
 ## What it generates
 
@@ -75,7 +75,7 @@ agent-init --apply-candidates
 One-shot safe upgrade from another machine/project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.18.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.21.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 The one-shot path installs the pinned release into `$HOME/dev/agent-bootstrap`,
@@ -97,7 +97,9 @@ Non-destructive by default: existing files are preserved; conflicts are written 
 Use `--diff` to preview generated-file drift, and `--apply-candidates` to promote
 reviewed bootstrap-generated candidates into place. Candidate promotion is
 scoped to the bootstrap generated-file allowlist, so unrelated project files such
-as `src/api.generated.ts` are left alone. `--skip-existing` skips existing files
+as `src/api.generated.ts` are left alone. Filled onboarding/context files such
+as `project-brief.md` and `project-tech-stack.json` are preserved even when an
+older empty candidate exists. `--skip-existing` skips existing files
 entirely; `--force` overwrites (a `.bak` is kept unless `--no-backup`). The
 generator never deletes target files outside explicit generated-candidate
 promotion.
@@ -106,7 +108,7 @@ promotion.
 
 The generated startup context is progressive: agents read a small always-on core
 first and load heavier docs/skills on demand. The generated `doctor` and verifier
-report an estimated token budget for the always-on core (target ≤3000) so harness
+report an estimated token budget for the always-on core (target ≤4000) so harness
 context cost stays visible before it becomes a recurring per-session tax. The
 reported core is `AGENTS.md`, `project-agent-context.md`, and the project brief;
 it excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`.

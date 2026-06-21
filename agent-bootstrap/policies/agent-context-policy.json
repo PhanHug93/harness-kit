@@ -14,7 +14,8 @@
     "docs/agent-configs/project-brief.md",
     "docs/superpowers/specs/project-tech-stack.json",
     "docs/superpowers/specs/project-tech-stack.md",
-    "docs/agent-configs/project-onboarding.md"
+    "docs/agent-configs/project-onboarding.md",
+    "docs/agent-configs/task-journal.md"
   ],
   "protected_paths": [
     {
