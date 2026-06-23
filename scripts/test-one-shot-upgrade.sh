@@ -156,6 +156,7 @@ fi
 need_contains "$run_out" "harness-kit one-shot upgrade" "one-shot run banner"
 need_contains "$run_out" "safe default: candidates were not auto-applied" "one-shot safe default"
 need_contains "$run_out" "Review generated candidates before applying them" "one-shot review guidance"
+need_contains "$run_out" "retrofit: wrap custom sections" "one-shot retrofit hint for pre-overlay files"
 
 [[ "$(git -C "$target_dir" branch --show-current)" == "codex/test-one-shot-upgrade" ]] ||
   fail "one-shot did not switch target onto upgrade branch"

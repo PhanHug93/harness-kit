@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.06.21.2`
+Version: `2026.06.22.2`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -57,6 +57,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | `lib/writers-runtime.sh` | Sourced library that emits target `scripts/*` runtime files. | Must match canonical home export. |
 | `lib/writers-docs.sh` | Sourced library that emits agent docs, tool entrypoints, and Codex files. | Must match canonical home export. |
 | `lib/onboarding.sh` | Sourced library that emits the onboarding scaffold (full workflow). | Must match canonical home export. |
+| `lib/overlays.sh` | Sourced USER-overlay engine; preserves keyed `<!-- BEGIN USER -->` regions across regeneration. | Must match canonical home export. |
 
 ## Guardrail
 

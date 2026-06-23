@@ -77,6 +77,22 @@ EOF_OVERLAY
   fi
 }
 
+compute_apply_state() {
+  local ro=false c d candidates
+  candidates="$(find "$TARGET_DIR" \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" \) -prune -o -type f -name '*.generated.*' -print 2>/dev/null)"
+  [[ -n "$candidates" ]] || { printf 'complete\n'; return 0; }
+  while IFS= read -r c; do
+    [[ -n "$c" ]] || continue
+    d="$(dirname "${c%.generated.*}")"
+    [[ -w "$d" ]] || ro=true
+  done <<< "$candidates"
+  if [[ "$ro" == "true" ]]; then
+    printf 'blocked-readonly\n'
+  else
+    printf 'pending\n'
+  fi
+}
+
 write_agent_bootstrap_lock() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
   local summary hash overlays overlay_json first saved_force saved_candidate
@@ -109,6 +125,7 @@ write_agent_bootstrap_lock() {
   "channel": "$AGENT_BOOTSTRAP_CHANNEL",
   "project_name": "$(json_escape "$PROJECT_NAME")",
   "generated_at": "$STAMP",
+  "apply_state": "$(compute_apply_state)",
   "rtk": {
     "required": true,
     "version": "$RTK_VERSION",

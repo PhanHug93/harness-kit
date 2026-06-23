@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.06.21.2"
+AGENT_BOOTSTRAP_VERSION="2026.06.22.2"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -24,6 +24,8 @@ BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 LIB_DIR="$BUNDLE_DIR/lib"
 # shellcheck source=agent-bootstrap/lib/core.sh
 source "$LIB_DIR/core.sh"
+# shellcheck source=agent-bootstrap/lib/overlays.sh
+source "$LIB_DIR/overlays.sh"
 # shellcheck source=agent-bootstrap/lib/detect.sh
 source "$LIB_DIR/detect.sh"
 # shellcheck source=agent-bootstrap/lib/render.sh
@@ -50,6 +52,7 @@ usage() {
     "  --skip-existing      Skip existing files instead of writing .generated candidates." \
     "  --refresh-lock       Refresh only docs/agent-configs/agent-bootstrap.lock.json." \
     "  --apply-candidates   Promote latest *.generated.* candidates into place." \
+    "  --cleanup-backups    Remove harness-stamped .bak/.generated leftovers." \
     "  --status             Report installed harness state for the target." \
     "  --first-10           Print the first 10 minutes operator/onboarding path." \
     "  --next               Alias for --first-10." \
@@ -96,6 +99,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --apply-candidates)
       ACTION="apply-candidates"
+      shift
+      ;;
+    --cleanup-backups)
+      ACTION="cleanup-backups"
       shift
       ;;
     --status)
@@ -220,7 +227,7 @@ fi
 
 if [[ "$WORKFLOW_EXPLICIT" == "false" ]]; then
   case "$ACTION" in
-    refresh-lock|status|first-10|diff|upgrade-plan|apply-candidates) resolve_workflow_from_lock ;;
+    refresh-lock|status|first-10|diff|upgrade-plan|apply-candidates|cleanup-backups) resolve_workflow_from_lock ;;
   esac
 fi
 
@@ -385,7 +392,8 @@ sanitize_for_diff() {
   local relpath="$1"
   local file="$2"
   if [[ "$relpath" == "docs/agent-configs/agent-bootstrap.lock.json" ]]; then
-    sed 's/"generated_at": "[^"]*"/"generated_at": "<generated_at>"/' "$file"
+    sed -e 's/"generated_at": "[^"]*"/"generated_at": "<generated_at>"/' \
+        -e 's/"apply_state": "[^"]*"/"apply_state": "<apply_state>"/' "$file"
   else
     cat "$file"
   fi | awk -v target="$TARGET_DIR" -v temp="${DIFF_TMP_TARGET:-}" -v target_private="/private$TARGET_DIR" -v temp_private="/private${DIFF_TMP_TARGET:-}" '
@@ -486,11 +494,12 @@ generated_file_allowlist() (
 )
 
 apply_generated_candidates() (
-  local candidate_list applied_list allowed_list candidate base rel_candidate rel_base applied_any
+  local candidate_list applied_list allowed_list candidate base rel_candidate rel_base applied_any skipped target_parent
   candidate_list="$(mktemp)"
   applied_list="$(mktemp)"
   allowed_list="$(mktemp)"
   applied_any=false
+  skipped=0
   trap 'rm -f "$candidate_list" "$applied_list" "$allowed_list"' EXIT HUP INT TERM
   generated_file_allowlist > "$allowed_list"
   find "$TARGET_DIR" \
@@ -516,6 +525,12 @@ apply_generated_candidates() (
       printf 'Skipped user-owned generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
       continue
     fi
+    target_parent="$(dirname "$base")"
+    if [[ ! -w "$target_parent" ]]; then
+      printf '  skipped (read-only): %s -> %s\n' "$rel_candidate" "$rel_base"
+      skipped=$((skipped + 1))
+      continue
+    fi
     applied_any=true
     if grep -Fxq "$base" "$applied_list"; then
       if [[ "$DRY_RUN" == "true" ]]; then
@@ -537,10 +552,56 @@ apply_generated_candidates() (
     printf '%s\n' "$base" >> "$applied_list"
   done < "$candidate_list"
 
-  if [[ "$applied_any" != "true" ]]; then
+  if [[ "$applied_any" != "true" && "$skipped" -eq 0 ]]; then
     printf 'No generated candidates to apply.\n'
   fi
+  if [[ "$skipped" -gt 0 ]]; then
+    printf 'Skipped %s candidate(s) in read-only directories; promote with write access.\n' "$skipped"
+  fi
 )
+
+cleanup_backups() {
+  local removed=0 f allowed_list relpath base rel_base should_remove
+  allowed_list="$(mktemp)"
+  generated_file_allowlist > "$allowed_list"
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    relpath="${f#"$TARGET_DIR"/}"
+    should_remove=false
+    case "$relpath" in
+      *.generated.*)
+        [[ "$relpath" =~ \.generated\.[0-9]{8}-[0-9]{6}$ ]] || continue
+        base="${f%.generated.*}"
+        rel_base="${base#"$TARGET_DIR"/}"
+        grep -Fxq "$rel_base" "$allowed_list" && should_remove=true
+        ;;
+      *.bak.*)
+        [[ "$relpath" =~ \.bak\.[0-9]{8}-[0-9]{6}$ ]] || continue
+        base="${f%.bak.*}"
+        rel_base="${base#"$TARGET_DIR"/}"
+        grep -Fxq "$rel_base" "$allowed_list" && should_remove=true
+        ;;
+    esac
+    [[ "$should_remove" == "true" ]] || continue
+    if [[ "$DRY_RUN" == "true" ]]; then
+      printf 'DRY-RUN remove %s\n' "$relpath"
+      removed=$((removed + 1))
+    else
+      if rm -f "$f"; then
+        printf 'Removed %s\n' "$relpath"
+        removed=$((removed + 1))
+      else
+        printf 'warn: could not remove %s\n' "$relpath" >&2
+      fi
+    fi
+  done < <(find "$TARGET_DIR" \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" \) -prune -o -type f \( -name '*.bak.*' -o -name '*.generated.*' \) -print 2>/dev/null)
+  if [[ "$removed" -eq 0 ]]; then
+    printf 'No harness-stamped .bak.* or .generated.* leftovers to clean.\n'
+  else
+    printf 'Cleaned %s harness leftover file(s).\n' "$removed"
+  fi
+  rm -f "$allowed_list"
+}
 
 print_upgrade_plan() {
   local status_fields
@@ -633,6 +694,10 @@ main() {
       ;;
     apply-candidates)
       apply_generated_candidates
+      exit 0
+      ;;
+    cleanup-backups)
+      cleanup_backups
       exit 0
       ;;
   esac

@@ -5,8 +5,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
 PROJECT_TECH_STACK_FILE="$PROJECT_ROOT/docs/superpowers/specs/project-tech-stack.json"
-CONTEXT_PACK="$PROJECT_ROOT/.agents/state/context-pack.json"
-ACK_LOG="$PROJECT_ROOT/.agents/state/guard-ack.log"
+# Resolve a usable state directory so the guard still works when .agents is
+# read-only (e.g. sandboxed runs). Order: $AGENT_STATE_DIR, .agents/state, then
+# a per-project dir under TMPDIR. Falls back to advisory-only if none is usable.
+agent_state_dir_usable() {
+  local d="$1" parent
+  if [[ -d "$d" ]]; then
+    [[ -w "$d" ]]
+    return
+  fi
+  parent="$(dirname "$d")"
+  while [[ ! -d "$parent" && "$parent" != "/" && "$parent" != "." ]]; do
+    parent="$(dirname "$parent")"
+  done
+  [[ -w "$parent" ]]
+}
+agent_resolve_state_dir() {
+  local candidate
+  for candidate in \
+    "${AGENT_STATE_DIR:-}" \
+    "$PROJECT_ROOT/.agents/state" \
+    "${TMPDIR:-/tmp}/agent-bootstrap-state/$(printf '%s' "$PROJECT_ROOT" | cksum | tr -d ' \t')"; do
+    [[ -n "$candidate" ]] || continue
+    if agent_state_dir_usable "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+if STATE_DIR="$(agent_resolve_state_dir)"; then
+  STATE_WRITABLE=true
+else
+  STATE_DIR="$PROJECT_ROOT/.agents/state"
+  STATE_WRITABLE=false
+fi
+CONTEXT_PACK="$STATE_DIR/context-pack.json"
+ACK_LOG="$STATE_DIR/guard-ack.log"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 
 REQUIRED_CONTEXT=()
@@ -17,7 +52,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final|status|doctor" \
+    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict]|status|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -420,6 +455,169 @@ protected_reason_for_path() {
   return 1
 }
 
+changed_protected_paths() {
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  local relpath match pattern reason
+  while IFS= read -r relpath; do
+    [[ -n "$relpath" ]] || continue
+    case "$relpath" in
+      .agents/*|.tools/*) continue ;;
+    esac
+    if match="$(protected_reason_for_path "$relpath")"; then
+      pattern="${match%%$'\t'*}"
+      if [[ "$match" == *$'\t'* ]]; then
+        reason="${match#*$'\t'}"
+      else
+        reason=""
+      fi
+      printf '%s\t%s\t%s\n' "$relpath" "$pattern" "$reason"
+    fi
+  done < <(git -C "$PROJECT_ROOT" diff --name-only HEAD -- 2>/dev/null || true)
+}
+
+latest_journal_closeout() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$PROJECT_ROOT" <<'PY'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+journals = sorted(
+    root.glob("docs/superpowers/plans/*/journal.md"),
+    key=lambda path: path.stat().st_mtime if path.exists() else 0,
+    reverse=True,
+)
+
+if not journals:
+    print("state\tnone")
+    return_code = 0
+    raise SystemExit(return_code)
+
+def emit(key, value):
+    print(f"{key}\t{str(value).replace(chr(9), ' ')}")
+
+path = journals[0]
+text = path.read_text(encoding="utf-8", errors="replace")
+entries = []
+current = []
+for line in text.splitlines():
+    if line.startswith("## "):
+        if current:
+            entries.append(current)
+        current = [line]
+    elif current:
+        current.append(line)
+if current:
+    entries.append(current)
+
+closeout = None
+for entry in entries:
+    fields = {}
+    for line in entry:
+        stripped = line.strip()
+        if not stripped.startswith("- ") or ":" not in stripped:
+            continue
+        key, value = stripped[2:].split(":", 1)
+        fields[key.strip()] = value.strip()
+    if fields.get("status") in {"decided", "done"}:
+        closeout = fields
+
+emit("journal", path.relative_to(root))
+if closeout is None:
+    emit("state", "no-closeout")
+    raise SystemExit(0)
+
+emit("state", "closeout")
+for key in ("status", "memory", "save_decision", "evidence", "recall_verified"):
+    emit(key, closeout.get(key, ""))
+PY
+}
+
+memory_gate_fail() {
+  local strict="$1"
+  shift
+  if [[ "$strict" == "true" && "$STATE_WRITABLE" == "true" ]]; then
+    fail "$*"
+  fi
+  warn "$*"
+}
+
+validate_memory_closeout() {
+  local strict="$1"
+  local changed_file="$2"
+  local high_risk=false
+  [[ -n "$changed_file" ]] && high_risk=true
+
+  local summary
+  summary="$(latest_journal_closeout || true)"
+  local journal_state="" journal_path="" status="" memory="" save_decision="" evidence="" recall_verified=""
+  local key value
+  while IFS=$'\t' read -r key value; do
+    case "$key" in
+      state) journal_state="$value" ;;
+      journal) journal_path="$value" ;;
+      status) status="$value" ;;
+      memory) memory="$value" ;;
+      save_decision) save_decision="$value" ;;
+      evidence) evidence="$value" ;;
+      recall_verified) recall_verified="$value" ;;
+    esac
+  done <<< "$summary"
+
+  case "$journal_state" in
+    none)
+      warn "no task journal found; memory close-out was not validated"
+      return 0
+      ;;
+    no-closeout)
+      warn "latest task journal has no decided/done entry; memory close-out was not validated${journal_path:+ ($journal_path)}"
+      return 0
+      ;;
+    closeout)
+      ;;
+    *)
+      warn "could not inspect task journal; memory close-out was not validated"
+      return 0
+      ;;
+  esac
+
+  if [[ -z "$memory" ]]; then
+    memory_gate_fail "$strict" "task journal decided/done entry missing memory:${journal_path:+ $journal_path}"
+  fi
+
+  if [[ "$high_risk" == "true" ]]; then
+    case "$recall_verified" in
+      yes|n/a|acked-deferred)
+        ;;
+      "")
+        memory_gate_fail "$strict" "protected-path diff requires recall_verified: yes|n/a|acked-deferred before pre-final${changed_file:+ (changed: $changed_file)}"
+        ;;
+      deferred:*)
+        memory_gate_fail "$strict" "protected-path diff cannot use recall_verified: deferred; use yes, n/a, or acked-deferred${changed_file:+ (changed: $changed_file)}"
+        ;;
+      *)
+        memory_gate_fail "$strict" "protected-path diff has invalid recall_verified value '$recall_verified'; use yes, n/a, or acked-deferred${changed_file:+ (changed: $changed_file)}"
+        ;;
+    esac
+  fi
+
+  if [[ -z "$save_decision" ]]; then
+    warn "task journal decided/done entry missing save_decision:${journal_path:+ $journal_path}"
+  fi
+  if [[ "$save_decision" == "saved" && ( -z "$evidence" || "$evidence" == "none" ) ]]; then
+    warn "task journal save_decision=saved should include evidence"
+  fi
+  case "$memory" in
+    ""|none|n/a) ;;
+    *)
+      if [[ -z "$evidence" || "$evidence" == "none" ]]; then
+        warn "task journal memory id should include evidence"
+      fi
+      ;;
+  esac
+}
+
 is_bootstrap_generated_base() {
   local relpath="$1"
   case "$relpath" in
@@ -475,6 +673,10 @@ append_ack_log() {
   local pattern="$2"
   local reason="$3"
   local ack="$4"
+  if [[ "$STATE_WRITABLE" != "true" ]]; then
+    warn "state dir not writable; skipping ack log"
+    return 0
+  fi
   mkdir -p "$(dirname "$ACK_LOG")"
   printf '%s\tpath=%s\tpattern=%s\treason=%s\tack=%s\n' \
     "$(utc_now)" \
@@ -561,6 +763,10 @@ ensure_required_context() {
 }
 
 write_context_pack() {
+  if [[ "$STATE_WRITABLE" != "true" ]]; then
+    warn "state dir not writable ($STATE_DIR); guard advisory-only, skipping context pack"
+    return 0
+  fi
   local policy_hash
   policy_hash="$(hash_file "$POLICY_FILE")"
   mkdir -p "$(dirname "$CONTEXT_PACK")"
@@ -581,6 +787,10 @@ write_context_pack() {
 }
 
 check_context_pack_freshness() {
+  if [[ "$STATE_WRITABLE" != "true" ]]; then
+    warn "state dir not writable; skipping context-pack freshness check (advisory)"
+    return 0
+  fi
   [[ -f "$CONTEXT_PACK" ]] || fail "missing context pack; run scripts/agent-guard.sh preflight"
   command -v python3 >/dev/null 2>&1 ||
     fail "python3 is required to verify context-pack freshness"
@@ -751,6 +961,25 @@ PY
 }
 
 pre_final() {
+  local strict=true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict)
+        strict=true
+        shift
+        ;;
+      --advisory)
+        strict=false
+        shift
+        ;;
+      -*)
+        fail "unknown pre-final option: $1"
+        ;;
+      *)
+        fail "pre-final does not accept path arguments"
+        ;;
+    esac
+  done
   load_policy
   check_context_pack_freshness
   local pending_candidate
@@ -758,8 +987,14 @@ pre_final() {
   if [[ -n "$pending_candidate" ]]; then
     warn "pending generated candidate requires review: $pending_candidate"
   fi
+  local protected_changes first_protected_change
+  protected_changes="$(changed_protected_paths || true)"
+  first_protected_change="$(printf '%s\n' "$protected_changes" | sed -n '1{s/\t/ /g;p;}')"
+  if [[ -n "$protected_changes" ]]; then
+    warn "protected-path changes require memory recall verification before completion"
+  fi
+  validate_memory_closeout "$strict" "$first_protected_change"
   printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
-  printf 'agent-guard: note — for a long or multi-step task, ensure the active journal (docs/superpowers/plans/*/journal.md) carries an up-to-date entry.\n'
 }
 
 status() {

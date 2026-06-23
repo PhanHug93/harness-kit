@@ -855,11 +855,33 @@ else
   ok "no pending generated candidates"
 fi
 
+lock_version="$(sed -n 's/.*"version": "\([^"]*\)".*/\1/p' "$ROOT_DIR/docs/agent-configs/agent-bootstrap.lock.json" 2>/dev/null | head -1)"
+if [[ -n "$lock_version" ]]; then
+  stale_version_refs=""
+  for version_file in README.md docs/superpowers/specs/project-tech-stack.json docs/agent-configs/project-brief.md; do
+    [[ -f "$ROOT_DIR/$version_file" ]] || continue
+    while IFS= read -r found_version; do
+      [[ -n "$found_version" && "$found_version" != "$lock_version" ]] &&
+        stale_version_refs="$stale_version_refs $version_file:$found_version"
+    done < <(grep -oE '20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]+' "$ROOT_DIR/$version_file" 2>/dev/null | sort -u)
+  done
+  if [[ -n "$stale_version_refs" ]]; then
+    warn "stale harness version references (lock is $lock_version):$stale_version_refs"
+  else
+    ok "harness version references match lock ($lock_version)"
+  fi
+fi
+
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   if "$ROOT_DIR/.codex/codex-mode.sh" doctor >/dev/null 2>&1; then
     ok "Codex helper doctor passes"
   else
-    bad "Codex helper doctor failed"
+    codex_candidate="$(find "$ROOT_DIR/.codex" -name '*.generated.*' -print 2>/dev/null | head -1)"
+    if [[ -n "$codex_candidate" && ! -w "$ROOT_DIR/.codex" ]]; then
+      warn "Codex helper doctor skipped: read-only .codex candidate unapplied (${codex_candidate#"$ROOT_DIR"/}); promote with write access"
+    else
+      bad "Codex helper doctor failed"
+    fi
   fi
 else
   ok "Codex helper doctor skipped for infra-only workflow"

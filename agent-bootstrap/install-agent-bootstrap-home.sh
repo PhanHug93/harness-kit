@@ -337,6 +337,7 @@ main() {
   copy_file "lib/writers-runtime.sh" "lib/writers-runtime.sh"
   copy_file "lib/writers-docs.sh" "lib/writers-docs.sh"
   copy_file "lib/onboarding.sh" "lib/onboarding.sh"
+  copy_file "lib/overlays.sh" "lib/overlays.sh"
   write_source_metadata
   init_history
 

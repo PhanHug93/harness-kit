@@ -474,7 +474,8 @@ for canonical_file in \
   lib/render.sh \
   lib/writers-runtime.sh \
   lib/writers-docs.sh \
-  lib/onboarding.sh; do
+  lib/onboarding.sh \
+  lib/overlays.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
@@ -820,6 +821,8 @@ need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "memor
 need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "falls back to 7 tools" "generated agentmemory limited MCP fallback warning"
 need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "agentmemory connect codex --with-hooks" "generated agentmemory Codex plugin hook setup"
 need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "npx skills add rohitg00/agentmemory" "generated agentmemory upstream native skills install"
+need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Memory Brief" "generated agentmemory memory brief discipline"
+need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Use a type-first shape" "generated agentmemory type-first storage discipline"
 need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Handoff Format" "generated agentmemory handoff protocol"
 [[ -f "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md" ]] || fail "full bootstrap did not generate doubt-driven skill"
 need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "CLAIM" "doubt-driven procedure"
@@ -850,6 +853,8 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/project-brief.md")" "<!-- UNFI
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/model-profiles.json")" '"schema": "agent-model-profiles/v1"' "full bootstrap model profiles schema"
 [[ -f "$TMP_DIR/docs/agent-configs/context-policy.json" ]] || fail "full bootstrap did not generate context policy"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/context-policy.json")" '"schema": "agent-context-policy/v1"' "full bootstrap context policy schema"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "save_decision" "task journal memory save triage field"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "recall_verified" "task journal high-risk memory recall verification field"
 [[ -x "$TMP_DIR/scripts/agent-guard.sh" ]] || fail "full bootstrap did not generate executable agent guard"
 [[ -x "$TMP_DIR/scripts/agent-onboarding.sh" ]] || fail "full bootstrap did not generate executable onboarding helper"
 [[ -f "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-context-policy-v1.schema.json" ]] || fail "full bootstrap did not generate context policy schema"
@@ -1074,6 +1079,241 @@ PY
 (cd "$GUARD_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-guard-doctor-readonly.out)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-doctor-readonly.out")" "agent guard check passes" "Codex doctor uses read-only agent guard check"
 [[ ! -e "$GUARD_DIR/.agents/state/context-pack.json" ]] || fail "Codex doctor created context-pack side effect"
+
+# pre-final enforces memory close-out only through the journal artifact. High-risk
+# is derived from git diff intersecting protected_paths, not agent self-report.
+MEM_GUARD_DIR="$FIXTURE_DIR/memory-prefinal"
+mkdir -p "$MEM_GUARD_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MEM_GUARD_DIR" --workflow full >/dev/null
+(
+  cd "$MEM_GUARD_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+)
+mkdir -p "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline"
+cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EOF_MEMORY_JOURNAL_NO_MEMORY'
+## 2099-01-01T00:00:00Z · coding · memory-discipline
+- status: done
+- context: memory close-out regression
+- next-action: none
+EOF_MEMORY_JOURNAL_NO_MEMORY
+if (cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-missing.out 2>"$TMP_DIR"/out/bootstrap-memory-missing.err); then
+  fail "pre-final accepted decided/done journal entry without memory field"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-missing.err")" "memory:" "pre-final missing memory field error"
+
+cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EOF_MEMORY_JOURNAL_NO_RECALL'
+## 2099-01-01T00:00:00Z · coding · memory-discipline
+- status: done
+- context: memory close-out regression
+- next-action: none
+- memory: none
+EOF_MEMORY_JOURNAL_NO_RECALL
+printf '\n# high-risk memory gate regression\n' >> "$MEM_GUARD_DIR/scripts/agent-hook.sh"
+if (cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-recall-missing.out 2>"$TMP_DIR"/out/bootstrap-memory-recall-missing.err); then
+  fail "pre-final accepted protected-path diff without recall_verified"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-recall-missing.err")" "recall_verified" "pre-final missing high-risk recall verification error"
+
+cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EOF_MEMORY_JOURNAL_DEFERRED'
+## 2099-01-01T00:00:00Z · coding · memory-discipline
+- status: done
+- context: memory close-out regression
+- next-action: none
+- memory: none
+- recall_verified: deferred: check later
+EOF_MEMORY_JOURNAL_DEFERRED
+if (cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-recall-deferred.out 2>"$TMP_DIR"/out/bootstrap-memory-recall-deferred.err); then
+  fail "pre-final accepted protected-path diff with deferred recall verification"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-recall-deferred.err")" "recall_verified" "pre-final rejects deferred high-risk recall verification"
+
+cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EOF_MEMORY_JOURNAL_NA'
+## 2099-01-01T00:00:00Z · coding · memory-discipline
+- status: done
+- context: memory close-out regression
+- next-action: none
+- memory: n/a
+- recall_verified: n/a
+EOF_MEMORY_JOURNAL_NA
+(cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-recall-na.out 2>"$TMP_DIR"/out/bootstrap-memory-recall-na.err)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-recall-na.out")" "pre-final ok" "pre-final accepts explicit n/a recall verification"
+
+cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EOF_MEMORY_JOURNAL_WARN'
+## 2099-01-01T00:00:00Z · coding · memory-discipline
+- status: done
+- context: memory close-out regression
+- next-action: none
+- memory: mem_123
+- recall_verified: yes
+- save_decision: saved
+- evidence: none
+EOF_MEMORY_JOURNAL_WARN
+(cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-warn.out 2>"$TMP_DIR"/out/bootstrap-memory-warn.err)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-warn.err")" "evidence" "pre-final warns on saved memory without evidence"
+
+# Read-only .agents must not break agent-guard: it falls back to a writable state dir.
+RO_GUARD_DIR="$FIXTURE_DIR/guard-readonly"
+mkdir -p "$RO_GUARD_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$RO_GUARD_DIR" --workflow full >/dev/null
+chmod -R a-w "$RO_GUARD_DIR/.agents"
+if ! (cd "$RO_GUARD_DIR" && AGENT_STATE_DIR="$RO_GUARD_DIR/.tools/agent-state" scripts/agent-guard.sh preflight >"$TMP_DIR"/out/guard-ro.out 2>&1); then
+  chmod -R u+w "$RO_GUARD_DIR/.agents"
+  fail "agent-guard preflight must not hard-fail under read-only .agents (see $TMP_DIR/out/guard-ro.out)"
+fi
+chmod -R u+w "$RO_GUARD_DIR/.agents"
+[[ -f "$RO_GUARD_DIR/.tools/agent-state/context-pack.json" ]] || fail "agent-guard must write context pack to fallback state dir"
+
+# Read-only target dir must not abort apply-candidates; it skips with guidance.
+RO_APPLY_DIR="$FIXTURE_DIR/apply-readonly"
+mkdir -p "$RO_APPLY_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$RO_APPLY_DIR" --workflow full >/dev/null
+printf 'x\n' > "$RO_APPLY_DIR/.codex/config.toml.generated.20990101-000000"
+chmod a-w "$RO_APPLY_DIR/.codex"
+if ! apply_ro_out="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$RO_APPLY_DIR" --apply-candidates 2>&1)"; then
+  chmod u+w "$RO_APPLY_DIR/.codex"
+  fail "apply-candidates must not abort on read-only dir"
+fi
+chmod u+w "$RO_APPLY_DIR/.codex"
+need_contains "$apply_ro_out" "skipped (read-only)" "apply reports read-only skip"
+
+# Read-only .codex with an unapplied candidate must not hard-fail verify (warn instead).
+RO_VERIFY_DIR="$FIXTURE_DIR/verify-readonly"
+mkdir -p "$RO_VERIFY_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$RO_VERIFY_DIR" --workflow full >/dev/null
+cp "$RO_VERIFY_DIR/.codex/codex-mode.sh" "$RO_VERIFY_DIR/.codex/codex-mode.sh.generated.20990101-000000"
+cat > "$RO_VERIFY_DIR/.codex/codex-mode.sh" <<'STUB'
+#!/usr/bin/env bash
+# codex-preflight stub for read-only verify regression
+[ "${1:-}" = "doctor" ] && exit 1
+exit 0
+STUB
+chmod +x "$RO_VERIFY_DIR/.codex/codex-mode.sh"
+chmod -R a-w "$RO_VERIFY_DIR/.codex"
+verify_ro_out="$(
+  cd "$RO_VERIFY_DIR"
+  AGENT_BOOTSTRAP_SKIP_SMOKE=1 bash scripts/verify-ai-deps.sh 2>&1 || true
+)"
+chmod -R u+w "$RO_VERIFY_DIR/.codex"
+need_contains "$verify_ro_out" "read-only .codex candidate unapplied" "verify warns on read-only codex candidate"
+need_contains "$verify_ro_out" "Fail: 0" "read-only codex candidate verify stays non-failing"
+case "$verify_ro_out" in
+  *"Codex helper doctor failed"*) fail "read-only codex candidate must not be a hard verify fail" ;;
+esac
+
+# apply_state recorded in the lock (complete -> pending -> blocked-readonly).
+AS_DIR="$FIXTURE_DIR/apply-state"
+mkdir -p "$AS_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$AS_DIR" --workflow full >/dev/null
+AS_LOCK="$AS_DIR/docs/agent-configs/agent-bootstrap.lock.json"
+need_contains "$(cat "$AS_LOCK")" '"apply_state": "complete"' "fresh lock apply_state complete"
+printf 'x\n' > "$AS_DIR/AGENTS.md.generated.20990101-000000"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$AS_DIR" --refresh-lock >/dev/null
+need_contains "$(cat "$AS_LOCK")" '"apply_state": "pending"' "writable candidate -> pending lock apply_state"
+rm -f "$AS_DIR/AGENTS.md.generated.20990101-000000"
+printf 'x\n' > "$AS_DIR/.codex/config.toml.generated.20990101-000000"
+chmod a-w "$AS_DIR/.codex"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$AS_DIR" --refresh-lock >/dev/null
+chmod u+w "$AS_DIR/.codex"
+need_contains "$(cat "$AS_LOCK")" '"apply_state": "blocked-readonly"' "read-only candidate -> blocked-readonly lock apply_state"
+rm -f "$AS_DIR/.codex/config.toml.generated.20990101-000000"
+
+# write_overlay_file must surface merge diagnostics instead of silently
+# degrading to the new template.
+MERGE_ERR_DIR="$FIXTURE_DIR/overlay-merge-stderr"
+mkdir -p "$MERGE_ERR_DIR"
+printf 'old\n' > "$MERGE_ERR_DIR/AGENTS.md"
+merge_err="$(
+  (
+    . "$BOOTSTRAP_BUNDLE/lib/core.sh"
+    TARGET_DIR="$MERGE_ERR_DIR"
+    DRY_RUN=false
+    BACKUP=false
+    FORCE=true
+    CANDIDATE_ON_CONFLICT=false
+    STAMP=20990101-000000
+    LAST_WRITTEN_FILE=""
+    # shellcheck disable=SC2329  # write_overlay_file invokes this override by name.
+    overlay_merge() {
+      printf 'synthetic overlay merge diagnostic\n' >&2
+      return 1
+    }
+    write_overlay_file "$MERGE_ERR_DIR/AGENTS.md" <<'EOF_MERGE_ERR'
+new
+EOF_MERGE_ERR
+  ) 2>&1 >/dev/null
+)"
+need_contains "$merge_err" "synthetic overlay merge diagnostic" "write_overlay_file surfaces overlay_merge stderr"
+
+# USER-overlay engine: keyed regions preserved, orphans parked (B1).
+. "$BOOTSTRAP_BUNDLE/lib/overlays.sh"
+ov_old="$TMP_DIR/ov-old.md"; ov_new="$TMP_DIR/ov-new.md"; ov_out="$TMP_DIR/ov-out.md"
+printf '<!-- BEGIN USER: agents:extra -->\nKEEP-ME\n<!-- END USER: agents:extra -->\n<!-- BEGIN USER: gone:key -->\nORPHAN-ME\n<!-- END USER: gone:key -->\n' > "$ov_old"
+printf 'top\n<!-- BEGIN USER: agents:extra -->\n<!-- hint -->\n<!-- END USER: agents:extra -->\nbottom\n' > "$ov_new"
+overlay_merge "$ov_old" "$ov_new" > "$ov_out"
+need_contains "$(cat "$ov_out")" "KEEP-ME" "overlay preserves filled USER region"
+need_contains "$(cat "$ov_out")" "USER (orphaned)" "overlay parks orphaned region"
+need_contains "$(cat "$ov_out")" "ORPHAN-ME" "overlay keeps orphaned body"
+printf '<!-- BEGIN USER: agents:extra -->\nKEEP-BEFORE\n<!-- END USER: agents:extra -->\nKEEP-AFTER\n<!-- END USER: agents:extra -->\n' > "$ov_old"
+printf '<!-- BEGIN USER: agents:extra -->\n<!-- hint -->\n<!-- END USER: agents:extra -->\n' > "$ov_new"
+overlay_merge "$ov_old" "$ov_new" > "$ov_out"
+need_contains "$(cat "$ov_out")" "KEEP-BEFORE" "overlay preserves body before embedded END marker"
+need_contains "$(cat "$ov_out")" "KEEP-AFTER" "overlay preserves body after embedded END marker"
+
+# AGENTS.md USER region survives regeneration (B2); empty render is idempotent (B3).
+OV_DIR="$FIXTURE_DIR/overlay-agents"
+mkdir -p "$OV_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$OV_DIR" --workflow full >/dev/null
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "BEGIN USER: agents:extra" "AGENTS.md ships USER anchor"
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "One branch, one commit" "AGENTS.md git workflow: one branch one commit"
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "feature/<slug>" "AGENTS.md git workflow: branch naming"
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "force-with-lease" "AGENTS.md git workflow: force-push safety"
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "No agent identity" "AGENTS.md git workflow: no agent info"
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "Conventional Commits" "AGENTS.md git workflow: commit format"
+cp "$OV_DIR/AGENTS.md" "$TMP_DIR/ov-agents-1"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$OV_DIR" --workflow full --force >/dev/null
+cmp -s "$TMP_DIR/ov-agents-1" "$OV_DIR/AGENTS.md" || fail "empty USER render must be idempotent"
+python3 - "$OV_DIR/AGENTS.md" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = s.replace("<!-- BEGIN USER: agents:extra -->\n", "<!-- BEGIN USER: agents:extra -->\n## Scheme Access Policy\nCUSTOM-KEEP\n", 1)
+open(p, "w", encoding="utf-8").write(s)
+PY
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$OV_DIR" --workflow full --force >/dev/null
+need_contains "$(cat "$OV_DIR/AGENTS.md")" "CUSTOM-KEEP" "AGENTS.md USER region survives regeneration"
+need_contains "$(cat "$OV_DIR/docs/agent-configs/agent-mode-contracts.md")" "BEGIN USER: mode-contracts:overrides" "mode-contracts ships USER anchor"
+need_contains "$(cat "$OV_DIR/.codex/README.md")" "BEGIN USER: codex-readme:notes" "codex README ships USER anchor"
+
+# --cleanup-backups removes .bak.* and .generated.* leftovers (C1).
+CB_DIR="$FIXTURE_DIR/cleanup-backups"
+mkdir -p "$CB_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CB_DIR" --workflow full >/dev/null
+touch "$CB_DIR/AGENTS.md.bak.20990101-000000" "$CB_DIR/AGENTS.md.generated.20990101-000000"
+touch "$CB_DIR/AGENTS.md.bak.before-upgrade" "$CB_DIR/AGENTS.md.generated.before-upgrade"
+touch "$CB_DIR/R.generated.swift"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CB_DIR" --cleanup-backups >/dev/null
+[[ ! -e "$CB_DIR/AGENTS.md.bak.20990101-000000" ]] || fail "--cleanup-backups must remove harness .bak.<stamp> files"
+[[ ! -e "$CB_DIR/AGENTS.md.generated.20990101-000000" ]] || fail "--cleanup-backups must remove harness .generated.* candidates"
+[[ -f "$CB_DIR/AGENTS.md.bak.before-upgrade" ]] || fail "--cleanup-backups must preserve user-named .bak.* files"
+[[ -f "$CB_DIR/AGENTS.md.generated.before-upgrade" ]] || fail "--cleanup-backups must preserve non-stamped .generated.* files"
+[[ -f "$CB_DIR/R.generated.swift" ]] || fail "--cleanup-backups must not remove project source files named *.generated.*"
+
+# verify warns on stale harness-version references (C2).
+SV_DIR="$FIXTURE_DIR/stale-version"
+mkdir -p "$SV_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$SV_DIR" --workflow full >/dev/null
+printf '\n<!-- harness ref 2026.06.18.3 -->\n' >> "$SV_DIR/docs/agent-configs/project-brief.md"
+sv_out="$(
+  cd "$SV_DIR"
+  AGENT_BOOTSTRAP_SKIP_SMOKE=1 bash scripts/verify-ai-deps.sh 2>&1 || true
+)"
+need_contains "$sv_out" "stale harness version" "verify warns on stale harness version references"
+need_contains "$sv_out" "Fail: 0" "stale harness version verify stays non-failing"
 
 python3 - "$GUARD_DIR/docs/agent-configs/context-policy.json" <<'PY'
 import json

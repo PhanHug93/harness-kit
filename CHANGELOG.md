@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026.06.22.2 — Sandbox-safe upgrades, USER overlays, hygiene + git workflow
+
+- **Sandbox-safe apply/guard/verify.** `agent-guard.sh` resolves a writable state
+  directory (`$AGENT_STATE_DIR` → `.agents/state` → `$TMPDIR`) and degrades to
+  advisory when none is writable; `--apply-candidates` skips read-only targets
+  with guidance instead of aborting and backs up best-effort; the generated
+  verifier downgrades a read-only-blocked Codex doctor candidate to a warning
+  rather than a hard failure.
+- **`apply_state` in the lock.** `agent-bootstrap.lock.json` records
+  `complete` | `pending` | `blocked-readonly`; it is normalized out of the
+  generated-file drift comparison.
+- **USER overlays.** A keyed `<!-- BEGIN USER: <key> --> … <!-- END USER -->`
+  engine (`lib/overlays.sh`) preserves project customizations across
+  regeneration for `AGENTS.md`, `.codex/README.md`, and
+  `agent-mode-contracts.md`; orphaned keys are parked, never dropped.
+- **Upgrade hygiene.** New `--cleanup-backups` removes harness-stamped
+  `.bak.<timestamp>`/`.generated.<timestamp>` leftovers; the verifier warns on
+  stale harness-version references; the one-shot upgrader flags pre-overlay files
+  to wrap in USER markers (retrofit).
+- **Git Workflow conventions** in generated `AGENTS.md` (infra + full):
+  one-branch-one-commit via `git commit --amend`; `feature/<slug>` and
+  `bugfix/<slug>` branch naming off the latest default branch; Conventional
+  Commits; no AI/agent identifiers or `Co-Authored-By` agent trailers in commits
+  or branch names; `--force-with-lease`-only amended pushes on your own branch;
+  and an explicit human-approval gate for commit/push/tag/merge.
+- **Memory discipline gate.** The generated agentmemory skill now teaches
+  type-first recall/save discipline and compact Memory Briefs; the task journal
+  close-out records save decisions, evidence, and protected-path recall
+  verification; `agent-guard.sh pre-final` validates the journal and fails
+  protected-path changes that skip recall verification.
+
 ## 2026.06.21.2 — Journal clarity + budget headroom
 
 - Made every generated mode contract, Claude command, Council/Karpathy
