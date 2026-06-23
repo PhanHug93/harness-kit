@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEFAULT_REPO_URL="https://github.com/PhanHug93/harness-kit.git"
-DEFAULT_REF="v2026.06.21.2"
+DEFAULT_REF="v2026.06.22.2"
 
 REPO_URL="${HARNESS_KIT_REPO_URL:-$DEFAULT_REPO_URL}"
 REF="${HARNESS_KIT_REF:-$DEFAULT_REF}"
@@ -27,7 +27,7 @@ generates *.generated.* candidates for conflicts, and does NOT apply candidates.
 
 Options:
   --repo URL             Harness-kit Git repo. Defaults to https://github.com/PhanHug93/harness-kit.git.
-  --ref REF              Harness-kit ref/tag. Defaults to v2026.06.21.2.
+  --ref REF              Harness-kit ref/tag. Defaults to v2026.06.22.2.
   --cache-dir DIR        Local source clone/cache. Defaults to $HOME/dev/harness-kit.
   --source-dir DIR       Use an existing harness-kit checkout instead of cloning/fetching.
   --home DIR             Canonical harness home. Defaults to $AGENT_BOOTSTRAP_HOME or $HOME/dev/agent-bootstrap.
@@ -278,6 +278,29 @@ if [[ -n "$candidate_list" ]]; then
   printf '%s\n' "$candidate_list"
 else
   log "none"
+fi
+
+# Retrofit hint: overlay-enabled files that predate USER markers (no
+# <!-- BEGIN USER --> region) but now have a candidate likely hold hand-merged
+# custom content. Tell the operator to wrap it so it survives future upgrades.
+overlay_retrofit=""
+for overlay_file in AGENTS.md .codex/README.md docs/agent-configs/agent-mode-contracts.md; do
+  [[ -f "$TARGET_DIR/$overlay_file" ]] || continue
+  found_overlay_candidate=false
+  for candidate_path in "$TARGET_DIR/$overlay_file".generated.*; do
+    if [[ -e "$candidate_path" ]]; then
+      found_overlay_candidate=true
+      break
+    fi
+  done
+  [[ "$found_overlay_candidate" == "true" ]] || continue
+  if grep -Fq '<!-- BEGIN USER:' "$TARGET_DIR/$overlay_file"; then
+    continue
+  fi
+  overlay_retrofit="$overlay_retrofit $overlay_file"
+done
+if [[ -n "$overlay_retrofit" ]]; then
+  log "retrofit: wrap custom sections with <!-- BEGIN USER: <key> --> ... <!-- END USER: <key> --> before applying so they survive future upgrades:$overlay_retrofit"
 fi
 
 cat <<EOF

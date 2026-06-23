@@ -84,7 +84,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.21.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.22.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the

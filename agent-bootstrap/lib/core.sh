@@ -37,9 +37,21 @@ ensure_dir() {
 
 backup_existing() {
   local path="$1"
-  if [[ -e "$path" && "$BACKUP" == "true" ]]; then
-    cp -p "$path" "$path.bak.$STAMP"
+  [[ -e "$path" && "$BACKUP" == "true" ]] || return 0
+  local dir
+  dir="$(dirname "$path")"
+  if [[ -w "$dir" ]] && cp -p "$path" "$path.bak.$STAMP" 2>/dev/null; then
+    return 0
   fi
+  # Read-only target dir (e.g. sandboxed .codex/.agents): back up to a writable
+  # side location instead of failing the whole run.
+  local fallback="${AGENT_STATE_DIR:-$TARGET_DIR/.tools/agent-state}/backups"
+  if mkdir -p "$fallback" 2>/dev/null && cp -p "$path" "$fallback/$(basename "$path").bak.$STAMP" 2>/dev/null; then
+    log "backup (fallback): $fallback/$(basename "$path").bak.$STAMP"
+    return 0
+  fi
+  log "warn: could not back up $path (read-only); proceeding"
+  return 0
 }
 
 bootstrap_relpath_for() {
@@ -153,6 +165,22 @@ write_file() {
   mv "$tmp" "$final_path"
   LAST_WRITTEN_FILE="$final_path"
   record_generated_file "$final_path"
+}
+
+write_overlay_file() {
+  local path="$1" tmp_new merged
+  tmp_new="$(mktemp)"
+  cat > "$tmp_new"
+  if [[ -f "$path" ]]; then
+    merged="${tmp_new}.merged"
+    if overlay_merge "$path" "$tmp_new" > "$merged" && [[ -s "$merged" ]]; then
+      mv "$merged" "$tmp_new"
+    else
+      rm -f "$merged"
+    fi
+  fi
+  write_file "$path" < "$tmp_new"
+  rm -f "$tmp_new"
 }
 
 copy_bundle_file() {

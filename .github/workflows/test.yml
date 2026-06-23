@@ -48,6 +48,7 @@ jobs:
               agent-bootstrap/agent-guard.sh \
               agent-bootstrap/verify-ai-deps.sh \
               agent-bootstrap/lib/core.sh \
+              agent-bootstrap/lib/overlays.sh \
               agent-bootstrap/lib/detect.sh \
               agent-bootstrap/lib/render.sh \
               agent-bootstrap/lib/writers-runtime.sh \
