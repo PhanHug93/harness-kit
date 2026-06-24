@@ -186,7 +186,7 @@ agent-init --apply-candidates
 One-shot safe upgrade for an old project on another machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.22.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 That script installs the pinned harness release, creates
@@ -312,6 +312,17 @@ Generated full-workflow projects use progressive disclosure:
 core startup tokens and on-demand full-workflow tokens. The core startup budget
 is 3k estimated tokens; the full-workflow on-demand budget is 6.5k estimated
 tokens. Estimates use a portable heuristic: max(chars/4, words*1.3).
+
+## Closed-loop pre-final
+
+The detector emits verification candidates as structured JSON. The standard local close-out path is:
+
+```bash
+scripts/agent-guard.sh preflight
+scripts/agent-guard.sh pre-final --run-verify
+```
+
+`pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
 
 ## Agent Guard Lite
 

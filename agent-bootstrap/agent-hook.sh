@@ -110,7 +110,44 @@ hash_text() {
 
 lock_value() {
   local key="$1"
-  sed -n "s/^[[:space:]]*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$LOCK_FILE" | head -n1
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required to read bootstrap lock"
+  python3 - "$LOCK_FILE" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path, wanted = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+
+def walk(value):
+    if isinstance(value, dict):
+        if wanted in value:
+            found = value[wanted]
+            if isinstance(found, str):
+                print(found)
+                return True
+            if isinstance(found, bool):
+                print("true" if found else "false")
+                return True
+            if isinstance(found, (int, float)):
+                print(found)
+                return True
+        for child in value.values():
+            if walk(child):
+                return True
+    elif isinstance(value, list):
+        for child in value:
+            if walk(child):
+                return True
+    return False
+
+
+walk(document)
+PY
 }
 
 verify_detector_lock() {

@@ -43,6 +43,11 @@ fi
 CONTEXT_PACK="$STATE_DIR/context-pack.json"
 ACK_LOG="$STATE_DIR/guard-ack.log"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
+VERIFY_REPORT="$STATE_DIR/last-verify-report.json"
+VERIFY_LOG_DIR="$STATE_DIR/verify-logs"
+VERIFY_TIMEOUT_SECONDS="${AGENT_GUARD_VERIFY_TIMEOUT_SECONDS:-900}"
+VERIFY_SCOPE_DEFAULT="${AGENT_GUARD_VERIFY_SCOPE:-fast}"
+SESSION_EVENTS="$STATE_DIR/session-events.jsonl"
 
 REQUIRED_CONTEXT=()
 RECOMMENDED_CONTEXT=()
@@ -52,7 +57,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict]|status|doctor" \
+    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|status|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -960,8 +965,269 @@ PY
   sed -n 's/.*"policy_sha256":"\([^"]*\)".*/\1/p' "$CONTEXT_PACK" | head -n1
 }
 
+lock_value() {
+  local key="$1"
+  local file="$PROJECT_ROOT/docs/agent-configs/agent-bootstrap.lock.json"
+  [[ -f "$file" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required to read bootstrap lock"
+  python3 - "$file" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path, wanted = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+
+def walk(value):
+    if isinstance(value, dict):
+        if wanted in value:
+            found = value[wanted]
+            if isinstance(found, str):
+                print(found)
+                return True
+            if isinstance(found, bool):
+                print("true" if found else "false")
+                return True
+            if isinstance(found, (int, float)):
+                print(found)
+                return True
+        for child in value.values():
+            if walk(child):
+                return True
+    elif isinstance(value, list):
+        for child in value:
+            if walk(child):
+                return True
+    return False
+
+
+walk(document)
+PY
+}
+
+check_detector_summary_drift() {
+  local strict="$1"
+  [[ -x "$DETECTOR" ]] || { warn "missing detector; skipping stack drift check"; return 0; }
+  local expected actual summary
+  expected="$(lock_value detector_summary_sha256)"
+  [[ -n "$expected" ]] || { warn "missing detector_summary_sha256 in bootstrap lock"; return 0; }
+  summary="$("$DETECTOR" --summary 2>/dev/null || true)"
+  actual="$(printf '%s' "$summary" | hash_text)"
+  if [[ "$expected" != "$actual" ]]; then
+    if [[ "$strict" == "true" ]]; then
+      fail "detector summary drifted from bootstrap lock; run scripts/detect-agent-tech-stack.sh --markdown and refresh with bash scripts/bootstrap-multi-agent-project.sh --refresh-lock"
+    fi
+    warn "detector summary drifted from bootstrap lock; refresh intentionally before completion"
+  fi
+}
+
+append_pre_final_event() {
+  local status="$1"
+  local verification_ran="${2:-false}"
+  [[ "$STATE_WRITABLE" == "true" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" STATUS_VALUE="$status" VERIFICATION_RAN="$verification_ran" python3 - <<'PY'
+import json
+import os
+import pathlib
+import time
+
+events_path = pathlib.Path(os.environ["SESSION_EVENTS"])
+verify_path = pathlib.Path(os.environ["VERIFY_REPORT"])
+ran = os.environ.get("VERIFICATION_RAN") == "true"
+verification = {"ran": ran, "available": False}
+if ran and verify_path.is_file():
+    try:
+        doc = json.loads(verify_path.read_text(encoding="utf-8"))
+        verification = {"ran": True, "summary": doc.get("summary", {}), "available": True, "report_path": str(verify_path)}
+    except Exception as exc:
+        verification = {"ran": True, "available": False, "error": str(exc)}
+
+event = {
+    "schema": "agent-guard-event/v1",
+    "event": "pre_final",
+    "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "status": os.environ["STATUS_VALUE"],
+    "verification": verification,
+}
+events_path.parent.mkdir(parents=True, exist_ok=True)
+with events_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+PY
+}
+
+# Runnable vs placeholder/full-scope classification is centralized in the Python
+# runner below (single source of truth): a command is skipped when it is empty,
+# contains a token-shaped placeholder such as `<scheme>`, or starts with
+# "Add project-specific"; full-class build commands are skipped under the
+# default `fast` scope.
+run_detected_verification() {
+  local strict="$1"
+  local verify_scope="$2"
+  if [[ "$STATE_WRITABLE" != "true" ]]; then
+    warn "state dir not writable; skipping verification execution (advisory)"
+    return 0
+  fi
+  [[ -x "$DETECTOR" ]] || { warn "missing detector; skipping verification execution"; return 0; }
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required to run detected verification"
+  mkdir -p "$VERIFY_LOG_DIR"
+  local detector_json code=0
+  detector_json="$("$DETECTOR" --json 2>/dev/null || true)"
+  DETECTOR_JSON="$detector_json" \
+  VERIFY_REPORT="$VERIFY_REPORT" \
+  VERIFY_LOG_DIR="$VERIFY_LOG_DIR" \
+  VERIFY_TIMEOUT_SECONDS="$VERIFY_TIMEOUT_SECONDS" \
+  VERIFY_SCOPE="$verify_scope" \
+  PROJECT_ROOT="$PROJECT_ROOT" \
+  python3 - <<'PY' || code=$?
+import json
+import os
+import pathlib
+import re
+import signal
+import subprocess
+import sys
+import time
+
+root = pathlib.Path(os.environ["PROJECT_ROOT"])
+report_path = pathlib.Path(os.environ["VERIFY_REPORT"])
+log_dir = pathlib.Path(os.environ["VERIFY_LOG_DIR"])
+timeout = int(os.environ["VERIFY_TIMEOUT_SECONDS"])
+scope = os.environ["VERIFY_SCOPE"]
+try:
+    detection = json.loads(os.environ.get("DETECTOR_JSON") or "{}")
+except Exception as exc:
+    print(f"agent-guard: ERROR: detector JSON is invalid: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+commands = detection.get("verification_commands")
+if not isinstance(commands, list):
+    print("agent-guard: ERROR: detector JSON has no verification_commands array", file=sys.stderr)
+    sys.exit(2)
+
+log_dir.mkdir(parents=True, exist_ok=True)
+results = []
+summary = {"pass": 0, "fail": 0, "skipped": 0}
+placeholder_token = re.compile(r"<[A-Za-z0-9_.:-]+>")
+
+
+def path_for_report(path):
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def command_class(command):
+    lowered = command.lower()
+    if (
+        " assemble" in lowered
+        or ":assemble" in lowered
+        or " npm run build" in f" {lowered}"
+        or lowered.endswith(" build")
+        or " flutter build" in f" {lowered}"
+        or "xcodebuild" in lowered
+        or " compile" in lowered
+        or ":compile" in lowered
+    ):
+        return "full"
+    return "fast"
+
+
+for index, command in enumerate(commands, 1):
+    if (
+        not isinstance(command, str)
+        or not command
+        or placeholder_token.search(command)
+        or command.startswith("Add project-specific")
+    ):
+        summary["skipped"] += 1
+        results.append({"command": command, "status": "skipped", "reason": "placeholder_or_non_runnable"})
+        print(f"agent-guard: warn: skipped verification command: {command}", file=sys.stderr)
+        continue
+    klass = command_class(command)
+    if scope == "fast" and klass == "full":
+        summary["skipped"] += 1
+        results.append({"command": command, "status": "skipped", "reason": "scope_fast", "class": klass})
+        print(f"agent-guard: warn: skipped full-scope verification command: {command}", file=sys.stderr)
+        continue
+    started = time.time()
+    log_path = log_dir / f"verify-{int(started)}-{index}.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        log.write(f"$ {command}\n")
+        process = subprocess.Popen(
+            command,
+            cwd=root,
+            shell=True,
+            text=True,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            exit_code = process.wait(timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            exit_code = 124
+            timed_out = True
+            log.write(f"\nTIMEOUT after {timeout}s\n")
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+    duration_ms = int((time.time() - started) * 1000)
+    if exit_code == 0:
+        summary["pass"] += 1
+        status = "pass"
+    else:
+        summary["fail"] += 1
+        status = "timeout" if timed_out else "fail"
+    results.append({
+        "command": command,
+        "class": klass,
+        "status": status,
+        "exit_code": exit_code,
+        "duration_ms": duration_ms,
+        "log_path": path_for_report(log_path),
+    })
+
+report = {
+    "schema": "agent-guard-verification/v1",
+    "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "scope": scope,
+    "summary": summary,
+    "commands": results,
+}
+report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+if summary["fail"]:
+    print(f"agent-guard: ERROR: verification failed ({summary['fail']} failed, {summary['pass']} passed, {summary['skipped']} skipped)", file=sys.stderr)
+    sys.exit(1)
+print(f"agent-guard: verification ok ({summary['pass']} passed, {summary['skipped']} skipped)")
+PY
+  if [[ "$code" -ne 0 ]]; then
+    if [[ "$strict" == "true" ]]; then
+      return "$code"
+    fi
+    warn "verification failed in advisory mode"
+  fi
+}
+
 pre_final() {
   local strict=true
+  local run_verify=false
+  local verify_scope="$VERIFY_SCOPE_DEFAULT"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --strict)
@@ -971,6 +1237,18 @@ pre_final() {
       --advisory)
         strict=false
         shift
+        ;;
+      --run-verify)
+        run_verify=true
+        shift
+        ;;
+      --verify-scope)
+        verify_scope="${2:-}"
+        case "$verify_scope" in
+          fast|full) ;;
+          *) fail "--verify-scope must be fast or full" ;;
+        esac
+        shift 2
         ;;
       -*)
         fail "unknown pre-final option: $1"
@@ -982,6 +1260,7 @@ pre_final() {
   done
   load_policy
   check_context_pack_freshness
+  check_detector_summary_drift "$strict"
   local pending_candidate
   pending_candidate="$(pending_bootstrap_generated_candidate || true)"
   if [[ -n "$pending_candidate" ]]; then
@@ -994,6 +1273,10 @@ pre_final() {
     warn "protected-path changes require memory recall verification before completion"
   fi
   validate_memory_closeout "$strict" "$first_protected_change"
+  if [[ "$run_verify" == "true" ]]; then
+    run_detected_verification "$strict" "$verify_scope"
+  fi
+  append_pre_final_event "pass" "$run_verify"
   printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
 }
 

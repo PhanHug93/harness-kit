@@ -263,3 +263,10 @@ PY
   value="${value//$'\t'/\\t}"
   printf '%s' "$value"
 }
+
+render_bundle_template() {
+  local relative="$1"
+  local template_path="$BUNDLE_DIR/$relative"
+  [[ -f "$template_path" ]] || fail "missing bundle template: $relative"
+  cat "$template_path"
+}

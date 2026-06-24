@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEFAULT_REPO_URL="https://github.com/PhanHug93/harness-kit.git"
-DEFAULT_REF="v2026.06.22.2"
+DEFAULT_REF="v2026.06.24.1"
 
 REPO_URL="${HARNESS_KIT_REPO_URL:-$DEFAULT_REPO_URL}"
 REF="${HARNESS_KIT_REF:-$DEFAULT_REF}"
@@ -27,7 +27,7 @@ generates *.generated.* candidates for conflicts, and does NOT apply candidates.
 
 Options:
   --repo URL             Harness-kit Git repo. Defaults to https://github.com/PhanHug93/harness-kit.git.
-  --ref REF              Harness-kit ref/tag. Defaults to v2026.06.22.2.
+  --ref REF              Harness-kit ref/tag. Defaults to v2026.06.24.1.
   --cache-dir DIR        Local source clone/cache. Defaults to $HOME/dev/harness-kit.
   --source-dir DIR       Use an existing harness-kit checkout instead of cloning/fetching.
   --home DIR             Canonical harness home. Defaults to $AGENT_BOOTSTRAP_HOME or $HOME/dev/agent-bootstrap.

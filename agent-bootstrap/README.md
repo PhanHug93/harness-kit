@@ -67,6 +67,17 @@ pinned `rtk` download and checksum verification. The rtk version is hard-pinned
 on purpose so the kit stays reproducible across machines and future upstream
 releases.
 
+### Closed-loop pre-final
+
+The detector emits verification candidates as structured JSON. The standard local close-out path is:
+
+```bash
+scripts/agent-guard.sh preflight
+scripts/agent-guard.sh pre-final --run-verify
+```
+
+`pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
+
 Inspect an existing target before upgrading:
 
 ```bash
@@ -84,7 +95,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.22.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the

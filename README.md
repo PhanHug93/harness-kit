@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.22.2`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.24.1`).
 
 ## What it generates
 
@@ -75,7 +75,7 @@ agent-init --apply-candidates
 One-shot safe upgrade from another machine/project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.22.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 The one-shot path installs the pinned release into `$HOME/dev/agent-bootstrap`,
@@ -135,6 +135,17 @@ until rerun with `--ack <reason>` and records the acknowledgement locally, and
 completion claim. Generated Claude hooks route `Edit`/`Write`/`MultiEdit`
 through the same path-aware guard. It is a thin enforcement layer, not a daemon
 or broker, and not a security boundary for arbitrary Bash commands.
+
+### Closed-loop pre-final
+
+The detector emits verification candidates as structured JSON. The standard local close-out path is:
+
+```bash
+scripts/agent-guard.sh preflight
+scripts/agent-guard.sh pre-final --run-verify
+```
+
+`pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
 
 ## Contracts and schemas
 

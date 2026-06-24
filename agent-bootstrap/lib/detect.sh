@@ -13,7 +13,7 @@ emit_tech_stack_lib() {
 # Shared tech-stack detection library for agent bootstrap/runtime scripts.
 # Keep this file portable: bash 3.2 compatible, no repo-specific paths.
 
-AGENT_TECH_STACK_LIB_VERSION="2026.05.12.3"
+AGENT_TECH_STACK_LIB_VERSION="2026.06.24.1"
 
 agent_reset_detection() {
   AGENT_TECH_STACKS=()
@@ -400,6 +400,43 @@ agent_print_summary() {
   printf 'modules=%s\n' "${AGENT_MODULES[*]}"
   printf 'verification_commands=%s\n' "${AGENT_VERIFY_COMMANDS[*]}"
   printf 'warnings=%s\n' "${AGENT_WARNINGS[*]:-}"
+}
+
+agent_json_escape() {
+  JSON_ESCAPE_VALUE="$1" python3 - <<'PY'
+import json
+import os
+print(json.dumps(os.environ.get("JSON_ESCAPE_VALUE", ""), ensure_ascii=False)[1:-1], end="")
+PY
+}
+
+agent_print_json_array() {
+  local first=true
+  local item
+  printf '['
+  for item in "$@"; do
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      printf ','
+    fi
+    printf '"%s"' "$(agent_json_escape "$item")"
+  done
+  printf ']'
+}
+
+agent_print_json() {
+  printf '{"schema":"agent-tech-stack-detection/v1"'
+  printf ',"tech_stack_lib_version":"%s"' "$(agent_json_escape "$AGENT_TECH_STACK_LIB_VERSION")"
+  printf ',"tech_stacks":'
+  agent_print_json_array ${AGENT_TECH_STACKS[@]+"${AGENT_TECH_STACKS[@]}"}
+  printf ',"modules":'
+  agent_print_json_array ${AGENT_MODULES[@]+"${AGENT_MODULES[@]}"}
+  printf ',"verification_commands":'
+  agent_print_json_array ${AGENT_VERIFY_COMMANDS[@]+"${AGENT_VERIFY_COMMANDS[@]}"}
+  printf ',"warnings":'
+  agent_print_json_array ${AGENT_WARNINGS[@]+"${AGENT_WARNINGS[@]}"}
+  printf '}\n'
 }
 
 agent_print_markdown() {
