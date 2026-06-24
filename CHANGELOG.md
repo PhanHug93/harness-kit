@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026.06.24.1 — Harness closed-loop verification
+
+- **Closed-loop pre-final verification.** `agent-guard.sh pre-final --run-verify`
+  consumes detector JSON, runs concrete fast verification commands by default,
+  records per-command results, and leaves full/build commands behind an explicit
+  `--verify-scope full` opt-in.
+- **Stack drift and telemetry.** `pre-final` now checks the live detector summary
+  against the bootstrap lock and appends compact JSONL session events without
+  reusing stale verification reports for no-verify invocations.
+- **Tool-surface parity.** A shared managed tool contract is rendered into
+  Claude, Gemini, Windsurf, and Cursor entrypoints, with a synced template
+  catalog mirror and regression coverage.
+- **Sandbox-safe hardening.** Verification reports work when state lives outside
+  the project through `$AGENT_STATE_DIR` or TMPDIR fallback, and integration
+  tests use a fixture-local `npm` shim instead of requiring npm on PATH.
+
 ## 2026.06.22.2 — Sandbox-safe upgrades, USER overlays, hygiene + git workflow
 
 - **Sandbox-safe apply/guard/verify.** `agent-guard.sh` resolves a writable state

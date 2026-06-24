@@ -31,7 +31,7 @@ need_contains() {
   local haystack="$1"
   local needle="$2"
   local label="$3"
-  if ! printf '%s' "$haystack" | grep -Fq -- "$needle"; then
+  if ! grep -Fq -- "$needle" <<<"$haystack"; then
     fail "$label missing '$needle' in: $haystack"
   fi
 }
@@ -66,6 +66,43 @@ printf '%s\n' "openrsync: mkstempsock: Invalid argument" >&2
 exit 23
 EOF_FAKE_RSYNC
   chmod +x "$fakebin/rsync"
+}
+
+make_fake_npm() {
+  local fakebin="$1"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/npm" <<'EOF_FAKE_NPM'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  test)
+    if [[ -x scripts/verify-fail.sh ]]; then
+      bash scripts/verify-fail.sh
+    elif [[ -x scripts/verify-ok.sh ]]; then
+      bash scripts/verify-ok.sh
+    else
+      printf '%s\n' "fake npm: no test shim found" >&2
+      exit 127
+    fi
+    ;;
+  run)
+    case "${2:-}" in
+      build)
+        bash scripts/verify-build.sh
+        ;;
+      *)
+        printf '%s\n' "fake npm: unsupported run target: ${2:-}" >&2
+        exit 127
+        ;;
+    esac
+    ;;
+  *)
+    printf '%s\n' "fake npm: unsupported command: ${1:-}" >&2
+    exit 127
+    ;;
+esac
+EOF_FAKE_NPM
+  chmod +x "$fakebin/npm"
 }
 
 estimate_tokens_for_file() {
@@ -461,6 +498,7 @@ for canonical_file in \
   schemas/agent-bootstrap-status-v1.schema.json \
   schemas/agent-bootstrap-verify-report-v1.schema.json \
   templates/base/README.md \
+  templates/tool-contract/shared.md \
   templates/overlays/android_kotlin.md \
   templates/overlays/generic.md \
   templates/overlays/ios_swift.md \
@@ -780,6 +818,13 @@ need_contains "$user_owned_apply" "Skipped user-owned generated candidate docs/a
 need_contains "$(cat "$USER_OWNED_DIR/docs/agent-configs/project-brief.md")" "Filled project context" "filled user-owned brief preserved by apply-candidates"
 
 cmp -s "$SHARED_LIB" "$TMP_DIR/scripts/agent-tech-stack-lib.sh" || fail "generated tech-stack lib drifted from source lib"
+
+# Task 7: the docs template mirror is mechanically synced from agent-bootstrap/templates.
+# Checked before the transient .bak/.generated drift-test artifacts below, since
+# sync --check uses a plain recursive diff.
+(cd "$ROOT_DIR" && scripts/sync-template-catalog.sh --check) \
+  || fail "template catalog mirror drifted from agent-bootstrap/templates; run scripts/sync-template-catalog.sh"
+
 source_template_bak="$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md.bak.test-$$"
 bundle_template_generated="$BOOTSTRAP_BUNDLE/templates/base/README.md.generated.test-$$"
 printf '%s\n' "temporary backup must be ignored by drift tests" > "$source_template_bak"
@@ -793,6 +838,7 @@ while IFS= read -r bundle_template; do
   relative_template="${bundle_template#"$BOOTSTRAP_BUNDLE"/templates/}"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
 done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
+
 for runtime_snapshot in \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
@@ -834,6 +880,39 @@ need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Read on demand" "AGENTS lazy contex
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
 need_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read on demand" "CLAUDE lazy context disclosure"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"
+
+# Task 6: shared tool-entrypoint contract rendered identically into every surface.
+extract_tool_contract() {
+  local file="$1"
+  sed -n '/BEGIN MANAGED: multi-agent-bootstrap:tool-contract/,/END MANAGED: multi-agent-bootstrap:tool-contract/p' "$file"
+}
+
+claude_contract="$(extract_tool_contract "$TMP_DIR/CLAUDE.md")"
+gemini_contract="$(extract_tool_contract "$TMP_DIR/GEMINI.md")"
+windsurf_contract="$(extract_tool_contract "$TMP_DIR/.windsurfrules")"
+cursor_contract="$(extract_tool_contract "$TMP_DIR/.cursor/rules/agent-conventions.mdc")"
+[[ -n "$claude_contract" ]] || fail "CLAUDE.md missing managed tool contract"
+[[ "$claude_contract" == "$gemini_contract" ]] || fail "GEMINI.md tool contract drifted from CLAUDE.md"
+[[ "$claude_contract" == "$windsurf_contract" ]] || fail "Windsurf tool contract drifted from CLAUDE.md"
+[[ "$claude_contract" == "$cursor_contract" ]] || fail "Cursor tool contract drifted from CLAUDE.md"
+need_contains "$claude_contract" "scripts/agent-guard.sh pre-final --run-verify" "tool contract close-out command"
+
+infra_claude_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/CLAUDE.md")"
+infra_gemini_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/GEMINI.md")"
+infra_windsurf_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/.windsurfrules")"
+infra_cursor_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/.cursor/rules/agent-conventions.mdc")"
+[[ -n "$infra_claude_contract" ]] || fail "root-direct CLAUDE.md missing managed tool contract"
+[[ "$infra_claude_contract" == "$infra_gemini_contract" ]] || fail "root-direct GEMINI.md tool contract drifted from CLAUDE.md"
+[[ "$infra_claude_contract" == "$infra_windsurf_contract" ]] || fail "root-direct Windsurf tool contract drifted from CLAUDE.md"
+[[ "$infra_claude_contract" == "$infra_cursor_contract" ]] || fail "root-direct Cursor tool contract drifted from CLAUDE.md"
+need_contains "$infra_claude_contract" "scripts/agent-guard.sh pre-final --run-verify" "root-direct tool contract close-out command"
+
+# Task 8: generated guidance and READMEs document the closed-loop close-out path.
+need_contains "$(cat "$TMP_DIR/AGENTS.md")" "scripts/agent-guard.sh pre-final --run-verify" "AGENTS close-out verify command"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "verification report" "task journal verification evidence guidance"
+need_contains "$(cat "$ROOT_DIR/README.md")" "pre-final --run-verify" "root README closed-loop guidance"
+need_contains "$(cat "$ROOT_DIR/agent-bootstrap/README.md")" "pre-final --run-verify" "bundle README closed-loop guidance"
+need_contains "$(cat "$ROOT_DIR/README.md")" "not a security boundary for arbitrary Bash" "root README shell boundary"
 startup_tokens=$(( \
   $(estimate_tokens_for_file "$TMP_DIR/AGENTS.md") + \
   $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-agent-context.md") + \
@@ -876,6 +955,36 @@ need_contains "$summary" "./gradlew :wear-api:test" "non-Android module test com
 need_contains "$summary" "./gradlew :feature:app:testDebugUnitTest" "nested Android module unit test command"
 need_contains "$summary" "./gradlew :feature:app:assembleDebug" "nested Android module assemble command"
 need_contains "$summary" "tech_stack_lib_version=" "library version summary"
+
+# Task 2: structured detector JSON — generated detector inside the bootstrapped target.
+detector_json="$(cd "$TMP_DIR" && scripts/detect-agent-tech-stack.sh --json)"
+python3 - "$detector_json" <<'PY'
+import json
+import sys
+
+doc = json.loads(sys.argv[1])
+assert doc["schema"] == "agent-tech-stack-detection/v1", doc
+assert isinstance(doc["tech_stacks"], list), doc
+assert isinstance(doc["modules"], list), doc
+assert isinstance(doc["verification_commands"], list), doc
+assert isinstance(doc["warnings"], list), doc
+assert "./gradlew :app:testProdDebugUnitTest" in doc["verification_commands"], doc
+assert "./gradlew :app:assembleProdDebug" in doc["verification_commands"], doc
+PY
+
+# Canonical bundle detector --json against the same multi-module Android project.
+# (Plan referenced $FIXTURE_DIR/android-app, which does not exist; $TMP_DIR is the
+# real Android target built above — adaptation noted at the Task 2 checkpoint.)
+canonical_detector_json="$(cd "$ROOT_DIR" && agent-bootstrap/detect-agent-tech-stack.sh --root "$TMP_DIR" --json)"
+python3 - "$canonical_detector_json" <<'PY'
+import json
+import sys
+
+doc = json.loads(sys.argv[1])
+assert doc["schema"] == "agent-tech-stack-detection/v1", doc
+assert "android_kotlin" in doc["tech_stacks"], doc
+assert any(command.startswith("./gradlew") for command in doc["verification_commands"]), doc
+PY
 
 mkdir -p "$FIXTURE_DIR/node-tooling"
 cat > "$FIXTURE_DIR/node-tooling/package.json" <<'EOF_PACKAGE'
@@ -1155,6 +1264,260 @@ cat > "$MEM_GUARD_DIR/docs/superpowers/plans/memory-discipline/journal.md" <<'EO
 EOF_MEMORY_JOURNAL_WARN
 (cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-warn.out 2>"$TMP_DIR"/out/bootstrap-memory-warn.err)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-warn.err")" "evidence" "pre-final warns on saved memory without evidence"
+
+# Task 3: pre-final verification runner (fast default scope, full opt-in).
+# Note: the plan fixture used a bare {scripts} package.json, which the detector
+# classifies as tooling/generic (no npm commands). A production node signal
+# ("type") makes the detector confirm node_js so it emits npm test / npm run build.
+FAKE_NPM_DIR="$TMP_DIR/fake-npm"
+make_fake_npm "$FAKE_NPM_DIR"
+VERIFY_OK_DIR="$FIXTURE_DIR/verify-prefinal-ok"
+mkdir -p "$VERIFY_OK_DIR/scripts"
+cat > "$VERIFY_OK_DIR/package.json" <<'EOF_VERIFY_OK_PACKAGE'
+{
+  "type": "module",
+  "scripts": {
+    "test": "bash scripts/verify-ok.sh",
+    "build": "bash scripts/verify-build.sh"
+  }
+}
+EOF_VERIFY_OK_PACKAGE
+cat > "$VERIFY_OK_DIR/scripts/verify-ok.sh" <<'EOF_VERIFY_OK_SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "verify ok"
+EOF_VERIFY_OK_SCRIPT
+cat > "$VERIFY_OK_DIR/scripts/verify-build.sh" <<'EOF_VERIFY_BUILD_SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "verify build"
+touch .agents/state/build-ran.marker
+EOF_VERIFY_BUILD_SCRIPT
+chmod +x "$VERIFY_OK_DIR/scripts/verify-ok.sh"
+chmod +x "$VERIFY_OK_DIR/scripts/verify-build.sh"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_OK_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_OK_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.err
+)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-verify-ok.out")" "pre-final ok" "pre-final verify ok output"
+[[ -f "$VERIFY_OK_DIR/.agents/state/last-verify-report.json" ]] || fail "pre-final did not write verification report"
+python3 - "$VERIFY_OK_DIR/.agents/state/last-verify-report.json" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["schema"] == "agent-guard-verification/v1", doc
+assert doc["scope"] == "fast", doc
+assert doc["summary"]["fail"] == 0, doc
+assert any(item["command"] == "npm test" and item["status"] == "pass" for item in doc["commands"]), doc
+assert any(item["command"] == "npm run build" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in doc["commands"]), doc
+PY
+[[ ! -e "$VERIFY_OK_DIR/.agents/state/build-ran.marker" ]] || fail "default pre-final --run-verify should not run full-scope build commands"
+(
+  cd "$VERIFY_OK_DIR"
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR"/out/bootstrap-prefinal-verify-full.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-full.err
+)
+[[ -f "$VERIFY_OK_DIR/.agents/state/build-ran.marker" ]] || fail "pre-final --verify-scope full did not run build command"
+python3 - "$VERIFY_OK_DIR/.agents/state/last-verify-report.json" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["scope"] == "full", doc
+assert doc["summary"]["fail"] == 0, doc
+assert any(item["command"] == "npm run build" and item["status"] == "pass" for item in doc["commands"]), doc
+PY
+
+EXTERNAL_STATE_DIR="$TMP_DIR/external-agent-state"
+mkdir -p "$EXTERNAL_STATE_DIR"
+if ! (
+  cd "$VERIFY_OK_DIR"
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh preflight >/dev/null
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-external-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-external-state.err
+); then
+  fail "pre-final --run-verify must accept external AGENT_STATE_DIR (see $TMP_DIR/out/bootstrap-prefinal-external-state.err)"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-external-state.out")" "pre-final ok" "pre-final accepts external AGENT_STATE_DIR"
+[[ -f "$EXTERNAL_STATE_DIR/last-verify-report.json" ]] || fail "external AGENT_STATE_DIR did not receive verification report"
+
+TMPDIR_FALLBACK_ROOT="$TMP_DIR/tmpdir-agent-state"
+VERIFY_TMPDIR_DIR="$FIXTURE_DIR/verify-prefinal-tmpdir-fallback"
+mkdir -p "$TMPDIR_FALLBACK_ROOT" "$VERIFY_TMPDIR_DIR/scripts"
+cp "$VERIFY_OK_DIR/package.json" "$VERIFY_TMPDIR_DIR/package.json"
+cp "$VERIFY_OK_DIR/scripts/verify-ok.sh" "$VERIFY_TMPDIR_DIR/scripts/verify-ok.sh"
+chmod +x "$VERIFY_TMPDIR_DIR/scripts/verify-ok.sh"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_TMPDIR_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_TMPDIR_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  chmod -R a-w .agents
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.err; then
+    chmod -R u+w .agents
+    fail "preflight failed with TMPDIR fallback state dir"
+  fi
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.err; then
+    chmod -R u+w .agents
+    fail "pre-final --run-verify failed with TMPDIR fallback state dir"
+  fi
+  chmod -R u+w .agents
+)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-tmpdir-state.out")" "pre-final ok" "pre-final accepts TMPDIR fallback state"
+fallback_report="$(find "$TMPDIR_FALLBACK_ROOT/agent-bootstrap-state" -name last-verify-report.json -print -quit 2>/dev/null || true)"
+[[ -f "$fallback_report" ]] || fail "TMPDIR fallback state did not receive verification report"
+
+VERIFY_FAIL_DIR="$FIXTURE_DIR/verify-prefinal-fail"
+mkdir -p "$VERIFY_FAIL_DIR/scripts"
+cat > "$VERIFY_FAIL_DIR/package.json" <<'EOF_VERIFY_FAIL_PACKAGE'
+{
+  "type": "module",
+  "scripts": {
+    "test": "bash scripts/verify-fail.sh"
+  }
+}
+EOF_VERIFY_FAIL_PACKAGE
+cat > "$VERIFY_FAIL_DIR/scripts/verify-fail.sh" <<'EOF_VERIFY_FAIL_SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "verify fail" >&2
+exit 7
+EOF_VERIFY_FAIL_SCRIPT
+chmod +x "$VERIFY_FAIL_DIR/scripts/verify-fail.sh"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_FAIL_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_FAIL_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+)
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.err); then
+  fail "pre-final --run-verify passed with a failing verification command"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-verify-fail.err")" "verification failed" "pre-final verification failure message"
+python3 - "$VERIFY_FAIL_DIR/.agents/state/last-verify-report.json" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["summary"]["fail"] == 1, doc
+assert any(item["command"] == "npm test" and item["status"] == "fail" and item["exit_code"] == 7 for item in doc["commands"]), doc
+PY
+
+VERIFY_PLACEHOLDER_DIR="$FIXTURE_DIR/verify-prefinal-placeholder"
+mkdir -p "$VERIFY_PLACEHOLDER_DIR/Demo.xcodeproj"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_PLACEHOLDER_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_PLACEHOLDER_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-placeholder.out 2>"$TMP_DIR"/out/bootstrap-prefinal-placeholder.err
+)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-placeholder.err")" "skipped verification command" "pre-final skips placeholder command"
+python3 - "$VERIFY_PLACEHOLDER_DIR/.agents/state/last-verify-report.json" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert any("<scheme>" in item["command"] and item["status"] == "skipped" for item in doc["commands"]), doc
+PY
+
+# Task 5: session telemetry JSONL appended on a passing pre-final (checks the
+# VERIFY_OK_DIR fixture above, whose last pre-final --run-verify passed).
+[[ -f "$VERIFY_OK_DIR/.agents/state/session-events.jsonl" ]] || fail "pre-final did not write session telemetry JSONL"
+python3 - "$VERIFY_OK_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+lines = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+assert lines, "no telemetry lines"
+last = lines[-1]
+assert last["schema"] == "agent-guard-event/v1", last
+assert last["event"] == "pre_final", last
+assert last["verification"]["ran"] is True, last
+assert last["verification"]["summary"]["fail"] == 0, last
+PY
+
+(
+  cd "$VERIFY_OK_DIR"
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-prefinal-noverify.out 2>"$TMP_DIR"/out/bootstrap-prefinal-noverify.err
+)
+python3 - "$VERIFY_OK_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+lines = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+last = lines[-1]
+assert last["schema"] == "agent-guard-event/v1", last
+assert last["event"] == "pre_final", last
+assert last["verification"]["ran"] is False, last
+assert last["verification"]["available"] is False, last
+PY
+
+# Task 4: stack drift check — pre-final compares the live detector summary with the lock.
+STACK_DRIFT_DIR="$FIXTURE_DIR/stack-drift-prefinal"
+mkdir -p "$STACK_DRIFT_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STACK_DRIFT_DIR" --workflow full >/dev/null
+(
+  cd "$STACK_DRIFT_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+)
+# Hardening (a): a fresh, unmodified target must NOT report drift (advisory so unrelated
+# strict checks cannot mask the assertion; only assert on the drift line).
+(cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-nodrift.out 2>"$TMP_DIR"/out/bootstrap-stack-nodrift.err) || true
+if grep -q "detector summary drifted" "$TMP_DIR"/out/bootstrap-stack-nodrift.err; then
+  fail "fresh unmodified target wrongly reported detector drift"
+fi
+# Hardening (b): the detector --summary the guard hashes must byte-match the summary the
+# lock hashed (pins the detect.sh detector_summary_for_lock <-> agent-tech-stack-lib.sh format).
+python3 - "$STACK_DRIFT_DIR" <<'PY'
+import json
+import pathlib
+import subprocess
+import sys
+
+root = pathlib.Path(sys.argv[1])
+lock = json.loads((root / "docs/agent-configs/agent-bootstrap.lock.json").read_text(encoding="utf-8"))
+live = subprocess.run(
+    ["scripts/detect-agent-tech-stack.sh", "--summary"],
+    cwd=root,
+    text=True,
+    capture_output=True,
+).stdout
+assert live.strip() == str(lock["detector_summary"]).strip(), (live, lock["detector_summary"])
+PY
+
+cat > "$STACK_DRIFT_DIR/package.json" <<'EOF_STACK_DRIFT_PACKAGE'
+{
+  "scripts": {
+    "test": "bash -c 'true'"
+  }
+}
+EOF_STACK_DRIFT_PACKAGE
+if (cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-stack-drift.out 2>"$TMP_DIR"/out/bootstrap-stack-drift.err); then
+  fail "pre-final accepted detector stack drift"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-stack-drift.err")" "detector summary drifted" "pre-final stack drift error"
+(cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-drift-advisory.out 2>"$TMP_DIR"/out/bootstrap-stack-drift-advisory.err)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-stack-drift-advisory.err")" "detector summary drifted" "pre-final advisory stack drift warning"
 
 # Read-only .agents must not break agent-guard: it falls back to a writable state dir.
 RO_GUARD_DIR="$FIXTURE_DIR/guard-readonly"

@@ -8,7 +8,7 @@ LIB="$SCRIPT_DIR/agent-tech-stack-lib.sh"
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/detect-agent-tech-stack.sh [--root DIR] [--markdown|--summary]" \
+    "Usage: scripts/detect-agent-tech-stack.sh [--root DIR] [--markdown|--summary|--json]" \
     "" \
     "Detect project tech stack from local file signatures and print agent-ready context."
 }
@@ -25,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary)
       FORMAT="summary"
+      shift
+      ;;
+    --json)
+      FORMAT="json"
       shift
       ;;
     -h|--help)
@@ -49,9 +53,14 @@ source "$LIB"
 
 agent_detect_tech_stack "$ROOT"
 
-if [[ "$FORMAT" == "summary" ]]; then
-  agent_print_summary
-  exit 0
-fi
-
-agent_print_markdown "$ROOT"
+case "$FORMAT" in
+  summary)
+    agent_print_summary
+    ;;
+  json)
+    agent_print_json
+    ;;
+  *)
+    agent_print_markdown "$ROOT"
+    ;;
+esac

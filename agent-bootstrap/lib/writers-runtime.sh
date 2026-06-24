@@ -121,6 +121,7 @@ write_template_catalog() {
   local template
   for template in \
     base/README.md \
+    tool-contract/shared.md \
     overlays/android_kotlin.md \
     overlays/generic.md \
     overlays/ios_swift.md \
@@ -182,7 +183,7 @@ LIB="$SCRIPT_DIR/agent-tech-stack-lib.sh"
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/detect-agent-tech-stack.sh [--root DIR] [--markdown|--summary]" \
+    "Usage: scripts/detect-agent-tech-stack.sh [--root DIR] [--markdown|--summary|--json]" \
     "" \
     "Detect project tech stack from local file signatures and print agent-ready context."
 }
@@ -199,6 +200,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --summary)
       FORMAT="summary"
+      shift
+      ;;
+    --json)
+      FORMAT="json"
       shift
       ;;
     -h|--help)
@@ -223,12 +228,17 @@ source "$LIB"
 
 agent_detect_tech_stack "$ROOT"
 
-if [[ "$FORMAT" == "summary" ]]; then
-  agent_print_summary
-  exit 0
-fi
-
-agent_print_markdown "$ROOT"
+case "$FORMAT" in
+  summary)
+    agent_print_summary
+    ;;
+  json)
+    agent_print_json
+    ;;
+  *)
+    agent_print_markdown "$ROOT"
+    ;;
+esac
 EOF
 
   make_executable "$LAST_WRITTEN_FILE"
@@ -358,7 +368,44 @@ hash_text() {
 
 lock_value() {
   local key="$1"
-  sed -n "s/^[[:space:]]*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$LOCK_FILE" | head -n1
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required to read bootstrap lock"
+  python3 - "$LOCK_FILE" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path, wanted = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+
+def walk(value):
+    if isinstance(value, dict):
+        if wanted in value:
+            found = value[wanted]
+            if isinstance(found, str):
+                print(found)
+                return True
+            if isinstance(found, bool):
+                print("true" if found else "false")
+                return True
+            if isinstance(found, (int, float)):
+                print(found)
+                return True
+        for child in value.values():
+            if walk(child):
+                return True
+    elif isinstance(value, list):
+        for child in value:
+            if walk(child):
+                return True
+    return False
+
+
+walk(document)
+PY
 }
 
 verify_detector_lock() {
@@ -745,7 +792,44 @@ hash_text() {
 
 lock_value() {
   local key="$1"
-  sed -n "s/^[[:space:]]*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$ROOT_DIR/docs/agent-configs/agent-bootstrap.lock.json" | head -n1
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$ROOT_DIR/docs/agent-configs/agent-bootstrap.lock.json" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path, wanted = sys.argv[1], sys.argv[2]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+
+def walk(value):
+    if isinstance(value, dict):
+        if wanted in value:
+            found = value[wanted]
+            if isinstance(found, str):
+                print(found)
+                return True
+            if isinstance(found, bool):
+                print("true" if found else "false")
+                return True
+            if isinstance(found, (int, float)):
+                print(found)
+                return True
+        for child in value.values():
+            if walk(child):
+                return True
+    elif isinstance(value, list):
+        for child in value:
+            if walk(child):
+                return True
+    return False
+
+
+walk(document)
+PY
 }
 
 estimate_tokens_for_file() {

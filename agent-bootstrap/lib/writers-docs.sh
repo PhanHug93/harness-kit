@@ -339,6 +339,16 @@ scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 \`\`\`
 
+Before claiming ordinary completion:
+
+\`\`\`bash
+scripts/agent-guard.sh pre-final --run-verify
+\`\`\`
+
+This runs the fast verification subset. For release, high-risk, or final PR
+readiness, review the detected verification commands first, then run
+\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`.
+
 If the detector output changes intentionally, refresh the lock:
 
 \`\`\`bash
@@ -453,7 +463,6 @@ $stack_overlay_content
   context, harness, CI, release, or generated-runtime paths. For intentional
   protected edits, rerun with \`--ack <reason>\` and keep the reason in the
   handoff or final summary.
-- Run \`scripts/agent-guard.sh pre-final\` before claiming completion.
 - Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
@@ -468,8 +477,21 @@ $stack_overlay_content
 EOF
 }
 
+tool_contract_block() {
+  render_bundle_template "templates/tool-contract/shared.md"
+}
+
+tool_surface_write() {
+  local path="$1"
+  {
+    cat
+    printf '\n'
+    tool_contract_block
+  } | write_file "$path"
+}
+
 write_infra_tool_entrypoints() {
-  write_file "$TARGET_DIR/CLAUDE.md" <<'EOF'
+  tool_surface_write "$TARGET_DIR/CLAUDE.md" <<'EOF'
 # Claude Instructions
 
 Read `AGENTS.md` first. This project has portable agent infrastructure only;
@@ -486,19 +508,19 @@ scripts/detect-agent-tech-stack.sh --markdown
 Use `./scripts/rtk git ...` for all shell git commands.
 EOF
 
-  write_file "$TARGET_DIR/GEMINI.md" <<'EOF'
+  tool_surface_write "$TARGET_DIR/GEMINI.md" <<'EOF'
 # Gemini Instructions
 
 Read `AGENTS.md` first. Durable project-specific stack context lives in
 `docs/agent-configs/project-agent-context.md`.
 EOF
 
-  write_file "$TARGET_DIR/.windsurfrules" <<'EOF'
+  tool_surface_write "$TARGET_DIR/.windsurfrules" <<'EOF'
 Read `AGENTS.md` first. Durable project-specific stack context lives in
 `docs/agent-configs/project-agent-context.md`.
 EOF
 
-  write_file "$TARGET_DIR/.cursor/rules/agent-conventions.mdc" <<'EOF'
+  tool_surface_write "$TARGET_DIR/.cursor/rules/agent-conventions.mdc" <<'EOF'
 ---
 description: Shared agent infrastructure
 alwaysApply: true
@@ -604,6 +626,19 @@ At the start of substantive work:
 scripts/agent-guard.sh preflight
 scripts/detect-agent-tech-stack.sh --markdown
 \`\`\`
+
+Before claiming ordinary completion:
+
+\`\`\`bash
+scripts/agent-guard.sh pre-final --run-verify
+\`\`\`
+
+This runs the fast verification subset. For release, high-risk, or final PR
+readiness, review the detected verification commands first, then run
+\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`. If a
+detected command is a placeholder or needs unavailable local services, record
+the skip reason in the task journal and rerun with \`--advisory\` only when the
+user or CI environment explicitly requires advisory mode.
 
 Stack detection logic lives in \`scripts/agent-tech-stack-lib.sh\`; update that
 library rather than duplicating detection rules in multiple scripts.
@@ -798,7 +833,6 @@ $stack_overlay_content
   context, harness, CI, release, or generated-runtime paths. For intentional
   protected edits, rerun with \`--ack <reason>\` and keep the reason in the
   handoff or final summary.
-- Run \`scripts/agent-guard.sh pre-final\` before claiming completion.
 - Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
@@ -1093,6 +1127,7 @@ new appended entry.
     - save_decision: saved | journal-only | rejected | n/a
     - evidence: <file/test/command/user decision summary | none>
     - recall_verified: yes | n/a | acked-deferred
+    - verification: path to the verification report `.agents/state/last-verify-report.json`, or `n/a` with a short reason when delegated to CI or blocked by the local environment
 
 ## Close-out (Layer 1 + Layer 2)
 
@@ -1123,7 +1158,7 @@ EOF
 }
 
 write_tool_entrypoints() {
-  write_file "$TARGET_DIR/CLAUDE.md" <<'EOF'
+  tool_surface_write "$TARGET_DIR/CLAUDE.md" <<'EOF'
 # Claude Instructions
 
 ## First run
@@ -1172,7 +1207,7 @@ when available and use its output with `docs/agent-configs/project-agent-context
 Use `scripts/agent-hook.sh no-scan-paths` before broad search.
 EOF
 
-  write_file "$TARGET_DIR/GEMINI.md" <<'EOF'
+  tool_surface_write "$TARGET_DIR/GEMINI.md" <<'EOF'
 # Gemini Instructions
 
 ## First run
@@ -1187,12 +1222,12 @@ context is `project-agent-context.md`, the filled project brief when available,
 and detector output. Read heavier workflow docs only on demand.
 EOF
 
-  write_file "$TARGET_DIR/.windsurfrules" <<'EOF'
+  tool_surface_write "$TARGET_DIR/.windsurfrules" <<'EOF'
 Read `AGENTS.md` first. This file is only a pointer. Use project context and
 brief at startup; read heavier workflow docs on demand.
 EOF
 
-  write_file "$TARGET_DIR/.cursor/rules/agent-conventions.mdc" <<'EOF'
+  tool_surface_write "$TARGET_DIR/.cursor/rules/agent-conventions.mdc" <<'EOF'
 ---
 description: Shared agent conventions
 alwaysApply: true

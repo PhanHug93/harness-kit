@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.06.22.2`
+Version: `2026.06.24.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -43,6 +43,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | `schemas/agent-bootstrap-status-v1.schema.json` | JSON Schema for `--status --json` output. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-verify-report-v1.schema.json` | JSON Schema for `scripts/verify-ai-deps.sh --json` output. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
+| `templates/tool-contract/shared.md` | Shared managed tool contract rendered into CLAUDE/GEMINI/Windsurf/Cursor entrypoints. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/android_kotlin.md` | Android/Kotlin overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/generic.md` | Generic overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/ios_swift.md` | iOS/Swift overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
@@ -63,3 +64,7 @@ change, including doc, generator, or runtime-snapshot edits.
 
 Run `scripts/test-bootstrap-multi-agent-project.sh` after changing this bundle.
 That test verifies canonical home export and generated runtime snapshot drift.
+
+The repo utility `scripts/sync-template-catalog.sh` regenerates the docs template
+mirror (`docs/agent-configs/bootstrap-multi-agent-project/templates`) from
+`agent-bootstrap/templates`; its `--check` mode must pass in that integration test.
