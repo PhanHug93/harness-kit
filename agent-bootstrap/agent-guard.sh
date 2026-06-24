@@ -63,7 +63,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|status|doctor" \
+    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|status|stats [--json]|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -1036,14 +1036,16 @@ append_pre_final_event() {
   local verification_ran="${2:-false}"
   [[ "$STATE_WRITABLE" == "true" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" python3 - <<'PY'
+  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
 import json
 import os
 import pathlib
+import subprocess
 import time
 
 events_path = pathlib.Path(os.environ["SESSION_EVENTS"])
 verify_path = pathlib.Path(os.environ["VERIFY_REPORT"])
+root = pathlib.Path(os.environ.get("PROJECT_ROOT", "."))
 ran = os.environ.get("VERIFICATION_RAN") == "true"
 verification = {"ran": ran, "available": False, "status": "none"}
 if ran and verify_path.is_file():
@@ -1063,10 +1065,58 @@ gate = os.environ["GATE_STATUS_VALUE"]
 if verification.get("status") == "fail" and gate == "pass":
     gate = "warn"
 
+
+def count_changed_files(project_root):
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "status", "--porcelain"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
+
+
+def estimate_tokens_for_file(path):
+    if not path.is_file():
+        return 0
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return 0
+    words = len(text.split())
+    chars = len(text)
+    return int(max(chars / 4, words * 1.3))
+
+
+def core_startup_token_estimate(project_root):
+    relpaths = (
+        "AGENTS.md",
+        "docs/agent-configs/project-agent-context.md",
+        "docs/agent-configs/project-brief.md",
+    )
+    return sum(estimate_tokens_for_file(project_root / relpath) for relpath in relpaths)
+
+
 event = {
     "schema": "agent-guard-event/v2",
     "event": "pre_final",
     "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "mode": (
+        os.environ.get("AGENT_GUARD_MODE")
+        or os.environ.get("CODEX_MODE")
+        or os.environ.get("CLAUDE_MODE")
+        or os.environ.get("AGENT_MODE")
+        or "unknown"
+    ),
+    "files_changed": count_changed_files(root),
+    "token_estimate": {"core_startup": core_startup_token_estimate(root)},
     "gate_status": gate,
     "verification": verification,
 }
@@ -1138,7 +1188,7 @@ total_timeout = int(os.environ.get("VERIFY_TOTAL_TIMEOUT_SECONDS", "0"))
 scope = os.environ["VERIFY_SCOPE"]
 log_dir.mkdir(parents=True, exist_ok=True)
 results = []
-summary = {"pass": 0, "fail": 0, "skipped": 0}
+summary = {"pass": 0, "fail": 0, "skipped": 0, "error": 0}
 placeholder_token = re.compile(r"<[A-Za-z0-9_.:-]+>")
 deadline = time.time() + total_timeout if total_timeout > 0 else None
 
@@ -1228,6 +1278,7 @@ for index, command in enumerate(commands, 1):
     log_path = log_dir / f"verify-{int(started)}-{index}.log"
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ {command}\n")
+        start_error = None
         try:
             argv = shlex.split(command)
         except ValueError:
@@ -1250,6 +1301,7 @@ for index, command in enumerate(commands, 1):
         except OSError as exc:
             exit_code = 127
             timed_out = False
+            start_error = str(exc)
             log.write(f"\nFAILED TO START: {exc}\n")
         else:
             try:
@@ -1272,23 +1324,34 @@ for index, command in enumerate(commands, 1):
                         pass
                     process.wait()
     duration_ms = int((time.time() - started) * 1000)
-    if exit_code == 0:
+    if start_error is not None:
+        summary["error"] += 1
+        status = "error"
+    elif exit_code == 0:
         summary["pass"] += 1
         status = "pass"
     else:
         summary["fail"] += 1
         status = "timeout" if timed_out else "fail"
-    results.append({
+    item = {
         "command": command,
         "class": klass,
         "status": status,
         "exit_code": exit_code,
         "duration_ms": duration_ms,
         "log_path": path_for_report(log_path),
-    })
+    }
+    if start_error is not None:
+        item["reason"] = "failed_to_start"
+        item["error"] = start_error
+    results.append(item)
 
-executed = summary["pass"] + summary["fail"]
+executed = summary["pass"] + summary["fail"] + summary["error"]
 budget_exhausted = any(item.get("reason") == "budget_exhausted" for item in results)
+if summary["error"]:
+    write_report("error")
+    print(f"agent-guard: ERROR: verification command failed to start ({summary['error']} error, {summary['fail']} failed, {summary['pass']} passed, {summary['skipped']} skipped)", file=sys.stderr)
+    sys.exit(2)
 if summary["fail"]:
     write_report("fail")
     print(f"agent-guard: ERROR: verification failed ({summary['fail']} failed, {summary['pass']} passed, {summary['skipped']} skipped)", file=sys.stderr)
@@ -1334,6 +1397,8 @@ PY
   fi
   if [[ "$verification_status" == "none" || "$verification_status" == "skipped" ]]; then
     GATE_STATUS=warn
+  elif [[ "$verification_status" == "pass" ]]; then
+    GATE_STATUS=pass
   fi
 }
 
@@ -1374,6 +1439,7 @@ pre_final() {
   RUN_VERIFY_FLAG="$run_verify"
   EMIT_CLOSEOUT=true
   trap closeout_trap EXIT
+  GATE_STATUS=pass
   load_policy
   check_context_pack_freshness
   check_detector_summary_drift "$strict"
@@ -1392,7 +1458,6 @@ pre_final() {
   if [[ "$run_verify" == "true" ]]; then
     run_detected_verification "$strict" "$verify_scope"
   fi
-  [[ "$GATE_STATUS" == "fail" ]] && GATE_STATUS=pass
   printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
 }
 
@@ -1408,6 +1473,84 @@ status() {
   fi
   printf 'required_context_count=%s\n' "${#REQUIRED_CONTEXT[@]}"
   printf 'protected_path_count=%s\n' "${#PROTECTED_PATTERNS[@]}"
+  local candidates=""
+  local candidate rel_candidate base rel_base
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    rel_candidate="${candidate#"$PROJECT_ROOT"/}"
+    base="${candidate%.generated.*}"
+    rel_base="${base#"$PROJECT_ROOT"/}"
+    if is_bootstrap_generated_base "$rel_base"; then
+      candidates="${candidates}${rel_candidate} "
+    fi
+  done < <(find "$PROJECT_ROOT" \
+    \( -path "$PROJECT_ROOT/.git" -o -path "$PROJECT_ROOT/.tools" -o -path "$PROJECT_ROOT/.gradle" -o -path "$PROJECT_ROOT/.agents" -o -path "$PROJECT_ROOT/build" \) -prune -o \
+    -type f -name '*.generated.*' -print 2>/dev/null || true)
+  printf 'pending_generated_candidates=%s\n' "${candidates:-none}"
+  local orphans=""
+  local surface
+  for surface in AGENTS.md .codex/README.md docs/agent-configs/agent-mode-contracts.md; do
+    if [[ -f "$PROJECT_ROOT/$surface" ]] && grep -Fq 'USER (orphaned):' "$PROJECT_ROOT/$surface" 2>/dev/null; then
+      orphans="${orphans}${surface} "
+    fi
+  done
+  printf 'parked_user_overlays=%s\n' "${orphans:-none}"
+}
+
+stats() {
+  local as_json=false
+  [[ "${1:-}" == "--json" ]] && as_json=true
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required for stats"
+  SESSION_EVENTS="$SESSION_EVENTS" AS_JSON="$as_json" python3 - <<'PY'
+import json
+import os
+
+path = os.environ["SESSION_EVENTS"]
+gate = {"pass": 0, "warn": 0, "fail": 0}
+vstat = {"pass": 0, "fail": 0, "none": 0, "skipped": 0, "error": 0}
+total = 0
+try:
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            if event.get("schema") != "agent-guard-event/v2" or event.get("event") != "pre_final":
+                continue
+            total += 1
+            gate_status = event.get("gate_status")
+            if gate_status in gate:
+                gate[gate_status] += 1
+            verification_status = (event.get("verification") or {}).get("status")
+            if verification_status in vstat:
+                vstat[verification_status] += 1
+except FileNotFoundError:
+    pass
+
+none_rate = (vstat["none"] / total) if total else 0.0
+report = {
+    "schema": "agent-guard-stats/v1",
+    "total_events": total,
+    "gate_status": gate,
+    "verification_status": vstat,
+    "verification_none_rate": round(none_rate, 3),
+}
+if os.environ["AS_JSON"] == "true":
+    print(json.dumps(report, indent=2))
+else:
+    print(f"agent-guard stats: {total} close-out (pre_final) events")
+    print(f"  gate_status: pass={gate['pass']} warn={gate['warn']} fail={gate['fail']}")
+    print(
+        "  verification: "
+        f"pass={vstat['pass']} fail={vstat['fail']} none={vstat['none']} "
+        f"skipped={vstat['skipped']} error={vstat['error']}"
+    )
+    print(f"  verification:none rate: {none_rate:.0%}  (repos with no runnable fast tests)")
+PY
 }
 
 case "${1:-}" in
@@ -1430,6 +1573,10 @@ case "${1:-}" in
   status)
     shift || true
     status "$@"
+    ;;
+  stats)
+    shift || true
+    stats "$@"
     ;;
   doctor)
     shift || true

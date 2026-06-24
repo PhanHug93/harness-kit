@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.06.24.2`
+Version: `2026.06.24.3`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -30,6 +30,8 @@ change, including doc, generator, or runtime-snapshot edits.
 | `agent-guard.sh` | Agent Guard Lite runtime snapshot for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
 | `detect-agent-tech-stack.sh` | Runtime detector entrypoint snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/detect-agent-tech-stack.sh`. |
+| `githooks/pre-push` | Optional portable git pre-push close-out gate copied into generated target `scripts/githooks/pre-push`. | Must match generated target hook and remain opt-in via `scripts/install-git-hooks.sh`. |
+| `install-git-hooks.sh` | Optional installer that sets `core.hooksPath=scripts/githooks` without clobbering an existing hooks path unless `--force` is used. | Must match generated target `scripts/install-git-hooks.sh`. |
 | `install-rtk.sh` | Runtime rtk installer snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/install-rtk.sh`. |
 | `rtk` | Runtime rtk wrapper snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/rtk`. |
 | `verify-ai-deps.sh` | Runtime verifier snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/verify-ai-deps.sh`. |
@@ -45,6 +47,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | `schemas/agent-guard-event-v2.schema.json` | JSON Schema for `agent-guard.sh` close-out telemetry events. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/tool-contract/shared.md` | Shared managed tool contract rendered into CLAUDE/GEMINI/Windsurf/Cursor entrypoints. | Must match canonical home export, source docs template, and generated target template. |
+| `templates/ci/agent-guard.yml` | GitHub Actions workflow template copied into generated target `.github/workflows/agent-guard.yml`. | Must match canonical home export, source docs template, and generated target workflow. |
 | `templates/overlays/android_kotlin.md` | Android/Kotlin overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/generic.md` | Generic overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/ios_swift.md` | iOS/Swift overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
