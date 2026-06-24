@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 WORKFLOW_PRESET="full"
@@ -323,6 +324,57 @@ doctor() {
   fi
 }
 
+close_out() {
+  # Claude Code Stop hook. Run fast verification in advisory mode so unrelated
+  # strict checks do not abort the hook, then block Stop (exit 2) only when this
+  # session has file changes and the verification report contains real failures.
+  # Gemini/Cursor/Windsurf have no equivalent close-out hook, so those surfaces
+  # stay advisory and should call agent-guard pre-final manually.
+  local input stop_active=false report failed=0 err_file
+  input="$(cat 2>/dev/null || true)"
+  if command -v python3 >/dev/null 2>&1; then
+    stop_active="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null || printf 'false\n'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    payload = {}
+print("true" if payload.get("stop_hook_active") is True else "false")
+PY
+)"
+  fi
+  [[ "$stop_active" == "true" ]] && exit 0
+  if command -v git >/dev/null 2>&1 &&
+    [[ -z "$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null)" ]]; then
+    exit 0
+  fi
+  err_file="$PROJECT_ROOT/.agents/state/closeout.err"
+  mkdir -p "$(dirname "$err_file")" 2>/dev/null || err_file="${TMPDIR:-/tmp}/agent-bootstrap-closeout.err"
+  "$AGENT_GUARD" pre-final --run-verify --verify-scope fast --advisory >/dev/null 2>"$err_file" || true
+  report="$PROJECT_ROOT/.agents/state/last-verify-report.json"
+  if [[ -f "$report" ]] && command -v python3 >/dev/null 2>&1; then
+    failed="$(python3 - "$report" <<'PY' 2>/dev/null || printf '0\n'
+import json
+import sys
+
+try:
+    doc = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    print(0)
+    raise SystemExit(0)
+print(int(doc.get("summary", {}).get("fail", 0)))
+PY
+)"
+  fi
+  if [[ "${failed:-0}" -gt 0 ]]; then
+    printf 'agent-guard: close-out fast verification failed (%s failed); review .agents/state/last-verify-report.json before completing.\n' "$failed" >&2
+    exit 2
+  fi
+  exit 0
+}
+
 case "${1:-}" in
   claude-pretool)
     shift || true
@@ -341,8 +393,11 @@ case "${1:-}" in
   doctor)
     doctor
     ;;
+  close-out)
+    close_out
+    ;;
   -h|--help|help|"")
-    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor"
+    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
     ;;
   *)
     fail "unknown command: $1"

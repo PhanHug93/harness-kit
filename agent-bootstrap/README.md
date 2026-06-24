@@ -76,7 +76,15 @@ scripts/agent-guard.sh preflight
 scripts/agent-guard.sh pre-final --run-verify
 ```
 
-`pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
+`pre-final --run-verify` runs concrete fast detector commands and skips
+placeholders such as `xcodebuild ... <scheme>` with a warning. Review the
+detected commands before using `--verify-scope full` to include build/full
+commands. Results are written to `.agents/state/last-verify-report.json`, and an
+`agent-guard-event/v2` event with separate `gate_status` and
+`verification.status` is appended to `.agents/state/session-events.jsonl`.
+Generated Claude Code settings also register a Stop hook that runs fast
+close-out verification when the tree has changes; Gemini, Cursor, and Windsurf
+remain advisory and should run the pre-final command manually.
 
 Inspect an existing target before upgrading:
 
@@ -95,7 +103,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the

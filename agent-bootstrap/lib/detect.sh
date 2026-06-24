@@ -10,6 +10,7 @@ emit_tech_stack_lib() {
   # scripts/test-bootstrap-multi-agent-project.sh (canonical + generated cmp).
   cat <<'EOF_TECH_STACK_LIB'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 # Shared tech-stack detection library for agent bootstrap/runtime scripts.
 # Keep this file portable: bash 3.2 compatible, no repo-specific paths.
 

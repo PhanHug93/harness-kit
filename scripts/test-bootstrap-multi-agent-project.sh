@@ -27,6 +27,10 @@ fail() {
   exit 1
 }
 
+note() {
+  printf 'bootstrap-test: --- %s\n' "$*" >&2
+}
+
 need_contains() {
   local haystack="$1"
   local needle="$2"
@@ -427,6 +431,11 @@ need_contains "$design_doc" "agent-init --apply-candidates" "design doc candidat
 need_contains "$design_doc" "scripts/test-onboarding-fixtures.sh" "design doc onboarding fixture validation"
 need_contains "$design_doc" "agent-guard.sh" "design doc agent guard runtime"
 need_contains "$design_doc" "context-policy.json" "design doc context policy contract"
+extension_guide="$(cat "$ROOT_DIR/docs/agent-configs/EXTENSION-GUIDE.md")"
+need_contains "$extension_guide" "Add a detected stack" "extension guide covers adding a stack"
+need_contains "$extension_guide" "agent-tech-stack-lib.sh" "extension guide names the detector snapshot"
+need_contains "$extension_guide" "lib/detect.sh" "extension guide names the detector heredoc mirror"
+need_contains "$extension_guide" "need_same_file" "extension guide names the mirror guard"
 root_readme="$(cat "$ROOT_DIR/README.md")"
 need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
 need_contains "$root_readme" "rtk is intentionally hard-pinned" "root README RTK pinning intent"
@@ -461,6 +470,11 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
+[[ "$bundle_version" == "2026.06.24.2" ]] || fail "VERSION not bumped to 2026.06.24.2"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "behavioral" "changelog marks behavioral change"
+need_contains "$(cat "$BOOTSTRAP_BUNDLE/MANIFEST.md")" "$bundle_version" "manifest version"
+grep -Fq 'agent-guard-event/v2' "$BOOTSTRAP_BUNDLE/agent-guard.sh" || fail "event schema not bumped to v2"
 assert_json_escape_handles_control_chars
 assert_hash_text_uses_sha256_without_crc32_fallback
 
@@ -497,6 +511,7 @@ for canonical_file in \
   schemas/agent-bootstrap-lock-v1.schema.json \
   schemas/agent-bootstrap-status-v1.schema.json \
   schemas/agent-bootstrap-verify-report-v1.schema.json \
+  schemas/agent-guard-event-v2.schema.json \
   templates/base/README.md \
   templates/tool-contract/shared.md \
   templates/overlays/android_kotlin.md \
@@ -819,6 +834,7 @@ need_contains "$(cat "$USER_OWNED_DIR/docs/agent-configs/project-brief.md")" "Fi
 
 cmp -s "$SHARED_LIB" "$TMP_DIR/scripts/agent-tech-stack-lib.sh" || fail "generated tech-stack lib drifted from source lib"
 
+note "template/runtime mirror drift checks"
 # Task 7: the docs template mirror is mechanically synced from agent-bootstrap/templates.
 # Checked before the transient .bak/.generated drift-test artifacts below, since
 # sync --check uses a plain recursive diff.
@@ -836,24 +852,26 @@ while IFS= read -r source_template; do
 done < <(find "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
 while IFS= read -r bundle_template; do
   relative_template="${bundle_template#"$BOOTSTRAP_BUNDLE"/templates/}"
+  [[ -f "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" ]] ||
+    fail "template $relative_template has no docs mirror"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
 done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
 
-for runtime_snapshot in \
-  agent-tech-stack-lib.sh \
-  agent-hook.sh \
-  agent-guard.sh \
-  agent-onboarding.sh \
-  detect-agent-tech-stack.sh \
-  install-rtk.sh \
-  rtk \
-  verify-ai-deps.sh; do
-  need_same_file "$BOOTSTRAP_BUNDLE/$runtime_snapshot" "$TMP_DIR/scripts/$runtime_snapshot" "generated runtime snapshot $runtime_snapshot"
-done
+while IFS= read -r runtime_snapshot; do
+  base="${runtime_snapshot#"$BOOTSTRAP_BUNDLE"/}"
+  if [[ ! -f "$TMP_DIR/scripts/$base" ]]; then
+    fail "discovered runtime snapshot $base was not generated into the target"
+  fi
+  need_same_file "$runtime_snapshot" "$TMP_DIR/scripts/$base" "generated runtime snapshot $base"
+done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BOOTSTRAP_BUNDLE"/*.sh "$BOOTSTRAP_BUNDLE"/rtk 2>/dev/null | sort)
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md" ]] || fail "full bootstrap did not generate agentmemory skill"
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/agents/openai.yaml" ]] || fail "full bootstrap did not generate agentmemory openai metadata"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit"' "Claude settings edit/write guard hook"
+	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"Stop"' "Claude settings registers Stop hook"
+	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" 'agent-hook.sh close-out' "Claude Stop hook calls close-out subcommand"
+	python3 -m json.tool "$TMP_DIR/.claude/settings.json" >/dev/null || fail "generated settings.json is not valid JSON after Stop hook"
 	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "agentmemory-mcp" "full bootstrap AGENTS agentmemory routing"
+	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "advisory" "AGENTS notes non-Claude close-out surfaces stay advisory"
 need_contains "$(cat "$TMP_DIR/.gitignore")" "!.agents/skills/**" "full bootstrap gitignore tracked skills exception"
 need_not_contains "$(cat "$TMP_DIR/.gitignore")" "*.generated.*" "full bootstrap generated candidates must stay visible"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "/Users/admin/" "generated agentmemory skill must not contain author machine path"
@@ -1189,6 +1207,7 @@ PY
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-doctor-readonly.out")" "agent guard check passes" "Codex doctor uses read-only agent guard check"
 [[ ! -e "$GUARD_DIR/.agents/state/context-pack.json" ]] || fail "Codex doctor created context-pack side effect"
 
+note "memory pre-final journal gate"
 # pre-final enforces memory close-out only through the journal artifact. High-risk
 # is derived from git diff intersecting protected_paths, not agent self-report.
 MEM_GUARD_DIR="$FIXTURE_DIR/memory-prefinal"
@@ -1265,6 +1284,7 @@ EOF_MEMORY_JOURNAL_WARN
 (cd "$MEM_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-memory-warn.out 2>"$TMP_DIR"/out/bootstrap-memory-warn.err)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-memory-warn.err")" "evidence" "pre-final warns on saved memory without evidence"
 
+note "pre-final verification runner and telemetry"
 # Task 3: pre-final verification runner (fast default scope, full opt-in).
 # Note: the plan fixture used a bare {scripts} package.json, which the detector
 # classifies as tooling/generic (no npm commands). A production node signal
@@ -1409,9 +1429,40 @@ import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["verification_status"] == "fail", doc
 assert doc["summary"]["fail"] == 1, doc
 assert any(item["command"] == "npm test" and item["status"] == "fail" and item["exit_code"] == 7 for item in doc["commands"]), doc
 PY
+python3 - "$VERIFY_FAIL_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+last = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()][-1]
+assert last["schema"] == "agent-guard-event/v2", last
+assert last["event"] == "pre_final", last
+assert last["gate_status"] == "fail", last
+assert last["verification"]["status"] == "fail", last
+assert last["verification"]["status"] == "fail" and last["gate_status"] != "pass", last
+PY
+(
+  cd "$VERIFY_FAIL_DIR"
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.err || true
+)
+python3 - "$VERIFY_FAIL_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+last = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()][-1]
+assert last["schema"] == "agent-guard-event/v2", last
+assert last["gate_status"] == "warn", last
+assert last["verification"]["status"] == "fail", last
+PY
+(
+  cd "$VERIFY_FAIL_DIR"
+  printf '%s\n' "dirty close-out trigger" >> README.md
+  printf '%s' '{"stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
+) && fail "close-out did not block stop (exit 2) on failing verification"
+need_contains "$(cat "$TMP_DIR/out/bootstrap-closeout-fail.err")" "verification" "close-out reports the failure reason to the model"
 
 VERIFY_PLACEHOLDER_DIR="$FIXTURE_DIR/verify-prefinal-placeholder"
 mkdir -p "$VERIFY_PLACEHOLDER_DIR/Demo.xcodeproj"
@@ -1427,12 +1478,138 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_PLACEHO
   scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-placeholder.out 2>"$TMP_DIR"/out/bootstrap-prefinal-placeholder.err
 )
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-placeholder.err")" "skipped verification command" "pre-final skips placeholder command"
+if grep -q "verification ok" "$TMP_DIR"/out/bootstrap-prefinal-placeholder.out; then
+  fail "all-skipped run printed false-green 'verification ok'"
+fi
 python3 - "$VERIFY_PLACEHOLDER_DIR/.agents/state/last-verify-report.json" <<'PY'
 import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["verification_status"] == "none", doc
 assert any("<scheme>" in item["command"] and item["status"] == "skipped" for item in doc["commands"]), doc
+PY
+python3 - "$VERIFY_PLACEHOLDER_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+last = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()][-1]
+assert last["verification"]["status"] == "none", last
+assert last["gate_status"] == "warn", last
+PY
+
+INJECT_DIR="$FIXTURE_DIR/verify-injection"
+mkdir -p "$INJECT_DIR/scripts"
+cat > "$INJECT_DIR/package.json" <<'EOF_INJECT_PKG'
+{ "type": "module", "scripts": { "test": "bash -c 'true'" } }
+EOF_INJECT_PKG
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$INJECT_DIR" --workflow full >/dev/null
+(
+  cd "$INJECT_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  cat > scripts/detect-agent-tech-stack.sh <<'EOF_FORGE_DETECTOR'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--json" ]]; then
+  printf '%s\n' '{"schema":"agent-tech-stack-detection/v1","tech_stacks":["node_js"],"modules":[],"verification_commands":["npm test ; touch PWNED"],"warnings":[]}'
+  exit 0
+fi
+printf '%s\n' "tech_stacks=node_js"
+EOF_FORGE_DETECTOR
+  chmod +x scripts/detect-agent-tech-stack.sh
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
+)
+[[ ! -e "$INJECT_DIR/PWNED" ]] || fail "verification runner executed an injected command (shell=True regression)"
+
+BUDGET_DIR="$FIXTURE_DIR/verify-budget"
+mkdir -p "$BUDGET_DIR/scripts"
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$BUDGET_DIR/scripts/slow.sh"
+chmod +x "$BUDGET_DIR/scripts/slow.sh"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$BUDGET_DIR" --workflow full >/dev/null
+(
+  cd "$BUDGET_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  budget_summary="$(scripts/detect-agent-tech-stack.sh --summary)"
+  cat > scripts/detect-agent-tech-stack.sh <<'EOF_BUDGET_DETECTOR'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--json" ]]; then
+  printf '%s\n' '{"schema":"agent-tech-stack-detection/v1","tech_stacks":["generic"],"modules":[],"verification_commands":["bash scripts/slow.sh","bash scripts/slow.sh"],"warnings":[]}'
+  exit 0
+fi
+cat <<'EOF_BUDGET_SUMMARY'
+__BUDGET_SUMMARY__
+EOF_BUDGET_SUMMARY
+EOF_BUDGET_DETECTOR
+  python3 - scripts/detect-agent-tech-stack.sh "$budget_summary" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+summary = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+path.write_text(text.replace("__BUDGET_SUMMARY__", summary), encoding="utf-8")
+PY
+  chmod +x scripts/detect-agent-tech-stack.sh
+)
+if (
+  cd "$BUDGET_DIR"
+  AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS=1 scripts/agent-guard.sh pre-final --run-verify >/dev/null 2>&1
+); then
+  fail "budget-exhausted run reported success in strict mode"
+fi
+python3 - "$BUDGET_DIR/.agents/state/last-verify-report.json" "$BUDGET_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["verification_status"] == "fail", doc
+assert any(item.get("status") == "timeout" for item in doc["commands"]), doc
+assert any(item.get("reason") == "budget_exhausted" for item in doc["commands"]), doc
+last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
+assert last["gate_status"] == "fail", last
+assert last["verification"]["status"] == "fail", last
+PY
+
+VERIFY_ERROR_DIR="$FIXTURE_DIR/verify-error"
+mkdir -p "$VERIFY_ERROR_DIR/scripts"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_ERROR_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_ERROR_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  cat > scripts/detect-agent-tech-stack.sh <<'EOF_ERROR_DETECTOR'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--json" ]]; then
+  printf '%s\n' '{not-json'
+  exit 0
+fi
+printf '%s\n' "tech_stacks=generic"
+EOF_ERROR_DETECTOR
+  chmod +x scripts/detect-agent-tech-stack.sh
+  scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
+)
+python3 - "$VERIFY_ERROR_DIR/.agents/state/last-verify-report.json" "$VERIFY_ERROR_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+assert report["verification_status"] == "error", report
+last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
+assert last["gate_status"] == "warn", last
+assert last["verification"]["status"] == "error", last
 PY
 
 # Task 5: session telemetry JSONL appended on a passing pre-final (checks the
@@ -1445,9 +1622,11 @@ import sys
 lines = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 assert lines, "no telemetry lines"
 last = lines[-1]
-assert last["schema"] == "agent-guard-event/v1", last
+assert last["schema"] == "agent-guard-event/v2", last
 assert last["event"] == "pre_final", last
+assert last["gate_status"] == "pass", last
 assert last["verification"]["ran"] is True, last
+assert last["verification"]["status"] == "pass", last
 assert last["verification"]["summary"]["fail"] == 0, last
 PY
 
@@ -1461,12 +1640,23 @@ import sys
 
 lines = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
 last = lines[-1]
-assert last["schema"] == "agent-guard-event/v1", last
+assert last["schema"] == "agent-guard-event/v2", last
 assert last["event"] == "pre_final", last
+assert last["gate_status"] == "pass", last
 assert last["verification"]["ran"] is False, last
+assert last["verification"]["status"] == "none", last
 assert last["verification"]["available"] is False, last
 PY
 
+(
+  cd "$VERIFY_OK_DIR"
+  before="$(wc -l < .agents/state/session-events.jsonl 2>/dev/null || echo 0)"
+  for _ in 1 2 3 4 5; do scripts/agent-guard.sh check >/dev/null 2>&1 || true; done
+  after="$(wc -l < .agents/state/session-events.jsonl 2>/dev/null || echo 0)"
+  [[ "$before" == "$after" ]] || fail "non-pre-final subcommand emitted a close-out event"
+)
+
+note "stack drift and read-only guard behavior"
 # Task 4: stack drift check — pre-final compares the live detector summary with the lock.
 STACK_DRIFT_DIR="$FIXTURE_DIR/stack-drift-prefinal"
 mkdir -p "$STACK_DRIFT_DIR"
@@ -1612,6 +1802,7 @@ EOF_MERGE_ERR
 )"
 need_contains "$merge_err" "synthetic overlay merge diagnostic" "write_overlay_file surfaces overlay_merge stderr"
 
+note "overlay, cleanup, stale-version, and candidate lifecycle"
 # USER-overlay engine: keyed regions preserved, orphans parked (B1).
 . "$BOOTSTRAP_BUNDLE/lib/overlays.sh"
 ov_old="$TMP_DIR/ov-old.md"; ov_new="$TMP_DIR/ov-new.md"; ov_out="$TMP_DIR/ov-out.md"
