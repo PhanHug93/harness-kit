@@ -5,7 +5,7 @@ Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
 docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
 scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.24.2`).
+Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION) (currently `2026.06.24.3`).
 
 ## What it generates
 
@@ -75,7 +75,7 @@ agent-init --apply-candidates
 One-shot safe upgrade from another machine/project:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 The one-shot path installs the pinned release into `$HOME/dev/agent-bootstrap`,
@@ -154,6 +154,9 @@ commands. Results are written to `.agents/state/last-verify-report.json`, and an
 Generated Claude Code settings also register a Stop hook that runs fast
 close-out verification when the tree has changes; Gemini, Cursor, and Windsurf
 remain advisory and should run the pre-final command manually.
+The generated CI workflow is a portable skeleton: add project stack setup before
+the guard step, then mark `agent-guard / verify` as a required status check in
+branch protection.
 
 ## Contracts and schemas
 

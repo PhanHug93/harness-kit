@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
+# Portable close-out gate. Runs preflight before fast verification so fresh
+# clones have a context pack before pre-final freshness checks.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+scope="${AGENT_GUARD_PREPUSH_SCOPE:-fast}"
+
+bash "$ROOT/scripts/agent-guard.sh" preflight >/dev/null
+exec bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope"

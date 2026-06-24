@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026.06.24.3 — Observability + portable close-out enforcement
+
+- **Agent Guard stats.** `scripts/agent-guard.sh stats` aggregates close-out
+  telemetry (`agent-guard-event/v2` pre-final events) and reports gate status,
+  verification status, and the `verification:none` rate.
+- **Recovery surfacing.** `scripts/agent-guard.sh status` now surfaces pending
+  bootstrap-managed generated candidates and parked USER-overlay orphans, and
+  generated targets include `docs/agent-configs/RECOVERY.md` with concrete
+  partial-upgrade recovery commands.
+- **Opt-in portable enforcement.** Generated targets ship
+  `scripts/githooks/pre-push`, `scripts/install-git-hooks.sh`, and a GitHub
+  Actions workflow template that run `preflight` before close-out verification;
+  the installer refuses to overwrite an existing `core.hooksPath` unless
+  `--force` is used.
+
 ## 2026.06.24.2 — Harness Path B hardening
 
 - **behavioral close-out hardening.** Claude Code targets now get a Stop hook

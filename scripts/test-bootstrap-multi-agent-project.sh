@@ -470,9 +470,10 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.06.24.2" ]] || fail "VERSION not bumped to 2026.06.24.2"
+[[ "$bundle_version" == "2026.06.24.3" ]] || fail "VERSION not bumped to 2026.06.24.3"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
-need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "behavioral" "changelog marks behavioral change"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
 need_contains "$(cat "$BOOTSTRAP_BUNDLE/MANIFEST.md")" "$bundle_version" "manifest version"
 grep -Fq 'agent-guard-event/v2' "$BOOTSTRAP_BUNDLE/agent-guard.sh" || fail "event schema not bumped to v2"
 assert_json_escape_handles_control_chars
@@ -499,6 +500,8 @@ for canonical_file in \
   agent-guard.sh \
   agent-onboarding.sh \
   detect-agent-tech-stack.sh \
+  githooks/pre-push \
+  install-git-hooks.sh \
   install-rtk.sh \
   rtk \
   verify-ai-deps.sh \
@@ -514,6 +517,7 @@ for canonical_file in \
   schemas/agent-guard-event-v2.schema.json \
   templates/base/README.md \
   templates/tool-contract/shared.md \
+  templates/ci/agent-guard.yml \
   templates/overlays/android_kotlin.md \
   templates/overlays/generic.md \
   templates/overlays/ios_swift.md \
@@ -864,6 +868,34 @@ while IFS= read -r runtime_snapshot; do
   fi
   need_same_file "$runtime_snapshot" "$TMP_DIR/scripts/$base" "generated runtime snapshot $base"
 done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BOOTSTRAP_BUNDLE"/*.sh "$BOOTSTRAP_BUNDLE"/rtk 2>/dev/null | sort)
+need_same_file "$BOOTSTRAP_BUNDLE/githooks/pre-push" "$TMP_DIR/scripts/githooks/pre-push" "generated pre-push hook"
+[[ -x "$TMP_DIR/scripts/githooks/pre-push" ]] || fail "pre-push hook is not executable"
+need_same_file "$BOOTSTRAP_BUNDLE/install-git-hooks.sh" "$TMP_DIR/scripts/install-git-hooks.sh" "generated git hook installer"
+[[ -x "$TMP_DIR/scripts/install-git-hooks.sh" ]] || fail "git hook installer is not executable"
+[[ -f "$TMP_DIR/.github/workflows/agent-guard.yml" ]] || fail "agent-guard CI workflow not generated into target"
+need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "pre-final --run-verify" "pre-push runs close-out verification"
+need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "preflight" "pre-push runs preflight before pre-final"
+need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "preflight" "CI workflow runs preflight before pre-final"
+need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "--verify-scope full" "CI workflow runs full close-out verification"
+need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "Add project stack setup" "CI workflow documents required stack setup"
+need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "required status check" "CI workflow documents branch protection wiring"
+[[ -f "$TMP_DIR/docs/agent-configs/RECOVERY.md" ]] || fail "RECOVERY.md not generated into target"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "partial upgrade" "RECOVERY covers partial upgrade"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "git restore" "RECOVERY gives a concrete restore command"
+(
+  cd "$TMP_DIR"
+  git init -q
+  git config --unset core.hooksPath 2>/dev/null || true
+  scripts/install-git-hooks.sh >/dev/null
+  [[ "$(git config core.hooksPath)" == "scripts/githooks" ]] || fail "installer did not arm hooksPath"
+  git config core.hooksPath .githooks-other
+  if scripts/install-git-hooks.sh >/dev/null 2>&1; then
+    fail "installer overwrote existing hooksPath without --force"
+  fi
+  scripts/install-git-hooks.sh --force >/dev/null
+  [[ "$(git config core.hooksPath)" == "scripts/githooks" ]] || fail "installer --force did not override hooksPath"
+  git config --unset core.hooksPath 2>/dev/null || true
+)
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md" ]] || fail "full bootstrap did not generate agentmemory skill"
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/agents/openai.yaml" ]] || fail "full bootstrap did not generate agentmemory openai metadata"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit"' "Claude settings edit/write guard hook"
@@ -1207,6 +1239,38 @@ PY
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-doctor-readonly.out")" "agent guard check passes" "Codex doctor uses read-only agent guard check"
 [[ ! -e "$GUARD_DIR/.agents/state/context-pack.json" ]] || fail "Codex doctor created context-pack side effect"
 
+note "agent guard status recovery and stats"
+printf 'stale\n' > "$GUARD_DIR/AGENTS.md.generated.20260101000000"
+printf 'export const x=1\n' > "$GUARD_DIR/api.generated.ts"
+(cd "$GUARD_DIR" && scripts/agent-guard.sh status >"$TMP_DIR"/out/bootstrap-guard-status-recovery.out 2>&1)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-status-recovery.out")" "AGENTS.md.generated" "status surfaces managed generated candidate"
+if grep -q 'api.generated.ts' "$TMP_DIR"/out/bootstrap-guard-status-recovery.out; then
+  fail "status wrongly surfaced project-owned .generated file"
+fi
+rm -f "$GUARD_DIR/AGENTS.md.generated.20260101000000" "$GUARD_DIR/api.generated.ts"
+mkdir -p "$GUARD_DIR/.agents/state"
+cat > "$GUARD_DIR/.agents/state/session-events.jsonl" <<'EOF_STATS_EVENTS'
+{"schema":"agent-guard-event/v2","event":"pre_final","gate_status":"warn","verification":{"status":"none","available":false}}
+{"schema":"agent-guard-event/v2","event":"pre_final","gate_status":"fail","verification":{"status":"fail","available":true}}
+{"schema":"some-other/v1","event":"unrelated","gate_status":"pass","verification":{"status":"pass"}}
+{"schema":"agent-guard-event/v2","event":"heartbeat","gate_status":"pass","verification":{"status":"pass"}}
+EOF_STATS_EVENTS
+(cd "$GUARD_DIR" && scripts/agent-guard.sh stats --json >"$TMP_DIR"/out/bootstrap-guard-stats.json)
+python3 - "$TMP_DIR/out/bootstrap-guard-stats.json" <<'PY'
+import json
+import sys
+
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+assert doc["schema"] == "agent-guard-stats/v1", doc
+assert doc["total_events"] == 2, doc
+assert doc["gate_status"] == {"pass": 0, "warn": 1, "fail": 1}, doc
+assert doc["verification_status"]["none"] == 1, doc
+assert doc["verification_status"]["fail"] == 1, doc
+assert doc["verification_none_rate"] == 0.5, doc
+PY
+(cd "$GUARD_DIR" && scripts/agent-guard.sh stats >"$TMP_DIR"/out/bootstrap-guard-stats.txt)
+need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-stats.txt")" "verification:none rate" "stats surfaces none-rate"
+
 note "memory pre-final journal gate"
 # pre-final enforces memory close-out only through the journal artifact. High-risk
 # is derived from git diff intersecting protected_paths, not agent self-report.
@@ -1457,6 +1521,10 @@ assert last["schema"] == "agent-guard-event/v2", last
 assert last["gate_status"] == "warn", last
 assert last["verification"]["status"] == "fail", last
 PY
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" AGENT_GUARD_PREPUSH_SCOPE=fast scripts/githooks/pre-push >"$TMP_DIR"/out/bootstrap-prepush-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prepush-verify-fail.err); then
+  fail "generated pre-push hook passed with a failing verification command"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prepush-verify-fail.err")" "verification failed" "generated pre-push blocks failing verification"
 (
   cd "$VERIFY_FAIL_DIR"
   printf '%s\n' "dirty close-out trigger" >> README.md
@@ -1524,6 +1592,63 @@ EOF_FORGE_DETECTOR
   PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
 )
 [[ ! -e "$INJECT_DIR/PWNED" ]] || fail "verification runner executed an injected command (shell=True regression)"
+
+VERIFY_START_ERROR_DIR="$FIXTURE_DIR/verify-start-error"
+mkdir -p "$VERIFY_START_ERROR_DIR"
+cat > "$VERIFY_START_ERROR_DIR/package.json" <<'EOF_START_ERROR_PACKAGE'
+{
+  "type": "module",
+  "scripts": {
+    "test": "definitely-missing-agent-bootstrap-command"
+  }
+}
+EOF_START_ERROR_PACKAGE
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_START_ERROR_DIR" --workflow full >/dev/null
+(
+  cd "$VERIFY_START_ERROR_DIR"
+  git init -q
+  git config user.email "agent-bootstrap-test@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  git add -A
+  git commit -qm baseline
+  scripts/agent-guard.sh preflight >/dev/null
+  start_error_summary="$(scripts/detect-agent-tech-stack.sh --summary)"
+  cat > scripts/detect-agent-tech-stack.sh <<EOF_START_ERROR_DETECTOR
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--summary" ]]; then
+  printf '%s\n' "$start_error_summary"
+  exit 0
+fi
+if [[ "\${1:-}" == "--json" ]]; then
+  printf '%s\n' '{"schema":"agent-tech-stack-detection/v1","tech_stacks":["node_js"],"modules":[],"verification_commands":["definitely-missing-agent-bootstrap-command"],"warnings":[]}'
+  exit 0
+fi
+printf '%s\n' "tech_stacks=node_js"
+EOF_START_ERROR_DETECTOR
+  chmod +x scripts/detect-agent-tech-stack.sh
+)
+if (cd "$VERIFY_START_ERROR_DIR" && scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-start-error.out 2>"$TMP_DIR"/out/bootstrap-prefinal-start-error.err); then
+  fail "pre-final --run-verify passed with a missing verification executable"
+fi
+need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-start-error.err")" "failed to start" "pre-final reports verification command start errors distinctly"
+python3 - "$VERIFY_START_ERROR_DIR/.agents/state/last-verify-report.json" "$VERIFY_START_ERROR_DIR/.agents/state/session-events.jsonl" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+assert report["verification_status"] == "error", report
+assert report["summary"]["fail"] == 0, report
+assert report["summary"]["error"] == 1, report
+assert any(
+    item["command"] == "definitely-missing-agent-bootstrap-command"
+    and item["status"] == "error"
+    and item["reason"] == "failed_to_start"
+    for item in report["commands"]
+), report
+last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
+assert last["gate_status"] == "fail", last
+assert last["verification"]["status"] == "error", last
+PY
 
 BUDGET_DIR="$FIXTURE_DIR/verify-budget"
 mkdir -p "$BUDGET_DIR/scripts"
@@ -1625,6 +1750,11 @@ last = lines[-1]
 assert last["schema"] == "agent-guard-event/v2", last
 assert last["event"] == "pre_final", last
 assert last["gate_status"] == "pass", last
+assert isinstance(last["mode"], str) and last["mode"], last
+assert isinstance(last["files_changed"], int) and last["files_changed"] >= 0, last
+assert isinstance(last["token_estimate"], dict), last
+assert isinstance(last["token_estimate"]["core_startup"], int), last
+assert last["token_estimate"]["core_startup"] > 0, last
 assert last["verification"]["ran"] is True, last
 assert last["verification"]["status"] == "pass", last
 assert last["verification"]["summary"]["fail"] == 0, last
@@ -1643,6 +1773,10 @@ last = lines[-1]
 assert last["schema"] == "agent-guard-event/v2", last
 assert last["event"] == "pre_final", last
 assert last["gate_status"] == "pass", last
+assert isinstance(last["mode"], str) and last["mode"], last
+assert isinstance(last["files_changed"], int) and last["files_changed"] >= 0, last
+assert isinstance(last["token_estimate"], dict), last
+assert isinstance(last["token_estimate"]["core_startup"], int), last
 assert last["verification"]["ran"] is False, last
 assert last["verification"]["status"] == "none", last
 assert last["verification"]["available"] is False, last
@@ -1790,7 +1924,7 @@ merge_err="$(
     CANDIDATE_ON_CONFLICT=false
     STAMP=20990101-000000
     LAST_WRITTEN_FILE=""
-    # shellcheck disable=SC2329  # write_overlay_file invokes this override by name.
+    # shellcheck disable=SC2317,SC2329  # write_overlay_file invokes this override by name.
     overlay_merge() {
       printf 'synthetic overlay merge diagnostic\n' >&2
       return 1

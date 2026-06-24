@@ -123,6 +123,7 @@ write_template_catalog() {
   local template
   for template in \
     base/README.md \
+    ci/agent-guard.yml \
     tool-contract/shared.md \
     overlays/android_kotlin.md \
     overlays/generic.md \
@@ -136,6 +137,76 @@ write_template_catalog() {
       "templates/$template" \
       "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$template"
   done
+}
+
+write_recovery_runbook() {
+  write_file "$TARGET_DIR/docs/agent-configs/RECOVERY.md" <<'EOF'
+# Agent Bootstrap Recovery
+
+Use this runbook when an upgrade or regeneration stops halfway, leaves visible
+candidates, or parks a USER overlay that no longer has a matching managed
+section.
+
+## partial upgrade
+
+Inspect the current harness state first:
+
+```bash
+scripts/agent-guard.sh status
+```
+
+If `pending_generated_candidates=` lists a file, review the generated candidate
+next to the preserved file. Accept it only after review, or restore the managed
+file back to the committed state:
+
+```bash
+git diff -- <path>
+git restore --staged --worktree <path>
+```
+
+For bootstrap-managed `.generated.<stamp>` candidates that should replace their
+base file, run the project bootstrap with candidate application enabled from the
+same bundle that created the candidate:
+
+```bash
+bash scripts/bootstrap-multi-agent-project.sh --apply-candidates
+```
+
+Then run:
+
+```bash
+scripts/agent-guard.sh status
+scripts/verify-ai-deps.sh
+```
+
+## parked USER overlays
+
+If `parked_user_overlays=` names a managed markdown file, open that file and
+look for:
+
+```markdown
+<!-- USER (orphaned): re-home into a current USER block or delete -->
+```
+
+Move the parked text into the current `<!-- BEGIN USER: ... -->` block that now
+owns the customization, or delete it if it is obsolete. Do not remove unrelated
+managed blocks while doing this.
+
+## overwritten local settings
+
+`.claude/settings.json` is generated wholesale. Re-apply any local-only Claude
+customization from git history or your local notes after bootstrap regenerates
+the file. Keep machine-specific or personal settings in local files where the
+tool supports them.
+EOF
+}
+
+write_portable_enforcement() {
+  copy_bundle_file "githooks/pre-push" "$TARGET_DIR/scripts/githooks/pre-push"
+  make_executable "$LAST_WRITTEN_FILE"
+  copy_bundle_file "install-git-hooks.sh" "$TARGET_DIR/scripts/install-git-hooks.sh"
+  make_executable "$LAST_WRITTEN_FILE"
+  copy_bundle_file "templates/ci/agent-guard.yml" "$TARGET_DIR/.github/workflows/agent-guard.yml"
 }
 
 write_schema_model_and_provenance_catalog() {

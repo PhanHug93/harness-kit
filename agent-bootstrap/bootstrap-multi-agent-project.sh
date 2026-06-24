@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.06.24.2"
+AGENT_BOOTSTRAP_VERSION="2026.06.24.3"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -720,7 +720,9 @@ main() {
   fi
   write_agent_bootstrap_lock
   write_template_catalog
+  write_recovery_runbook
   write_schema_model_and_provenance_catalog
+  write_portable_enforcement
   write_agentmemory_skill
   write_rtk_tools
   write_tech_stack_lib

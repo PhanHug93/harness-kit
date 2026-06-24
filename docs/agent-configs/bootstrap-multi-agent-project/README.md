@@ -324,6 +324,8 @@ scripts/agent-guard.sh pre-final --run-verify
 
 `pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
 
+The generated CI workflow is a portable skeleton: add project stack setup before the guard step, then mark `agent-guard / verify` as a required status check in branch protection.
+
 ## Agent Guard Lite
 
 The harness includes a file-based guardrail instead of a daemon, database, or

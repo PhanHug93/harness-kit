@@ -352,6 +352,7 @@ Claude Code auto-runs fast close-out verification through a Stop hook when the
 tree has changes; Gemini, Cursor, and Windsurf do not expose an equivalent
 close-out hook here, so their loop remains advisory and agents must run the
 pre-final command manually.
+Optional git gate: \`scripts/install-git-hooks.sh\`.
 
 If the detector output changes intentionally, refresh the lock:
 
@@ -654,6 +655,7 @@ Claude Code auto-runs fast close-out verification through a Stop hook when the
 tree has changes; Gemini, Cursor, and Windsurf do not expose an equivalent
 close-out hook here, so their loop remains advisory and agents must run the
 pre-final command manually.
+Optional git gate: \`scripts/install-git-hooks.sh\`.
 
 Stack detection logic lives in \`scripts/agent-tech-stack-lib.sh\`; update that
 library rather than duplicating detection rules in multiple scripts.
