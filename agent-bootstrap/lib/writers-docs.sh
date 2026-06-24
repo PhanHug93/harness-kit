@@ -348,6 +348,10 @@ scripts/agent-guard.sh pre-final --run-verify
 This runs the fast verification subset. For release, high-risk, or final PR
 readiness, review the detected verification commands first, then run
 \`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`.
+Claude Code auto-runs fast close-out verification through a Stop hook when the
+tree has changes; Gemini, Cursor, and Windsurf do not expose an equivalent
+close-out hook here, so their loop remains advisory and agents must run the
+pre-final command manually.
 
 If the detector output changes intentionally, refresh the lock:
 
@@ -546,6 +550,13 @@ EOF
 	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
 	        ]
 	      }
+	    ],
+    "Stop": [
+	      {
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh close-out" }
+	        ]
+	      }
 	    ]
 	  }
 }
@@ -639,6 +650,10 @@ readiness, review the detected verification commands first, then run
 detected command is a placeholder or needs unavailable local services, record
 the skip reason in the task journal and rerun with \`--advisory\` only when the
 user or CI environment explicitly requires advisory mode.
+Claude Code auto-runs fast close-out verification through a Stop hook when the
+tree has changes; Gemini, Cursor, and Windsurf do not expose an equivalent
+close-out hook here, so their loop remains advisory and agents must run the
+pre-final command manually.
 
 Stack detection logic lives in \`scripts/agent-tech-stack-lib.sh\`; update that
 library rather than duplicating detection rules in multiple scripts.
@@ -1252,6 +1267,13 @@ EOF
 	        "matcher": "Edit|Write|MultiEdit",
 	        "hooks": [
 	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      }
+	    ],
+    "Stop": [
+	      {
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh close-out" }
 	        ]
 	      }
 	    ]

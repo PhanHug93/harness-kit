@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 WORKFLOW_PRESET="full"
@@ -439,6 +440,7 @@ expected_schema_ids = {
     "agent-bootstrap-lock-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-lock-v1.schema.json",
     "agent-bootstrap-status-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
     "agent-bootstrap-verify-report-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-verify-report-v1.schema.json",
+    "agent-guard-event-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-event-v2.schema.json",
 }
 for filename, schema_id in expected_schema_ids.items():
     schema = load_json(f"{schema_dir}/{filename}") or {}
@@ -683,7 +685,8 @@ if command -v python3 >/dev/null 2>&1; then
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1; then
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1; then
     ok "schema/model profile JSON parses"
   else
     bad "schema/model profile JSON is invalid"

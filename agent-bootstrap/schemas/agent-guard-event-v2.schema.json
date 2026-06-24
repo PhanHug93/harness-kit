@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-guard-event-v2.schema.json",
+  "title": "Agent Guard close-out event",
+  "type": "object",
+  "required": ["schema", "event", "generated_at", "gate_status", "verification"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "agent-guard-event/v2" },
+    "event": { "const": "pre_final" },
+    "generated_at": { "type": "string", "minLength": 1 },
+    "gate_status": { "enum": ["pass", "warn", "fail"] },
+    "verification": {
+      "type": "object",
+      "required": ["ran", "available", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "ran": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "status": { "enum": ["pass", "fail", "none", "skipped", "error"] },
+        "summary": { "type": "object" },
+        "report_path": { "type": "string", "minLength": 1 },
+        "error": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

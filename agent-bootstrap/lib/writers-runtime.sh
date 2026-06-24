@@ -7,6 +7,7 @@
 write_rtk_tools() {
   write_file "$TARGET_DIR/scripts/install-rtk.sh" <<'EOF'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -100,6 +101,7 @@ EOF
 
   write_file "$TARGET_DIR/scripts/rtk" <<'EOF'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -162,6 +164,9 @@ write_schema_model_and_provenance_catalog() {
     "schemas/agent-bootstrap-verify-report-v1.schema.json" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json"
   copy_bundle_file \
+    "schemas/agent-guard-event-v2.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json"
+  copy_bundle_file \
     "provenance/rtk-v0.37.2.sha256" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
 }
@@ -174,6 +179,7 @@ write_tech_stack_lib() {
 write_runtime_detector() {
   write_file "$TARGET_DIR/scripts/detect-agent-tech-stack.sh" <<'EOF'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -257,6 +263,7 @@ write_agent_onboarding_runtime() {
 write_agent_hook() {
   write_file "$TARGET_DIR/scripts/agent-hook.sh" <<'EOF'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 WORKFLOW_PRESET="__WORKFLOW_PRESET__"
@@ -581,6 +588,57 @@ doctor() {
   fi
 }
 
+close_out() {
+  # Claude Code Stop hook. Run fast verification in advisory mode so unrelated
+  # strict checks do not abort the hook, then block Stop (exit 2) only when this
+  # session has file changes and the verification report contains real failures.
+  # Gemini/Cursor/Windsurf have no equivalent close-out hook, so those surfaces
+  # stay advisory and should call agent-guard pre-final manually.
+  local input stop_active=false report failed=0 err_file
+  input="$(cat 2>/dev/null || true)"
+  if command -v python3 >/dev/null 2>&1; then
+    stop_active="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null || printf 'false\n'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    payload = {}
+print("true" if payload.get("stop_hook_active") is True else "false")
+PY
+)"
+  fi
+  [[ "$stop_active" == "true" ]] && exit 0
+  if command -v git >/dev/null 2>&1 &&
+    [[ -z "$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null)" ]]; then
+    exit 0
+  fi
+  err_file="$PROJECT_ROOT/.agents/state/closeout.err"
+  mkdir -p "$(dirname "$err_file")" 2>/dev/null || err_file="${TMPDIR:-/tmp}/agent-bootstrap-closeout.err"
+  "$AGENT_GUARD" pre-final --run-verify --verify-scope fast --advisory >/dev/null 2>"$err_file" || true
+  report="$PROJECT_ROOT/.agents/state/last-verify-report.json"
+  if [[ -f "$report" ]] && command -v python3 >/dev/null 2>&1; then
+    failed="$(python3 - "$report" <<'PY' 2>/dev/null || printf '0\n'
+import json
+import sys
+
+try:
+    doc = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    print(0)
+    raise SystemExit(0)
+print(int(doc.get("summary", {}).get("fail", 0)))
+PY
+)"
+  fi
+  if [[ "${failed:-0}" -gt 0 ]]; then
+    printf 'agent-guard: close-out fast verification failed (%s failed); review .agents/state/last-verify-report.json before completing.\n' "$failed" >&2
+    exit 2
+  fi
+  exit 0
+}
+
 case "${1:-}" in
   claude-pretool)
     shift || true
@@ -599,8 +657,11 @@ case "${1:-}" in
   doctor)
     doctor
     ;;
+  close-out)
+    close_out
+    ;;
   -h|--help|help|"")
-    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor"
+    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
     ;;
   *)
     fail "unknown command: $1"
@@ -615,6 +676,7 @@ EOF
 write_verify_ai_deps() {
   write_file "$TARGET_DIR/scripts/verify-ai-deps.sh" <<'EOF'
 #!/usr/bin/env bash
+# AGENT_BOOTSTRAP_GENERATED
 set -euo pipefail
 
 WORKFLOW_PRESET="__WORKFLOW_PRESET__"
@@ -1055,6 +1117,7 @@ expected_schema_ids = {
     "agent-bootstrap-lock-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-lock-v1.schema.json",
     "agent-bootstrap-status-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
     "agent-bootstrap-verify-report-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-verify-report-v1.schema.json",
+    "agent-guard-event-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-event-v2.schema.json",
 }
 for filename, schema_id in expected_schema_ids.items():
     schema = load_json(f"{schema_dir}/{filename}") or {}
@@ -1299,7 +1362,8 @@ if command -v python3 >/dev/null 2>&1; then
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1; then
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1; then
     ok "schema/model profile JSON parses"
   else
     bad "schema/model profile JSON is invalid"

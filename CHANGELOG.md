@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.06.24.2 — Harness Path B hardening
+
+- **behavioral close-out hardening.** Claude Code targets now get a Stop hook
+  that runs fast close-out verification through `scripts/agent-hook.sh close-out`
+  when the tree has changes; non-Claude surfaces remain advisory and must run
+  `scripts/agent-guard.sh pre-final --run-verify` manually.
+- **Honest verification telemetry.** `agent-guard.sh` emits
+  `agent-guard-event/v2` close-out events with separate `gate_status` and
+  `verification.status`, including fail, warn, none, skipped, and error paths.
+- **Safer verification runner.** Detected verification commands now run with
+  `shell=False`, all-skipped runs warn instead of printing a false green, and a
+  total wall-clock budget prevents interactive close-out from multiplying the
+  per-command timeout across every detected command.
+- **Maintainability rails.** Runtime snapshot drift is discovery-based, the
+  schema catalog includes close-out events, and the extension guide maps the
+  exact files/tests to touch when adding stacks, tool surfaces, or guard checks.
+
 ## 2026.06.24.1 — Harness closed-loop verification
 
 - **Closed-loop pre-final verification.** `agent-guard.sh pre-final --run-verify`

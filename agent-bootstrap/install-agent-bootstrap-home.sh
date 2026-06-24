@@ -322,6 +322,7 @@ main() {
   copy_file "schemas/agent-bootstrap-lock-v1.schema.json" "schemas/agent-bootstrap-lock-v1.schema.json"
   copy_file "schemas/agent-bootstrap-status-v1.schema.json" "schemas/agent-bootstrap-status-v1.schema.json"
   copy_file "schemas/agent-bootstrap-verify-report-v1.schema.json" "schemas/agent-bootstrap-verify-report-v1.schema.json"
+  copy_file "schemas/agent-guard-event-v2.schema.json" "schemas/agent-guard-event-v2.schema.json"
   copy_file "templates/base/README.md" "templates/base/README.md"
   copy_file "templates/tool-contract/shared.md" "templates/tool-contract/shared.md"
   copy_file "templates/overlays/android_kotlin.md" "templates/overlays/android_kotlin.md"
