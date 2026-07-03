@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.07.03.1 — Optional mobile optimization skill
+
+- **Opt-in mobile optimization skill.** Added `--add-skill mobile-optimization`
+  to emit a Kotlin/Swift optimization skill only when explicitly requested,
+  with stack-selected overlays, few-shots, and thin pointers for Codex, Claude,
+  Cursor, and Windsurf.
+- **Lock-backed optional skill registry.** `agent-bootstrap.lock.json` now
+  records installed optional skills so default updates preserve the AGENTS.md
+  pointer and `--apply-candidates` can promote optional skill candidates without
+  requiring operators to remember the install flag.
+- **Candidate hygiene.** Identical generated content no longer creates
+  `.generated.*` candidates, while real managed-file drift still surfaces for
+  review and promotion.
+
 ## 2026.06.24.3 — Observability + portable close-out enforcement
 
 - **Agent Guard stats.** `scripts/agent-guard.sh stats` aggregates close-out

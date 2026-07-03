@@ -95,10 +95,14 @@ compute_apply_state() {
 
 write_agent_bootstrap_lock() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
-  local summary hash overlays overlay_json first saved_force saved_candidate
+  local summary hash overlays overlay_json skills_json first saved_force saved_candidate
+  local apply_state lock_generated_at existing_generated_at existing_version existing_channel existing_project existing_workflow existing_hash existing_apply_state
+  local existing_skills current_skills
   summary="$(detector_summary_for_lock)"
   hash="$(printf '%s' "$summary" | hash_text)"
   overlays="$(selected_template_overlays | sort -u)"
+  skills_json="$(selected_optional_skills_json)"
+  apply_state="$(compute_apply_state)"
   overlay_json=""
   first=true
   while IFS= read -r overlay; do
@@ -111,6 +115,29 @@ write_agent_bootstrap_lock() {
     overlay_json+="\"$(json_escape "$overlay")\""
   done <<< "$overlays"
   [[ -n "$overlay_json" ]] || overlay_json='"generic"'
+  [[ -n "$skills_json" ]] || skills_json=""
+  lock_generated_at="$STAMP"
+  if [[ -f "$lock_file" ]]; then
+    existing_generated_at="$(read_lock_value generated_at "$lock_file")"
+    existing_version="$(read_lock_value version "$lock_file")"
+    existing_channel="$(read_lock_value channel "$lock_file")"
+    existing_project="$(read_lock_value project_name "$lock_file")"
+    existing_workflow="$(read_lock_value workflow_preset "$lock_file")"
+    existing_hash="$(read_lock_value detector_summary_sha256 "$lock_file")"
+    existing_apply_state="$(read_lock_value apply_state "$lock_file")"
+    existing_skills="$(read_lock_skills "$lock_file" | sort | tr '\n' ',')"
+    current_skills="$(selected_optional_skills | sort | tr '\n' ',')"
+    if [[ -n "$existing_generated_at" ]] &&
+      [[ "$existing_version" == "$AGENT_BOOTSTRAP_VERSION" ]] &&
+      [[ "$existing_channel" == "$AGENT_BOOTSTRAP_CHANNEL" ]] &&
+      [[ "$existing_project" == "$PROJECT_NAME" ]] &&
+      [[ "$existing_workflow" == "$WORKFLOW_PRESET" ]] &&
+      [[ "$existing_hash" == "$hash" ]] &&
+      [[ "$existing_apply_state" == "$apply_state" ]] &&
+      [[ "$existing_skills" == "$current_skills" ]]; then
+      lock_generated_at="$existing_generated_at"
+    fi
+  fi
 
   saved_force="$FORCE"
   saved_candidate="$CANDIDATE_ON_CONFLICT"
@@ -123,9 +150,10 @@ write_agent_bootstrap_lock() {
   "schema": "agent-bootstrap-lock/v1",
   "version": "$AGENT_BOOTSTRAP_VERSION",
   "channel": "$AGENT_BOOTSTRAP_CHANNEL",
+  "skills": [$skills_json],
   "project_name": "$(json_escape "$PROJECT_NAME")",
-  "generated_at": "$STAMP",
-  "apply_state": "$(compute_apply_state)",
+  "generated_at": "$lock_generated_at",
+  "apply_state": "$apply_state",
   "rtk": {
     "required": true,
     "version": "$RTK_VERSION",

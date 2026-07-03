@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.06.24.3`
+Version: `2026.07.03.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -53,6 +53,18 @@ change, including doc, generator, or runtime-snapshot edits.
 | `templates/overlays/ios_swift.md` | iOS/Swift overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/node_js.md` | Node/Web overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/python.md` | Python overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
+| `templates/skills/mobile-optimization/SKILL.md` | Mobile optimization skill entrypoint copied into selected Kotlin/Swift target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content. |
+| `templates/skills/mobile-optimization/WRITER-INTEGRATION.md` | Writer-only integration notes for the mobile optimization skill. | Must match canonical home export and source docs template; must not be emitted into generated target projects. |
+| `templates/skills/mobile-optimization/catalog.md` | Mobile optimization anti-pattern catalog copied into selected Kotlin/Swift target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content. |
+| `templates/skills/mobile-optimization/fewshots/kotlin.md` | Kotlin mobile optimization few-shot copied only into Kotlin target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content when selected. |
+| `templates/skills/mobile-optimization/fewshots/swift.md` | Swift mobile optimization few-shot copied only into Swift target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content when selected. |
+| `templates/skills/mobile-optimization/overlays/kotlin.md` | Kotlin mobile optimization overlay copied only into Kotlin target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content when selected. |
+| `templates/skills/mobile-optimization/overlays/swift.md` | Swift mobile optimization overlay copied only into Swift target projects. | Must match canonical home export, source docs template, generated target template, and emitted skill content when selected. |
+| `templates/skills/mobile-optimization/pointers/claude.command.md` | Claude command pointer for on-demand mobile optimization. | Must match canonical home export and source docs template; generated command must reference the emitted skill entrypoint. |
+| `templates/skills/mobile-optimization/pointers/cursor.rules.mdc` | Cursor glob pointer for on-demand mobile optimization. | Must match canonical home export and source docs template; generated pointer must substitute detected language globs. |
+| `templates/skills/mobile-optimization/pointers/pointer-body.md` | Shared pointer body for mobile optimization surfaces. | Must match canonical home export and source docs template. |
+| `templates/skills/mobile-optimization/pointers/windsurf.rules.md` | Windsurf glob pointer for on-demand mobile optimization. | Must match canonical home export and source docs template; generated pointer must substitute detected language globs. |
+| `templates/skills/mobile-optimization/skill.manifest.json` | Schema-first manifest for mobile optimization stack selection, budget, and emitted surfaces. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/workflows/council/README.md` | Council workflow template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/workflows/karpathy/README.md` | Karpathy workflow template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/workflows/three-mode/README.md` | Three-mode workflow template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
