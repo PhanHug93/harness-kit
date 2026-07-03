@@ -1,0 +1,1 @@
+For Kotlin/Swift optimization, performance-refactor, or efficiency-review tasks: read `.agents/skills/mobile-optimization/SKILL.md`, follow its Process and Response Format, and load only the matching overlay/few-shot. Security-sensitive code needs a behavior test before any optimization.

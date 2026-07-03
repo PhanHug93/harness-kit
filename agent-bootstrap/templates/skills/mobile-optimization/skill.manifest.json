@@ -1,0 +1,34 @@
+{
+  "schema": "harness-skill-manifest-v1",
+  "name": "mobile-optimization",
+  "purpose": "Behavior-preserving code-level optimization for Kotlin/Swift",
+  "activation": "on_demand",
+  "select_by_stack": {
+    "android_kotlin": {
+      "content": ["SKILL.md", "catalog.md", "overlays/kotlin.md", "fewshots/kotlin.md"],
+      "globs": "**/*.kt,**/*.kts"
+    },
+    "ios_swift": {
+      "content": ["SKILL.md", "catalog.md", "overlays/swift.md", "fewshots/swift.md"],
+      "globs": "**/*.swift"
+    }
+  },
+  "emit": {
+    "content_root": ".agents/skills/mobile-optimization/",
+    "pointers": {
+      "windsurf": ".windsurf/rules/mobile-optimization.md",
+      "cursor": ".cursor/rules/mobile-optimization.mdc",
+      "claude_command": ".claude/commands/optimize-code.md",
+      "agents_md": "one line in the Skills section"
+    }
+  },
+  "token_budget": {
+    "always_on_max": 120,
+    "on_invoke_max_per_language": 4200,
+    "note": "always_on = pointer surfaces only; content loads on invocation"
+  },
+  "loop_integration": {
+    "validate_step": "scripts/agent-guard.sh pre-final --run-verify --verify-scope fast"
+  },
+  "provenance": "Adapted from user-supplied mobile optimization pack; identity-sanitized, deduplicated, and rule-reviewed before templating."
+}

@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.06.24.3"
+AGENT_BOOTSTRAP_VERSION="2026.07.03.1"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -18,6 +18,8 @@ REFRESH_LOCK=false
 ACTION="generate"
 JSON_OUTPUT=false
 LAST_WRITTEN_FILE=""
+OPTIONAL_SKILLS=()
+INSTALLED_SKILLS=()
 
 BOOTSTRAP_SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -60,6 +62,7 @@ usage() {
     "  --upgrade-plan       Print an operator upgrade plan for the target." \
     "  --json               Machine-readable output for --status." \
     "  --workflow PRESET    Optional workflow philosophy: infra or full." \
+    "  --add-skill NAME     Add optional skill template to the target (mobile-optimization)." \
     "  --no-backup          Overwrite existing generated files without .bak copy." \
     "  --version            Print bootstrap version." \
     "  -h, --help           Show help."
@@ -130,6 +133,19 @@ while [[ $# -gt 0 ]]; do
       WORKFLOW_EXPLICIT=true
       shift 2
       ;;
+    --add-skill)
+      case "${2:?missing value for --add-skill}" in
+        mobile-optimization)
+          OPTIONAL_SKILLS+=("$2")
+          ;;
+        *)
+          echo "ERROR: unsupported optional skill: $2" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      ;;
     --no-backup)
       BACKUP=false
       shift
@@ -197,6 +213,160 @@ PY
     return 0
   fi
   sed -n "s/^[[:space:]]*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$file" | head -n1
+}
+
+read_lock_skills() {
+  local file="${1:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
+  [[ -f "$file" ]] || return 0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+skills = document.get("skills", [])
+if isinstance(skills, list):
+    for skill in skills:
+        if isinstance(skill, str):
+            print(skill)
+PY
+    return 0
+  fi
+  sed -n 's/.*"skills"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' "$file" |
+    tr ',' '\n' |
+    sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p'
+}
+
+array_has_value() {
+  local array_name="$1"
+  local wanted="$2"
+  local count=0
+  local index=0
+  local value
+  eval "count=\${#${array_name}[@]}"
+  while [[ "$index" -lt "$count" ]]; do
+    eval "value=\${${array_name}[$index]}"
+    [[ "$value" == "$wanted" ]] && return 0
+    index=$((index + 1))
+  done
+  return 1
+}
+
+add_installed_skill() {
+  local skill="$1"
+  array_has_value INSTALLED_SKILLS "$skill" && return 0
+  INSTALLED_SKILLS+=("$skill")
+}
+
+optional_skill_installed() {
+  array_has_value INSTALLED_SKILLS "$1"
+}
+
+optional_skill_selected() {
+  optional_skill_requested "$1" || optional_skill_installed "$1"
+}
+
+load_installed_optional_skills() {
+  local skill
+  INSTALLED_SKILLS=()
+  while IFS= read -r skill; do
+    [[ -n "$skill" ]] || continue
+    case "$skill" in
+      mobile-optimization) add_installed_skill "$skill" ;;
+    esac
+  done < <(read_lock_skills)
+}
+
+selected_optional_skills() {
+  if optional_skill_selected mobile-optimization; then
+    printf '%s\n' "mobile-optimization"
+  fi
+  return 0
+}
+
+selected_optional_skills_json() {
+  local skill
+  local first=true
+  local json=""
+  while IFS= read -r skill; do
+    [[ -n "$skill" ]] || continue
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      json+=", "
+    fi
+    json+="\"$(json_escape "$skill")\""
+  done < <(selected_optional_skills)
+  printf '%s' "$json"
+}
+
+selected_optional_skills_csv() {
+  local skill
+  local first=true
+  local csv=""
+  while IFS= read -r skill; do
+    [[ -n "$skill" ]] || continue
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      csv+=","
+    fi
+    csv+="$skill"
+  done < <(selected_optional_skills)
+  printf '%s' "${csv:-none}"
+}
+
+validate_requested_optional_skills() {
+  if optional_skill_requested mobile-optimization &&
+    ! detected_stack_has android_kotlin &&
+    ! detected_stack_has ios_swift; then
+    echo "ERROR: --add-skill mobile-optimization requires a detected android_kotlin or ios_swift stack." >&2
+    if detected_stack_has flutter_dart; then
+      echo "Flutter/Dart is out of scope for this skill." >&2
+    fi
+    echo "No files written." >&2
+    exit 3
+  fi
+}
+
+optional_skill_generation_args() {
+  if optional_skill_selected mobile-optimization &&
+    { detected_stack_has android_kotlin || detected_stack_has ios_swift; }; then
+    printf '%s\n' "--add-skill"
+    printf '%s\n' "mobile-optimization"
+  fi
+  return 0
+}
+
+optional_skill_allowlist_paths() {
+  optional_skill_selected mobile-optimization || return 0
+  cat <<'EOF'
+.agents/skills/mobile-optimization/SKILL.md
+.agents/skills/mobile-optimization/catalog.md
+.agents/skills/mobile-optimization/overlays/kotlin.md
+.agents/skills/mobile-optimization/overlays/swift.md
+.agents/skills/mobile-optimization/fewshots/kotlin.md
+.agents/skills/mobile-optimization/fewshots/swift.md
+.windsurf/rules/mobile-optimization.md
+.cursor/rules/mobile-optimization.mdc
+.claude/commands/optimize-code.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/SKILL.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/catalog.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/fewshots/kotlin.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/fewshots/swift.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/overlays/kotlin.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/overlays/swift.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/pointers/claude.command.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/pointers/cursor.rules.mdc
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/pointers/pointer-body.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/pointers/windsurf.rules.md
+docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/skill.manifest.json
+EOF
 }
 
 resolve_workflow_from_lock() {
@@ -329,6 +499,7 @@ current_status_fields() {
   printf 'installed_version=%s\n' "${installed_version:-missing}"
   printf 'channel=%s\n' "${installed_channel:-missing}"
   printf 'workflow_preset=%s\n' "${installed_workflow:-$WORKFLOW_PRESET}"
+  printf 'installed_skills=%s\n' "$(selected_optional_skills_csv)"
   printf 'detector_lock_status=%s\n' "$status"
   printf 'onboarding_status=%s\n' "$onboarding_status"
   printf 'pending_generated_candidates=%s\n' "$pending_count"
@@ -339,7 +510,7 @@ print_status() {
   local fields
   fields="$(current_status_fields)"
   if [[ "$JSON_OUTPUT" == "true" ]]; then
-    local target project schema installed version channel workflow detector onboarding pending generated_drift
+    local target project schema installed version channel workflow skills detector onboarding pending generated_drift
     target="$(printf '%s\n' "$fields" | sed -n 's/^target=//p')"
     project="$(printf '%s\n' "$fields" | sed -n 's/^project=//p')"
     schema="$(printf '%s\n' "$fields" | sed -n 's/^schema=//p')"
@@ -347,11 +518,12 @@ print_status() {
     installed="$(printf '%s\n' "$fields" | sed -n 's/^installed_version=//p')"
     channel="$(printf '%s\n' "$fields" | sed -n 's/^channel=//p')"
     workflow="$(printf '%s\n' "$fields" | sed -n 's/^workflow_preset=//p')"
+    skills="$(printf '%s\n' "$fields" | sed -n 's/^installed_skills=//p')"
     detector="$(printf '%s\n' "$fields" | sed -n 's/^detector_lock_status=//p')"
     onboarding="$(printf '%s\n' "$fields" | sed -n 's/^onboarding_status=//p')"
     pending="$(printf '%s\n' "$fields" | sed -n 's/^pending_generated_candidates=//p')"
     generated_drift="$(printf '%s\n' "$fields" | sed -n 's/^generated_file_drift=//p')"
-    printf '{"schema":"agent-bootstrap-status/v1","target":"%s","project":"%s","lock_schema":"%s","bundle_version":"%s","installed_version":"%s","channel":"%s","workflow_preset":"%s","detector_lock_status":"%s","onboarding_status":"%s","pending_generated_candidates":%s,"generated_file_drift":"%s"}\n' \
+    printf '{"schema":"agent-bootstrap-status/v1","target":"%s","project":"%s","lock_schema":"%s","bundle_version":"%s","installed_version":"%s","channel":"%s","workflow_preset":"%s","installed_skills":"%s","detector_lock_status":"%s","onboarding_status":"%s","pending_generated_candidates":%s,"generated_file_drift":"%s"}\n' \
       "$(json_escape "$target")" \
       "$(json_escape "$project")" \
       "$(json_escape "$schema")" \
@@ -359,6 +531,7 @@ print_status() {
       "$(json_escape "$installed")" \
       "$(json_escape "$channel")" \
       "$(json_escape "$workflow")" \
+      "$(json_escape "$skills")" \
       "$(json_escape "$detector")" \
       "$(json_escape "$onboarding")" \
       "${pending:-0}" \
@@ -422,7 +595,7 @@ sanitize_for_diff() {
 }
 
 print_generated_diff() (
-  local tmp_root tmp_target write_log relpath diff_found old_sanitized new_sanitized
+  local tmp_root tmp_target write_log relpath diff_found old_sanitized new_sanitized arg
   tmp_root="$(mktemp -d)"
   trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
   tmp_target="$tmp_root/target"
@@ -432,8 +605,13 @@ print_generated_diff() (
   copy_target_for_diff "$tmp_target"
   : > "$write_log"
 
+  set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] || continue
+    set -- "$@" "$arg"
+  done < <(optional_skill_generation_args)
   AGENT_BOOTSTRAP_WRITE_LOG="$write_log" \
-    "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup \
+    "$@" \
     >"$tmp_root/generate.out"
 
   sort -u "$write_log" | while IFS= read -r relpath; do
@@ -478,7 +656,7 @@ generated_file_drift_status() {
 }
 
 generated_file_allowlist() (
-  local tmp_root tmp_target write_log
+  local tmp_root tmp_target write_log arg
   tmp_root="$(mktemp -d)"
   trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
   tmp_target="$tmp_root/target"
@@ -486,11 +664,19 @@ generated_file_allowlist() (
   copy_target_for_diff "$tmp_target"
   : > "$write_log"
 
+  set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] || continue
+    set -- "$@" "$arg"
+  done < <(optional_skill_generation_args)
   AGENT_BOOTSTRAP_WRITE_LOG="$write_log" \
-    "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup \
+    "$@" \
     >"$tmp_root/generate.out"
 
-  sort -u "$write_log"
+  {
+    cat "$write_log"
+    optional_skill_allowlist_paths
+  } | sort -u
 )
 
 apply_generated_candidates() (
@@ -617,6 +803,11 @@ print_upgrade_plan() {
   printf '  bash %s --target %s --apply-candidates\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
   printf 'Validate target after review/apply:\n'
   printf '  scripts/verify-ai-deps.sh\n'
+  if optional_skill_installed mobile-optimization; then
+    printf '\n'
+    printf 'Optional skills installed from lock:\n'
+    printf '  mobile-optimization: installed; default update preserves content and pointer, use --add-skill mobile-optimization to upgrade reviewed skill files.\n'
+  fi
 }
 
 print_first_10() {
@@ -675,6 +866,8 @@ print_first_10() {
 
 main() {
   detect_tech_stack
+  load_installed_optional_skills
+  validate_requested_optional_skills
   case "$ACTION" in
     status)
       print_status
@@ -720,6 +913,7 @@ main() {
   fi
   write_agent_bootstrap_lock
   write_template_catalog
+  write_skill_mobile_optimization
   write_recovery_runbook
   write_schema_model_and_provenance_catalog
   write_portable_enforcement

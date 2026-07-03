@@ -135,8 +135,24 @@ write_user_owned_file() {
 write_file() {
   local path="$1"
   local final_path="$path"
+  local input_tmp tmp
   LAST_WRITTEN_FILE=""
   ensure_dir "$(dirname "$path")"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    log "DRY-RUN write $final_path"
+    cat >/dev/null
+    LAST_WRITTEN_FILE="$final_path"
+    return
+  fi
+  input_tmp="$(mktemp)"
+  cat > "$input_tmp"
+  if [[ -e "$path" ]] && cmp -s "$input_tmp" "$path"; then
+    log "Existing file up to date: $path"
+    rm -f "$input_tmp"
+    LAST_WRITTEN_FILE="$path"
+    record_generated_file "$path"
+    return
+  fi
   if [[ -e "$path" && "$FORCE" != "true" ]]; then
     if [[ "$CANDIDATE_ON_CONFLICT" == "true" ]]; then
       final_path="$path.generated.$STAMP"
@@ -145,23 +161,18 @@ write_file() {
       log "Writing candidate: $final_path"
     else
       log "Skipping existing file: $path"
-      cat >/dev/null
+      rm -f "$input_tmp"
       return
     fi
-  fi
-  if [[ "$DRY_RUN" == "true" ]]; then
-    log "DRY-RUN write $final_path"
-    cat >/dev/null
-    LAST_WRITTEN_FILE="$final_path"
-    return
   fi
   if [[ "$final_path" == "$path" ]]; then
     backup_existing "$path"
   fi
   # Atomic write: stage in the same dir, then rename into place so an abort
   # mid-write (e.g. --force --no-backup) cannot truncate an existing file.
-  local tmp="${final_path}.tmp.$$"
-  cat > "$tmp"
+  tmp="${final_path}.tmp.$$"
+  cat "$input_tmp" > "$tmp"
+  rm -f "$input_tmp"
   mv "$tmp" "$final_path"
   LAST_WRITTEN_FILE="$final_path"
   record_generated_file "$final_path"
@@ -219,7 +230,7 @@ replace_placeholder() {
   local path="$1"
   local placeholder="$2"
   local value="$3"
-  local content
+  local content base
   [[ "$DRY_RUN" == "true" ]] && return 0
   [[ -f "$path" ]] || return 0
   # Pure-bash substitution (no python3 dependency). The value is a slash-free
@@ -228,6 +239,16 @@ replace_placeholder() {
   # newline; `cat` strips it and `printf '%s\n'` restores it byte-for-byte.
   content="$(cat "$path")"
   printf '%s\n' "${content//$placeholder/$value}" > "$path"
+  case "$path" in
+    *.generated.*)
+      base="${path%.generated.*}"
+      if [[ -f "$base" ]] && cmp -s "$path" "$base"; then
+        rm -f "$path"
+        LAST_WRITTEN_FILE="$base"
+        log "Generated candidate matched existing file after placeholder replacement: $base"
+      fi
+      ;;
+  esac
 }
 
 hash_text() {

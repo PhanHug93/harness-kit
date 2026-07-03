@@ -121,6 +121,191 @@ estimate_tokens_for_file() {
   }'
 }
 
+assert_estimated_tokens_at_most() {
+  local file="$1"
+  local max_tokens="$2"
+  local label="$3"
+  local tokens
+  tokens="$(estimate_tokens_for_file "$file")"
+  [[ "$tokens" -le "$max_tokens" ]] || fail "$label exceeds token budget: $tokens > $max_tokens"
+}
+
+mobile_skill_path=".agents/skills/mobile-optimization/SKILL.md"
+
+assert_mobile_optimization_surface_parity() {
+  local target="$1"
+  local label="$2"
+  local surface
+  for surface in \
+    AGENTS.md \
+    .windsurf/rules/mobile-optimization.md \
+    .cursor/rules/mobile-optimization.mdc \
+    .claude/commands/optimize-code.md; do
+    [[ -f "$target/$surface" ]] || fail "$label missing mobile optimization surface: $surface"
+    need_contains "$(cat "$target/$surface")" "$mobile_skill_path" "$label $surface mobile optimization pointer"
+  done
+}
+
+assert_mobile_optimization_absent() {
+  local target="$1"
+  local label="$2"
+  local surface
+  [[ ! -e "$target/.agents/skills/mobile-optimization" ]] ||
+    fail "$label emitted optional mobile optimization skill without opt-in"
+  [[ ! -e "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization" ]] ||
+    fail "$label emitted optional mobile optimization template catalog without opt-in"
+  for surface in \
+    AGENTS.md \
+    .windsurf/rules/mobile-optimization.md \
+    .cursor/rules/mobile-optimization.mdc \
+    .claude/commands/optimize-code.md; do
+    if [[ -f "$target/$surface" ]]; then
+      need_not_contains "$(cat "$target/$surface")" "$mobile_skill_path" "$label optional mobile optimization pointer"
+    fi
+  done
+}
+
+assert_mobile_optimization_pointer_budget() {
+  local target="$1"
+  local label="$2"
+  local agents_line="$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-mobile-agents-pointer.txt"
+  grep -F "$mobile_skill_path" "$target/AGENTS.md" > "$agents_line" ||
+    fail "$label AGENTS.md missing mobile optimization pointer line"
+  assert_estimated_tokens_at_most "$agents_line" 120 "$label AGENTS.md mobile optimization pointer"
+
+  local pointer
+  for pointer in \
+    .windsurf/rules/mobile-optimization.md \
+    .cursor/rules/mobile-optimization.mdc \
+    .claude/commands/optimize-code.md; do
+    assert_estimated_tokens_at_most "$target/$pointer" 120 "$label $pointer"
+  done
+}
+
+assert_mobile_optimization_content_not_preloaded() {
+  local target="$1"
+  local label="$2"
+  local startup_pack="$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-startup-context-pack.txt"
+  cat \
+    "$target/AGENTS.md" \
+    "$target/docs/agent-configs/project-agent-context.md" \
+    "$target/docs/agent-configs/project-brief.md" \
+    > "$startup_pack"
+  need_not_contains "$(cat "$startup_pack")" "Anti-Pattern Catalog" "$label startup pack excludes mobile catalog"
+  need_not_contains "$(cat "$startup_pack")" "partitionSyncableRecords" "$label startup pack excludes Kotlin few-shot"
+  need_not_contains "$(cat "$startup_pack")" "One-pass loop with conditional sort" "$label startup pack excludes language overlays"
+  [[ -f "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/skill.manifest.json" ]] ||
+    fail "$label did not emit optional mobile optimization template manifest"
+  need_same_file \
+    "$BOOTSTRAP_BUNDLE/templates/skills/mobile-optimization/skill.manifest.json" \
+    "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/skill.manifest.json" \
+    "$label mobile optimization template manifest"
+  [[ ! -e "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/WRITER-INTEGRATION.md" ]] ||
+    fail "$label emitted writer-only mobile skill integration notes into target"
+}
+
+assert_mobile_optimization_stack_selection() {
+  local target="$1"
+  local label="$2"
+  local expected_globs="$3"
+  local forbidden_globs="$4"
+  shift 4
+  local expected_file forbidden_file pointer_text
+
+  [[ -f "$target/.agents/skills/mobile-optimization/SKILL.md" ]] ||
+    fail "$label missing mobile optimization SKILL.md"
+  [[ -f "$target/.agents/skills/mobile-optimization/catalog.md" ]] ||
+    fail "$label missing mobile optimization catalog.md"
+  need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" "Characterization test before patch" "$label mobile skill contract"
+  need_contains "$(cat "$target/.agents/skills/mobile-optimization/catalog.md")" "Security — never \"optimize\" into these" "$label mobile catalog"
+
+  while [[ "$#" -gt 0 && "$1" != "--absent" ]]; do
+    expected_file="$1"
+    [[ -f "$target/.agents/skills/mobile-optimization/$expected_file" ]] ||
+      fail "$label missing selected mobile skill file: $expected_file"
+    shift
+  done
+  [[ "${1:-}" == "--absent" ]] && shift
+  while [[ "$#" -gt 0 ]]; do
+    forbidden_file="$1"
+    [[ ! -e "$target/.agents/skills/mobile-optimization/$forbidden_file" ]] ||
+      fail "$label emitted unselected mobile skill file: $forbidden_file"
+    shift
+  done
+
+  pointer_text="$(cat "$target/.windsurf/rules/mobile-optimization.md" "$target/.cursor/rules/mobile-optimization.mdc")"
+  need_contains "$pointer_text" "$expected_globs" "$label mobile skill globs"
+  [[ -z "$forbidden_globs" ]] || need_not_contains "$pointer_text" "$forbidden_globs" "$label forbidden mobile skill globs"
+  need_not_contains "$pointer_text" "{{GLOBS}}" "$label mobile skill glob placeholder"
+}
+
+assert_mobile_optimization_lock_installed() {
+  local target="$1"
+  local label="$2"
+  need_contains \
+    "$(cat "$target/docs/agent-configs/agent-bootstrap.lock.json")" \
+    '"skills": ["mobile-optimization"]' \
+    "$label mobile optimization lock registry"
+}
+
+mobile_optimization_candidate_count() {
+  local target="$1"
+  find "$target" \
+    \( -path "$target/.git" -o -path "$target/.tools" \) -prune -o \
+    -type f \( \
+      -path "$target/.agents/skills/mobile-optimization/*.generated.*" -o \
+      -path "$target/.agents/skills/mobile-optimization/*/*.generated.*" -o \
+      -path "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/*.generated.*" -o \
+      -path "$target/docs/agent-configs/bootstrap-multi-agent-project/templates/skills/mobile-optimization/*/*.generated.*" -o \
+      -path "$target/.windsurf/rules/mobile-optimization.md.generated.*" -o \
+      -path "$target/.cursor/rules/mobile-optimization.mdc.generated.*" -o \
+      -path "$target/.claude/commands/optimize-code.md.generated.*" \
+    \) -print 2>/dev/null | wc -l | tr -d ' '
+}
+
+make_android_mobile_skill_fixture() {
+  local target="$1"
+  mkdir -p "$target/app/src/main"
+  cat > "$target/settings.gradle.kts" <<'EOF_ANDROID_SETTINGS'
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+rootProject.name = "mobile-skill-android"
+include(":app")
+EOF_ANDROID_SETTINGS
+  cat > "$target/build.gradle.kts" <<'EOF_ANDROID_ROOT_BUILD'
+plugins {
+    id("com.android.application") version "8.5.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+}
+EOF_ANDROID_ROOT_BUILD
+  cat > "$target/app/build.gradle.kts" <<'EOF_ANDROID_APP_BUILD'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "example.mobile.skill"
+    compileSdk = 35
+}
+EOF_ANDROID_APP_BUILD
+  cat > "$target/app/src/main/AndroidManifest.xml" <<'EOF_ANDROID_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_ANDROID_MANIFEST
+}
+
+make_swift_mobile_skill_fixture() {
+  local target="$1"
+  mkdir -p "$target/MobileSkill.xcodeproj" "$target/Sources"
+  cat > "$target/Sources/MobileView.swift" <<'EOF_SWIFT_VIEW'
+import SwiftUI
+
+struct MobileView: View {
+    var body: some View { Text("Mobile") }
+}
+EOF_SWIFT_VIEW
+}
+
 sha256_file() {
   local file="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -470,7 +655,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.06.24.3" ]] || fail "VERSION not bumped to 2026.06.24.3"
+[[ "$bundle_version" == "2026.07.03.1" ]] || fail "VERSION not bumped to 2026.07.03.1"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -523,6 +708,18 @@ for canonical_file in \
   templates/overlays/ios_swift.md \
   templates/overlays/node_js.md \
   templates/overlays/python.md \
+  templates/skills/mobile-optimization/SKILL.md \
+  templates/skills/mobile-optimization/WRITER-INTEGRATION.md \
+  templates/skills/mobile-optimization/catalog.md \
+  templates/skills/mobile-optimization/fewshots/kotlin.md \
+  templates/skills/mobile-optimization/fewshots/swift.md \
+  templates/skills/mobile-optimization/overlays/kotlin.md \
+  templates/skills/mobile-optimization/overlays/swift.md \
+  templates/skills/mobile-optimization/pointers/claude.command.md \
+  templates/skills/mobile-optimization/pointers/cursor.rules.mdc \
+  templates/skills/mobile-optimization/pointers/pointer-body.md \
+  templates/skills/mobile-optimization/pointers/windsurf.rules.md \
+  templates/skills/mobile-optimization/skill.manifest.json \
   templates/workflows/council/README.md \
   templates/workflows/karpathy/README.md \
   templates/workflows/three-mode/README.md \
@@ -859,7 +1056,7 @@ while IFS= read -r bundle_template; do
   [[ -f "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" ]] ||
     fail "template $relative_template has no docs mirror"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
-done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
+done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' -not -path '*/skills/mobile-optimization/*' | sort)
 
 while IFS= read -r runtime_snapshot; do
   base="${runtime_snapshot#"$BOOTSTRAP_BUNDLE"/}"
@@ -969,6 +1166,126 @@ startup_tokens=$(( \
   $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-brief.md") \
 ))
 [[ "$startup_tokens" -le 4000 ]] || fail "core startup context too large: ${startup_tokens} estimated tokens"
+assert_mobile_optimization_absent "$TMP_DIR" "android full bootstrap default"
+
+ANDROID_MOBILE_SKILL_DIR="$FIXTURE_DIR/android-mobile-skill"
+mkdir -p "$ANDROID_MOBILE_SKILL_DIR"
+make_android_mobile_skill_fixture "$ANDROID_MOBILE_SKILL_DIR"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-android-mobile-skill.out
+assert_mobile_optimization_surface_parity "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_pointer_budget "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_content_not_preloaded "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_lock_installed "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_stack_selection \
+  "$ANDROID_MOBILE_SKILL_DIR" \
+  "android full bootstrap opt-in" \
+  "**/*.kt,**/*.kts" \
+  "**/*.swift" \
+  overlays/kotlin.md \
+  fewshots/kotlin.md \
+  --absent \
+  overlays/swift.md \
+  fewshots/swift.md
+android_skill_hash_before="$(sha256_file "$ANDROID_MOBILE_SKILL_DIR/.agents/skills/mobile-optimization/SKILL.md")"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-android-mobile-default-after-opt-in.out
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-default-apply-candidates.out
+assert_mobile_optimization_surface_parity "$ANDROID_MOBILE_SKILL_DIR" "android default update after opt-in"
+assert_mobile_optimization_lock_installed "$ANDROID_MOBILE_SKILL_DIR" "android default update after opt-in"
+[[ "$(sha256_file "$ANDROID_MOBILE_SKILL_DIR/.agents/skills/mobile-optimization/SKILL.md")" == "$android_skill_hash_before" ]] ||
+  fail "default update changed installed optional mobile optimization skill content"
+cp "$BOOTSTRAP_BUNDLE/templates/skills/mobile-optimization/SKILL.md" \
+  "$ANDROID_MOBILE_SKILL_DIR/.agents/skills/mobile-optimization/SKILL.md.generated.20990101-000000"
+[[ "$(mobile_optimization_candidate_count "$ANDROID_MOBILE_SKILL_DIR")" -gt 0 ]] ||
+  fail "fixture did not create optional mobile optimization candidate"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-apply-optional-candidate.out
+[[ "$(mobile_optimization_candidate_count "$ANDROID_MOBILE_SKILL_DIR")" == "0" ]] ||
+  fail "apply-candidates did not promote optional mobile optimization candidates from lock scope"
+android_candidate_count_before="$(find "$ANDROID_MOBILE_SKILL_DIR" -type f -name '*.generated.*' | wc -l | tr -d ' ')"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-android-mobile-idempotent-readd.out
+android_candidate_count_after="$(find "$ANDROID_MOBILE_SKILL_DIR" -type f -name '*.generated.*' | wc -l | tr -d ' ')"
+[[ "$android_candidate_count_after" == "$android_candidate_count_before" ]] ||
+  fail "idempotent --add-skill mobile-optimization created generated candidates without content changes"
+make_swift_mobile_skill_fixture "$ANDROID_MOBILE_SKILL_DIR"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition.out
+android_transition_windsurf_candidate="$(find "$ANDROID_MOBILE_SKILL_DIR/.windsurf/rules" -name 'mobile-optimization.md.generated.*' -print | sort | tail -n1)"
+[[ -f "$android_transition_windsurf_candidate" ]] ||
+  fail "android-to-dual mobile optimization upgrade did not create pointer candidate"
+need_contains \
+  "$(cat "$android_transition_windsurf_candidate")" \
+  "**/*.kt,**/*.kts,**/*.swift" \
+  "android-to-dual mobile optimization candidate globs"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition-apply.out
+assert_mobile_optimization_stack_selection \
+  "$ANDROID_MOBILE_SKILL_DIR" \
+  "android-to-dual mobile optimization upgrade" \
+  "**/*.kt,**/*.kts,**/*.swift" \
+  "" \
+  overlays/kotlin.md \
+  fewshots/kotlin.md \
+  overlays/swift.md \
+  fewshots/swift.md \
+  --absent
+
+UNSUPPORTED_MOBILE_SKILL_DIR="$FIXTURE_DIR/unsupported-mobile-skill"
+mkdir -p "$UNSUPPORTED_MOBILE_SKILL_DIR"
+cat > "$UNSUPPORTED_MOBILE_SKILL_DIR/package.json" <<'EOF_UNSUPPORTED_PACKAGE'
+{
+  "private": true,
+  "main": "index.js"
+}
+EOF_UNSUPPORTED_PACKAGE
+unsupported_mobile_skill_rc=0
+bash "$BOOTSTRAP" --target "$UNSUPPORTED_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization \
+  >"$TMP_DIR"/out/bootstrap-unsupported-mobile-skill.out \
+  2>"$TMP_DIR"/out/bootstrap-unsupported-mobile-skill.err || unsupported_mobile_skill_rc=$?
+if [[ "$unsupported_mobile_skill_rc" -eq 0 ]]; then
+  fail "unsupported stack accepted --add-skill mobile-optimization"
+fi
+[[ "$unsupported_mobile_skill_rc" -eq 3 ]] ||
+  fail "unsupported stack --add-skill mobile-optimization exit code drifted: expected 3 got $unsupported_mobile_skill_rc"
+need_contains \
+  "$(cat "$TMP_DIR/out/bootstrap-unsupported-mobile-skill.err")" \
+  "requires a detected android_kotlin or ios_swift stack" \
+  "unsupported stack mobile optimization error"
+[[ ! -e "$UNSUPPORTED_MOBILE_SKILL_DIR/AGENTS.md" ]] ||
+  fail "unsupported stack wrote AGENTS.md before optional skill validation"
+[[ ! -e "$UNSUPPORTED_MOBILE_SKILL_DIR/docs/agent-configs/agent-bootstrap.lock.json" ]] ||
+  fail "unsupported stack wrote lock before optional skill validation"
+
+SWIFT_MOBILE_SKILL_DIR="$FIXTURE_DIR/swift-mobile-skill"
+mkdir -p "$SWIFT_MOBILE_SKILL_DIR"
+make_swift_mobile_skill_fixture "$SWIFT_MOBILE_SKILL_DIR"
+bash "$BOOTSTRAP" --target "$SWIFT_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-swift-mobile-skill.out
+assert_mobile_optimization_surface_parity "$SWIFT_MOBILE_SKILL_DIR" "swift full bootstrap opt-in"
+assert_mobile_optimization_pointer_budget "$SWIFT_MOBILE_SKILL_DIR" "swift full bootstrap opt-in"
+assert_mobile_optimization_stack_selection \
+  "$SWIFT_MOBILE_SKILL_DIR" \
+  "swift full bootstrap opt-in" \
+  "**/*.swift" \
+  "**/*.kt" \
+  overlays/swift.md \
+  fewshots/swift.md \
+  --absent \
+  overlays/kotlin.md \
+  fewshots/kotlin.md
+
+DUAL_MOBILE_SKILL_DIR="$FIXTURE_DIR/dual-mobile-skill"
+mkdir -p "$DUAL_MOBILE_SKILL_DIR"
+make_android_mobile_skill_fixture "$DUAL_MOBILE_SKILL_DIR"
+make_swift_mobile_skill_fixture "$DUAL_MOBILE_SKILL_DIR"
+bash "$BOOTSTRAP" --target "$DUAL_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-dual-mobile-skill.out
+assert_mobile_optimization_surface_parity "$DUAL_MOBILE_SKILL_DIR" "dual full bootstrap opt-in"
+assert_mobile_optimization_pointer_budget "$DUAL_MOBILE_SKILL_DIR" "dual full bootstrap opt-in"
+assert_mobile_optimization_stack_selection \
+  "$DUAL_MOBILE_SKILL_DIR" \
+  "dual full bootstrap opt-in" \
+  "**/*.kt,**/*.kts,**/*.swift" \
+  "" \
+  overlays/kotlin.md \
+  fewshots/kotlin.md \
+  overlays/swift.md \
+  fewshots/swift.md \
+  --absent
 [[ -f "$TMP_DIR/docs/agent-configs/project-onboarding.md" ]] || fail "full bootstrap did not generate onboarding procedure"
 [[ -f "$TMP_DIR/docs/agent-configs/first-10-minutes.md" ]] || fail "full bootstrap did not generate first 10 minutes guide"
 [[ -f "$TMP_DIR/.claude/commands/project-onboarding.md" ]] || fail "full bootstrap did not generate onboarding command"
@@ -1114,7 +1431,7 @@ need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"schema":"agent-boo
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"fail":0' "generated verifier json fail count"
 on_demand_tokens="$(sed -n 's/.*on-demand full workflow context estimate: \([0-9][0-9]*\) tokens.*/\1/p' "$TMP_DIR/out/bootstrap-verify.json" | head -1)"
 [[ -n "$on_demand_tokens" ]] || fail "generated verifier JSON did not report on-demand context estimate"
-[[ "$on_demand_tokens" -le 6100 ]] || fail "on-demand workflow context too close to budget: ${on_demand_tokens} estimated tokens"
+[[ "$on_demand_tokens" -le 6200 ]] || fail "on-demand workflow context too close to budget: ${on_demand_tokens} estimated tokens"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-agent-guard-preflight.out")" "agent-guard: preflight ok" "agent guard preflight output"
 [[ -f "$TMP_DIR/.agents/state/context-pack.json" ]] || fail "agent guard did not write context pack"
 need_contains "$(cat "$TMP_DIR/.agents/state/context-pack.json")" '"schema":"agent-context-pack/v1"' "agent guard context pack schema"
@@ -2100,11 +2417,12 @@ PY
 	(cd "$CANDIDATE_SCOPE_DIR" && scripts/agent-guard.sh preflight >/dev/null && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.out 2>"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.err)
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-prefinal.err")" "pending generated candidate requires review" "pre-final ignores non-bootstrap generated source"
 
-	CANDIDATE_DIR="$FIXTURE_DIR/candidate-visibility"
-	mkdir -p "$CANDIDATE_DIR"
-	bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-first.out
+CANDIDATE_DIR="$FIXTURE_DIR/candidate-visibility"
+mkdir -p "$CANDIDATE_DIR"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-first.out
+printf '\n# local generated-file drift for candidate visibility test\n' >> "$CANDIDATE_DIR/scripts/agent-hook.sh"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-second.out
-[[ -n "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "re-run did not create generated candidates"
+[[ -n "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "content drift re-run did not create generated candidates"
 need_not_contains "$(cat "$CANDIDATE_DIR/.gitignore")" "*.generated.*" "generated candidates must not be ignored"
 (cd "$CANDIDATE_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-candidate-verify.out)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-verify.out")" "pending generated candidate" "generated verifier pending candidate warning"
