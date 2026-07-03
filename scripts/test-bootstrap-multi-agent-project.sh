@@ -1205,6 +1205,26 @@ bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-ski
 android_candidate_count_after="$(find "$ANDROID_MOBILE_SKILL_DIR" -type f -name '*.generated.*' | wc -l | tr -d ' ')"
 [[ "$android_candidate_count_after" == "$android_candidate_count_before" ]] ||
   fail "idempotent --add-skill mobile-optimization created generated candidates without content changes"
+make_swift_mobile_skill_fixture "$ANDROID_MOBILE_SKILL_DIR"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition.out
+android_transition_windsurf_candidate="$(find "$ANDROID_MOBILE_SKILL_DIR/.windsurf/rules" -name 'mobile-optimization.md.generated.*' -print | sort | tail -n1)"
+[[ -f "$android_transition_windsurf_candidate" ]] ||
+  fail "android-to-dual mobile optimization upgrade did not create pointer candidate"
+need_contains \
+  "$(cat "$android_transition_windsurf_candidate")" \
+  "**/*.kt,**/*.kts,**/*.swift" \
+  "android-to-dual mobile optimization candidate globs"
+bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition-apply.out
+assert_mobile_optimization_stack_selection \
+  "$ANDROID_MOBILE_SKILL_DIR" \
+  "android-to-dual mobile optimization upgrade" \
+  "**/*.kt,**/*.kts,**/*.swift" \
+  "" \
+  overlays/kotlin.md \
+  fewshots/kotlin.md \
+  overlays/swift.md \
+  fewshots/swift.md \
+  --absent
 
 UNSUPPORTED_MOBILE_SKILL_DIR="$FIXTURE_DIR/unsupported-mobile-skill"
 mkdir -p "$UNSUPPORTED_MOBILE_SKILL_DIR"
@@ -1214,11 +1234,15 @@ cat > "$UNSUPPORTED_MOBILE_SKILL_DIR/package.json" <<'EOF_UNSUPPORTED_PACKAGE'
   "main": "index.js"
 }
 EOF_UNSUPPORTED_PACKAGE
-if bash "$BOOTSTRAP" --target "$UNSUPPORTED_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization \
+unsupported_mobile_skill_rc=0
+bash "$BOOTSTRAP" --target "$UNSUPPORTED_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization \
   >"$TMP_DIR"/out/bootstrap-unsupported-mobile-skill.out \
-  2>"$TMP_DIR"/out/bootstrap-unsupported-mobile-skill.err; then
+  2>"$TMP_DIR"/out/bootstrap-unsupported-mobile-skill.err || unsupported_mobile_skill_rc=$?
+if [[ "$unsupported_mobile_skill_rc" -eq 0 ]]; then
   fail "unsupported stack accepted --add-skill mobile-optimization"
 fi
+[[ "$unsupported_mobile_skill_rc" -eq 3 ]] ||
+  fail "unsupported stack --add-skill mobile-optimization exit code drifted: expected 3 got $unsupported_mobile_skill_rc"
 need_contains \
   "$(cat "$TMP_DIR/out/bootstrap-unsupported-mobile-skill.err")" \
   "requires a detected android_kotlin or ios_swift stack" \
