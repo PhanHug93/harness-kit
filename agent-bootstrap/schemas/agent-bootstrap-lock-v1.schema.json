@@ -18,6 +18,25 @@
     "schema": { "const": "agent-bootstrap-lock/v1" },
     "version": { "type": "string" },
     "channel": { "type": "string" },
+    "skills": {
+      "type": "array",
+      "items": { "enum": ["mobile-optimization"] }
+    },
+    "skill_metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mobile-optimization": {
+          "type": "object",
+          "required": ["installed_from_version", "content_hash"],
+          "additionalProperties": false,
+          "properties": {
+            "installed_from_version": { "type": "string", "minLength": 1 },
+            "content_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        }
+      }
+    },
     "project_name": { "type": "string" },
     "generated_at": { "type": "string" },
     "rtk": {

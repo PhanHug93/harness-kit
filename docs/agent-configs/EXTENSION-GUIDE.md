@@ -46,3 +46,15 @@ the generated target still matches the canonical bundle.
 - Cover the behavior by running the generated artifact in
   `scripts/test-bootstrap-multi-agent-project.sh`; do not rely only on source
   text assertions.
+
+## Add an optional skill
+
+- Keep optional skill discovery in this guide and operator docs; do not emit an
+  available advisory for uninstalled skills, because that creates advisory
+  fatigue on every default update.
+- Keep `agent-bootstrap.lock.json` as the consent registry: `skills` records
+  the opt-in name, and `skill_metadata` records `installed_from_version` plus a
+  content hash of the emitted bundle files.
+- Status skew must compare content hash, not bundle version. A bundle version
+  bump with unchanged skill files is clean; changed skill content is stale until
+  the operator reruns the explicit opt-in command.

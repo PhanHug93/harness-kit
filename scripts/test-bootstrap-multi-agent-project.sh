@@ -217,6 +217,7 @@ assert_mobile_optimization_stack_selection() {
   [[ -f "$target/.agents/skills/mobile-optimization/catalog.md" ]] ||
     fail "$label missing mobile optimization catalog.md"
   need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" "Characterization test before patch" "$label mobile skill contract"
+  need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" "skill-note mobile-optimization" "$label mobile skill usage telemetry"
   need_contains "$(cat "$target/.agents/skills/mobile-optimization/catalog.md")" "Security — never \"optimize\" into these" "$label mobile catalog"
 
   while [[ "$#" -gt 0 && "$1" != "--absent" ]]; do
@@ -246,6 +247,107 @@ assert_mobile_optimization_lock_installed() {
     "$(cat "$target/docs/agent-configs/agent-bootstrap.lock.json")" \
     '"skills": ["mobile-optimization"]' \
     "$label mobile optimization lock registry"
+  python3 - "$target/docs/agent-configs/agent-bootstrap.lock.json" "$bundle_version" "$label" <<'PY'
+import json
+import re
+import sys
+
+path, expected_version, label = sys.argv[1], sys.argv[2], sys.argv[3]
+doc = json.load(open(path, encoding="utf-8"))
+meta = (doc.get("skill_metadata") or {}).get("mobile-optimization")
+if not isinstance(meta, dict):
+    raise SystemExit(f"{label} lock missing mobile optimization skill_metadata")
+if meta.get("installed_from_version") != expected_version:
+    raise SystemExit(f"{label} lock installed_from_version drifted: {meta.get('installed_from_version')!r}")
+content_hash = meta.get("content_hash")
+if not isinstance(content_hash, str) or re.fullmatch(r"[0-9a-f]{64}", content_hash) is None:
+    raise SystemExit(f"{label} lock content_hash is not lowercase sha256: {content_hash!r}")
+PY
+}
+
+assert_mobile_optimization_status_clean() {
+  local target="$1"
+  local label="$2"
+  local status_json
+  status_json="$(bash "$BOOTSTRAP" --target "$target" --status --json)"
+  need_contains "$status_json" '"skill_mobile_optimization_skew":"clean"' "$label mobile skill status skew clean"
+  need_contains "$status_json" "\"skill_mobile_optimization_installed_from_version\":\"$bundle_version\"" "$label mobile skill status installed version"
+}
+
+assert_mobile_optimization_status_stale_after_hash_edit() {
+  local target="$1"
+  local label="$2"
+  local lock_file="$target/docs/agent-configs/agent-bootstrap.lock.json"
+  local original_hash stale_status_json
+  original_hash="$(python3 - "$lock_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+doc = json.load(open(path, encoding="utf-8"))
+print(doc["skill_metadata"]["mobile-optimization"]["content_hash"])
+PY
+)"
+  python3 - "$lock_file" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    doc = json.load(handle)
+doc["skill_metadata"]["mobile-optimization"]["content_hash"] = "0" * 64
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(doc, handle, indent=2)
+    handle.write("\n")
+PY
+  stale_status_json="$(bash "$BOOTSTRAP" --target "$target" --status --json)"
+  need_contains "$stale_status_json" '"skill_mobile_optimization_skew":"stale"' "$label mobile skill status skew stale"
+  python3 - "$lock_file" "$original_hash" <<'PY'
+import json
+import sys
+
+path, original_hash = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    doc = json.load(handle)
+doc["skill_metadata"]["mobile-optimization"]["content_hash"] = original_hash
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(doc, handle, indent=2)
+    handle.write("\n")
+PY
+}
+
+assert_mobile_optimization_skill_note_event() {
+  local target="$1"
+  local label="$2"
+  (
+    cd "$target"
+    scripts/agent-guard.sh skill-note mobile-optimization >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-skill-note.out"
+  )
+  need_contains \
+    "$(cat "$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-skill-note.out")" \
+    "skill-note recorded" \
+    "$label skill-note command output"
+  python3 - "$target/.agents/state/session-events.jsonl" "$label" <<'PY'
+import json
+import sys
+
+path, label = sys.argv[1], sys.argv[2]
+events = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+matches = [
+    event for event in events
+    if event.get("schema") == "agent-guard-event/v2"
+    and event.get("event") == "skill_note"
+    and event.get("skill") == "mobile-optimization"
+]
+if not matches:
+    raise SystemExit(f"{label} missing mobile optimization skill_note event")
+event = matches[-1]
+if event.get("telemetry") != "self-report" or event.get("measurement") != "convention":
+    raise SystemExit(f"{label} skill_note event did not record telemetry limits: {event}")
+PY
+  if (cd "$target" && scripts/agent-guard.sh skill-note '../bad' >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-bad-skill-note.out" 2>&1); then
+    fail "$label accepted invalid skill-note name"
+  fi
 }
 
 mobile_optimization_candidate_count() {
@@ -621,6 +723,7 @@ need_contains "$extension_guide" "Add a detected stack" "extension guide covers 
 need_contains "$extension_guide" "agent-tech-stack-lib.sh" "extension guide names the detector snapshot"
 need_contains "$extension_guide" "lib/detect.sh" "extension guide names the detector heredoc mirror"
 need_contains "$extension_guide" "need_same_file" "extension guide names the mirror guard"
+need_contains "$extension_guide" "available advisory" "extension guide records optional skill advisory decision"
 root_readme="$(cat "$ROOT_DIR/README.md")"
 need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
 need_contains "$root_readme" "rtk is intentionally hard-pinned" "root README RTK pinning intent"
@@ -655,7 +758,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.07.03.1" ]] || fail "VERSION not bumped to 2026.07.03.1"
+[[ "$bundle_version" == "2026.07.04.0" ]] || fail "VERSION not bumped to 2026.07.04.0"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -1176,6 +1279,9 @@ assert_mobile_optimization_surface_parity "$ANDROID_MOBILE_SKILL_DIR" "android f
 assert_mobile_optimization_pointer_budget "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
 assert_mobile_optimization_content_not_preloaded "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
 assert_mobile_optimization_lock_installed "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_status_clean "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_status_stale_after_hash_edit "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
+assert_mobile_optimization_skill_note_event "$ANDROID_MOBILE_SKILL_DIR" "android full bootstrap opt-in"
 assert_mobile_optimization_stack_selection \
   "$ANDROID_MOBILE_SKILL_DIR" \
   "android full bootstrap opt-in" \
@@ -1191,6 +1297,7 @@ bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full >"$TMP_DI
 bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-default-apply-candidates.out
 assert_mobile_optimization_surface_parity "$ANDROID_MOBILE_SKILL_DIR" "android default update after opt-in"
 assert_mobile_optimization_lock_installed "$ANDROID_MOBILE_SKILL_DIR" "android default update after opt-in"
+assert_mobile_optimization_status_clean "$ANDROID_MOBILE_SKILL_DIR" "android default update after opt-in"
 [[ "$(sha256_file "$ANDROID_MOBILE_SKILL_DIR/.agents/skills/mobile-optimization/SKILL.md")" == "$android_skill_hash_before" ]] ||
   fail "default update changed installed optional mobile optimization skill content"
 cp "$BOOTSTRAP_BUNDLE/templates/skills/mobile-optimization/SKILL.md" \
@@ -1569,6 +1676,7 @@ mkdir -p "$GUARD_DIR/.agents/state"
 cat > "$GUARD_DIR/.agents/state/session-events.jsonl" <<'EOF_STATS_EVENTS'
 {"schema":"agent-guard-event/v2","event":"pre_final","gate_status":"warn","verification":{"status":"none","available":false}}
 {"schema":"agent-guard-event/v2","event":"pre_final","gate_status":"fail","verification":{"status":"fail","available":true}}
+{"schema":"agent-guard-event/v2","event":"skill_note","skill":"mobile-optimization","telemetry":"self-report","measurement":"convention"}
 {"schema":"some-other/v1","event":"unrelated","gate_status":"pass","verification":{"status":"pass"}}
 {"schema":"agent-guard-event/v2","event":"heartbeat","gate_status":"pass","verification":{"status":"pass"}}
 EOF_STATS_EVENTS
@@ -1584,9 +1692,11 @@ assert doc["gate_status"] == {"pass": 0, "warn": 1, "fail": 1}, doc
 assert doc["verification_status"]["none"] == 1, doc
 assert doc["verification_status"]["fail"] == 1, doc
 assert doc["verification_none_rate"] == 0.5, doc
+assert doc["skill_usage"] == {"mobile-optimization": 1}, doc
 PY
 (cd "$GUARD_DIR" && scripts/agent-guard.sh stats >"$TMP_DIR"/out/bootstrap-guard-stats.txt)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-stats.txt")" "verification:none rate" "stats surfaces none-rate"
+need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-stats.txt")" "skill_usage: mobile-optimization=1" "stats surfaces skill usage"
 
 note "memory pre-final journal gate"
 # pre-final enforces memory close-out only through the journal artifact. High-risk

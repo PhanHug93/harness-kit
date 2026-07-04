@@ -95,13 +95,14 @@ compute_apply_state() {
 
 write_agent_bootstrap_lock() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
-  local summary hash overlays overlay_json skills_json first saved_force saved_candidate
+  local summary hash overlays overlay_json skills_json skill_metadata_json first saved_force saved_candidate
   local apply_state lock_generated_at existing_generated_at existing_version existing_channel existing_project existing_workflow existing_hash existing_apply_state
-  local existing_skills current_skills
+  local existing_skills current_skills existing_skill_metadata current_skill_metadata
   summary="$(detector_summary_for_lock)"
   hash="$(printf '%s' "$summary" | hash_text)"
   overlays="$(selected_template_overlays | sort -u)"
   skills_json="$(selected_optional_skills_json)"
+  skill_metadata_json="$(selected_optional_skill_metadata_json)"
   apply_state="$(compute_apply_state)"
   overlay_json=""
   first=true
@@ -127,6 +128,8 @@ write_agent_bootstrap_lock() {
     existing_apply_state="$(read_lock_value apply_state "$lock_file")"
     existing_skills="$(read_lock_skills "$lock_file" | sort | tr '\n' ',')"
     current_skills="$(selected_optional_skills | sort | tr '\n' ',')"
+    existing_skill_metadata="$(read_lock_skill_metadata_json "$lock_file")"
+    current_skill_metadata="$skill_metadata_json"
     if [[ -n "$existing_generated_at" ]] &&
       [[ "$existing_version" == "$AGENT_BOOTSTRAP_VERSION" ]] &&
       [[ "$existing_channel" == "$AGENT_BOOTSTRAP_CHANNEL" ]] &&
@@ -134,7 +137,8 @@ write_agent_bootstrap_lock() {
       [[ "$existing_workflow" == "$WORKFLOW_PRESET" ]] &&
       [[ "$existing_hash" == "$hash" ]] &&
       [[ "$existing_apply_state" == "$apply_state" ]] &&
-      [[ "$existing_skills" == "$current_skills" ]]; then
+      [[ "$existing_skills" == "$current_skills" ]] &&
+      [[ "$existing_skill_metadata" == "$current_skill_metadata" ]]; then
       lock_generated_at="$existing_generated_at"
     fi
   fi
@@ -151,6 +155,7 @@ write_agent_bootstrap_lock() {
   "version": "$AGENT_BOOTSTRAP_VERSION",
   "channel": "$AGENT_BOOTSTRAP_CHANNEL",
   "skills": [$skills_json],
+  "skill_metadata": $skill_metadata_json,
   "project_name": "$(json_escape "$PROJECT_NAME")",
   "generated_at": "$lock_generated_at",
   "apply_state": "$apply_state",

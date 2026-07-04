@@ -63,7 +63,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|status|stats [--json]|doctor" \
+    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -1126,6 +1126,50 @@ with events_path.open("a", encoding="utf-8") as handle:
 PY
 }
 
+append_skill_note_event() {
+  local skill="$1"
+  [[ "$STATE_WRITABLE" == "true" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  SESSION_EVENTS="$SESSION_EVENTS" SKILL_NAME="$skill" python3 - <<'PY'
+import json
+import os
+import pathlib
+import time
+
+events_path = pathlib.Path(os.environ["SESSION_EVENTS"])
+event = {
+    "schema": "agent-guard-event/v2",
+    "event": "skill_note",
+    "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "skill": os.environ["SKILL_NAME"],
+    "telemetry": "self-report",
+    "measurement": "convention",
+    "mode": (
+        os.environ.get("AGENT_GUARD_MODE")
+        or os.environ.get("CODEX_MODE")
+        or os.environ.get("CLAUDE_MODE")
+        or os.environ.get("AGENT_MODE")
+        or "unknown"
+    ),
+}
+events_path.parent.mkdir(parents=True, exist_ok=True)
+with events_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+PY
+}
+
+skill_note() {
+  local skill="${1:-}"
+  [[ -n "$skill" ]] || fail "skill-note requires a skill name"
+  [[ "${2:-}" == "" ]] || fail "skill-note accepts exactly one skill name"
+  case "$skill" in
+    mobile-optimization) ;;
+    *) fail "unsupported skill-note skill: $skill" ;;
+  esac
+  append_skill_note_event "$skill" || true
+  printf 'agent-guard: skill-note recorded skill=%s telemetry=self-report measurement=convention\n' "$skill"
+}
+
 closeout_trap() {
   local code=$?
   trap - EXIT
@@ -1508,6 +1552,7 @@ import os
 path = os.environ["SESSION_EVENTS"]
 gate = {"pass": 0, "warn": 0, "fail": 0}
 vstat = {"pass": 0, "fail": 0, "none": 0, "skipped": 0, "error": 0}
+skill_usage = {}
 total = 0
 try:
     with open(path, encoding="utf-8") as fh:
@@ -1519,7 +1564,14 @@ try:
                 event = json.loads(line)
             except Exception:
                 continue
-            if event.get("schema") != "agent-guard-event/v2" or event.get("event") != "pre_final":
+            if event.get("schema") != "agent-guard-event/v2":
+                continue
+            if event.get("event") == "skill_note":
+                skill = event.get("skill")
+                if isinstance(skill, str) and skill:
+                    skill_usage[skill] = skill_usage.get(skill, 0) + 1
+                continue
+            if event.get("event") != "pre_final":
                 continue
             total += 1
             gate_status = event.get("gate_status")
@@ -1538,6 +1590,7 @@ report = {
     "gate_status": gate,
     "verification_status": vstat,
     "verification_none_rate": round(none_rate, 3),
+    "skill_usage": skill_usage,
 }
 if os.environ["AS_JSON"] == "true":
     print(json.dumps(report, indent=2))
@@ -1550,6 +1603,9 @@ else:
         f"skipped={vstat['skipped']} error={vstat['error']}"
     )
     print(f"  verification:none rate: {none_rate:.0%}  (repos with no runnable fast tests)")
+    if skill_usage:
+        usage = " ".join(f"{skill}={count}" for skill, count in sorted(skill_usage.items()))
+        print(f"  skill_usage: {usage}")
 PY
 }
 
@@ -1569,6 +1625,10 @@ case "${1:-}" in
   pre-final)
     shift || true
     pre_final "$@"
+    ;;
+  skill-note)
+    shift || true
+    skill_note "$@"
     ;;
   status)
     shift || true
