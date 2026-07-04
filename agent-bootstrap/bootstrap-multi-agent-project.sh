@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.07.03.1"
+AGENT_BOOTSTRAP_VERSION="2026.07.04.0"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -242,6 +242,57 @@ PY
     sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p'
 }
 
+read_lock_skill_metadata_value() {
+  local skill="$1"
+  local key="$2"
+  local file="${3:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
+  [[ -f "$file" ]] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$file" "$skill" "$key" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+path, skill, key = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+metadata = document.get("skill_metadata", {})
+if not isinstance(metadata, dict):
+    sys.exit(0)
+skill_metadata = metadata.get(skill, {})
+if not isinstance(skill_metadata, dict):
+    sys.exit(0)
+value = skill_metadata.get(key)
+if isinstance(value, str):
+    print(value)
+PY
+}
+
+read_lock_skill_metadata_json() {
+  local file="${1:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
+  [[ -f "$file" ]] || { printf '{}'; return 0; }
+  command -v python3 >/dev/null 2>&1 || { printf '{}'; return 0; }
+  python3 - "$file" <<'PY' 2>/dev/null || printf '{}'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as handle:
+        document = json.load(handle)
+except Exception:
+    print("{}")
+    sys.exit(0)
+
+metadata = document.get("skill_metadata", {})
+if not isinstance(metadata, dict):
+    metadata = {}
+print(json.dumps(metadata, sort_keys=True, separators=(",", ":")))
+PY
+}
+
 array_has_value() {
   local array_name="$1"
   local wanted="$2"
@@ -305,6 +356,84 @@ selected_optional_skills_json() {
   printf '%s' "$json"
 }
 
+mobile_optimization_skill_source_paths() {
+  cat <<'EOF'
+templates/skills/mobile-optimization/SKILL.md
+templates/skills/mobile-optimization/catalog.md
+templates/skills/mobile-optimization/pointers/claude.command.md
+templates/skills/mobile-optimization/pointers/cursor.rules.mdc
+templates/skills/mobile-optimization/pointers/pointer-body.md
+templates/skills/mobile-optimization/pointers/windsurf.rules.md
+templates/skills/mobile-optimization/skill.manifest.json
+EOF
+  if detected_stack_has android_kotlin; then
+    cat <<'EOF'
+templates/skills/mobile-optimization/overlays/kotlin.md
+templates/skills/mobile-optimization/fewshots/kotlin.md
+EOF
+  fi
+  if detected_stack_has ios_swift; then
+    cat <<'EOF'
+templates/skills/mobile-optimization/overlays/swift.md
+templates/skills/mobile-optimization/fewshots/swift.md
+EOF
+  fi
+}
+
+optional_skill_content_hash() {
+  local skill="$1"
+  local relpath
+  case "$skill" in
+    mobile-optimization)
+      {
+        while IFS= read -r relpath; do
+          [[ -n "$relpath" ]] || continue
+          [[ -f "$BUNDLE_DIR/$relpath" ]] || fail "missing optional skill source: $relpath"
+          printf 'path:%s\n' "$relpath"
+          cat "$BUNDLE_DIR/$relpath"
+          printf '\n'
+        done < <(mobile_optimization_skill_source_paths | sort -u)
+      } | hash_text
+      ;;
+    *)
+      fail "unsupported optional skill hash: $skill"
+      ;;
+  esac
+}
+
+selected_optional_skill_metadata_json() {
+  local skill current_hash existing_hash existing_version installed_from_version content_hash
+  local first=true
+  local json=""
+  while IFS= read -r skill; do
+    [[ -n "$skill" ]] || continue
+    current_hash="$(optional_skill_content_hash "$skill")"
+    existing_hash="$(read_lock_skill_metadata_value "$skill" content_hash)"
+    existing_version="$(read_lock_skill_metadata_value "$skill" installed_from_version)"
+
+    installed_from_version="$existing_version"
+    content_hash="$existing_hash"
+    if optional_skill_requested "$skill"; then
+      if [[ -z "$existing_hash" || "$existing_hash" != "$current_hash" ]]; then
+        installed_from_version="$AGENT_BOOTSTRAP_VERSION"
+        content_hash="$current_hash"
+      fi
+    elif [[ -z "$content_hash" ]]; then
+      content_hash="$current_hash"
+    fi
+    [[ -n "$installed_from_version" ]] || installed_from_version="$AGENT_BOOTSTRAP_VERSION"
+    [[ -n "$content_hash" ]] || content_hash="$current_hash"
+
+    if [[ "$first" == "true" ]]; then
+      first=false
+    else
+      json+=","
+    fi
+    json+="\"$(json_escape "$skill")\":{\"content_hash\":\"$(json_escape "$content_hash")\",\"installed_from_version\":\"$(json_escape "$installed_from_version")\"}"
+  done < <(selected_optional_skills)
+  printf '{%s}' "$json"
+}
+
 selected_optional_skills_csv() {
   local skill
   local first=true
@@ -319,6 +448,19 @@ selected_optional_skills_csv() {
     csv+="$skill"
   done < <(selected_optional_skills)
   printf '%s' "${csv:-none}"
+}
+
+mobile_optimization_skew_status() {
+  optional_skill_installed mobile-optimization || { printf 'not-installed'; return 0; }
+  local installed_hash current_hash
+  installed_hash="$(read_lock_skill_metadata_value mobile-optimization content_hash)"
+  [[ -n "$installed_hash" ]] || { printf 'unknown'; return 0; }
+  current_hash="$(optional_skill_content_hash mobile-optimization)"
+  if [[ "$installed_hash" == "$current_hash" ]]; then
+    printf 'clean'
+  else
+    printf 'stale'
+  fi
 }
 
 validate_requested_optional_skills() {
@@ -480,6 +622,7 @@ onboarding_status_for_target() {
 current_status_fields() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
   local installed_version installed_schema installed_channel installed_workflow expected_hash actual_summary actual_hash status pending_count generated_drift onboarding_status
+  local mobile_skill_version mobile_skill_hash mobile_skill_skew
   installed_version="$(read_lock_value version "$lock_file")"
   installed_schema="$(read_lock_value schema "$lock_file")"
   installed_channel="$(read_lock_value channel "$lock_file")"
@@ -491,6 +634,14 @@ current_status_fields() {
   pending_count="$(pending_generated_candidate_count)"
   generated_drift="$(generated_file_drift_status)"
   onboarding_status="$(onboarding_status_for_target)"
+  mobile_skill_skew="$(mobile_optimization_skew_status)"
+  if optional_skill_installed mobile-optimization; then
+    mobile_skill_version="$(read_lock_skill_metadata_value mobile-optimization installed_from_version)"
+    mobile_skill_hash="$(read_lock_skill_metadata_value mobile-optimization content_hash)"
+  else
+    mobile_skill_version="none"
+    mobile_skill_hash="none"
+  fi
 
   printf 'target=%s\n' "$TARGET_DIR"
   printf 'project=%s\n' "$PROJECT_NAME"
@@ -500,6 +651,9 @@ current_status_fields() {
   printf 'channel=%s\n' "${installed_channel:-missing}"
   printf 'workflow_preset=%s\n' "${installed_workflow:-$WORKFLOW_PRESET}"
   printf 'installed_skills=%s\n' "$(selected_optional_skills_csv)"
+  printf 'skill_mobile_optimization_installed_from_version=%s\n' "${mobile_skill_version:-missing}"
+  printf 'skill_mobile_optimization_content_hash=%s\n' "${mobile_skill_hash:-missing}"
+  printf 'skill_mobile_optimization_skew=%s\n' "$mobile_skill_skew"
   printf 'detector_lock_status=%s\n' "$status"
   printf 'onboarding_status=%s\n' "$onboarding_status"
   printf 'pending_generated_candidates=%s\n' "$pending_count"
@@ -510,7 +664,7 @@ print_status() {
   local fields
   fields="$(current_status_fields)"
   if [[ "$JSON_OUTPUT" == "true" ]]; then
-    local target project schema installed version channel workflow skills detector onboarding pending generated_drift
+    local target project schema installed version channel workflow skills skill_mobile_version skill_mobile_hash skill_mobile_skew detector onboarding pending generated_drift
     target="$(printf '%s\n' "$fields" | sed -n 's/^target=//p')"
     project="$(printf '%s\n' "$fields" | sed -n 's/^project=//p')"
     schema="$(printf '%s\n' "$fields" | sed -n 's/^schema=//p')"
@@ -519,11 +673,14 @@ print_status() {
     channel="$(printf '%s\n' "$fields" | sed -n 's/^channel=//p')"
     workflow="$(printf '%s\n' "$fields" | sed -n 's/^workflow_preset=//p')"
     skills="$(printf '%s\n' "$fields" | sed -n 's/^installed_skills=//p')"
+    skill_mobile_version="$(printf '%s\n' "$fields" | sed -n 's/^skill_mobile_optimization_installed_from_version=//p')"
+    skill_mobile_hash="$(printf '%s\n' "$fields" | sed -n 's/^skill_mobile_optimization_content_hash=//p')"
+    skill_mobile_skew="$(printf '%s\n' "$fields" | sed -n 's/^skill_mobile_optimization_skew=//p')"
     detector="$(printf '%s\n' "$fields" | sed -n 's/^detector_lock_status=//p')"
     onboarding="$(printf '%s\n' "$fields" | sed -n 's/^onboarding_status=//p')"
     pending="$(printf '%s\n' "$fields" | sed -n 's/^pending_generated_candidates=//p')"
     generated_drift="$(printf '%s\n' "$fields" | sed -n 's/^generated_file_drift=//p')"
-    printf '{"schema":"agent-bootstrap-status/v1","target":"%s","project":"%s","lock_schema":"%s","bundle_version":"%s","installed_version":"%s","channel":"%s","workflow_preset":"%s","installed_skills":"%s","detector_lock_status":"%s","onboarding_status":"%s","pending_generated_candidates":%s,"generated_file_drift":"%s"}\n' \
+    printf '{"schema":"agent-bootstrap-status/v1","target":"%s","project":"%s","lock_schema":"%s","bundle_version":"%s","installed_version":"%s","channel":"%s","workflow_preset":"%s","installed_skills":"%s","skill_mobile_optimization_installed_from_version":"%s","skill_mobile_optimization_content_hash":"%s","skill_mobile_optimization_skew":"%s","detector_lock_status":"%s","onboarding_status":"%s","pending_generated_candidates":%s,"generated_file_drift":"%s"}\n' \
       "$(json_escape "$target")" \
       "$(json_escape "$project")" \
       "$(json_escape "$schema")" \
@@ -532,6 +689,9 @@ print_status() {
       "$(json_escape "$channel")" \
       "$(json_escape "$workflow")" \
       "$(json_escape "$skills")" \
+      "$(json_escape "$skill_mobile_version")" \
+      "$(json_escape "$skill_mobile_hash")" \
+      "$(json_escape "$skill_mobile_skew")" \
       "$(json_escape "$detector")" \
       "$(json_escape "$onboarding")" \
       "${pending:-0}" \

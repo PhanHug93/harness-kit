@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026.07.04.0 — Optional skill skew + telemetry
+
+- **Hash-based optional skill skew.** `agent-bootstrap.lock.json` now records
+  per-skill `installed_from_version` and `content_hash`; `--status --json`
+  reports mobile skill skew from content hash differences, not bundle version
+  noise.
+- **Self-report skill usage telemetry.** `scripts/agent-guard.sh skill-note
+  mobile-optimization` appends a convention-based `skill_note` JSONL event, and
+  `agent-guard.sh stats` counts optional skill usage without changing the
+  existing close-out event totals.
+- **Optional-skill release discipline.** Mobile optimization now records usage
+  at the start of its process, and `EXTENSION-GUIDE.md` documents the deliberate
+  choice to avoid uninstalled-skill "available" advisories.
+
 ## 2026.07.03.1 — Optional mobile optimization skill
 
 - **Opt-in mobile optimization skill.** Added `--add-skill mobile-optimization`

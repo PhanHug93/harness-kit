@@ -37,11 +37,13 @@ Blanket rule: outside a known hot path, with no measurement, prefer answering "m
 
 ## Process
 
-0. **Detect scope** — language, platform, code path class (table above), risk level.
-1. **Lock behavior** — list invariants per the contract; write or extend the characterization test.
-2. **Scan** — walk `catalog.md`; note only the patterns that actually apply.
-3. **Patch** — apply the minimal fix per the language overlay.
-4. **Validate** — run the targeted test command, then the project gate:
+0. **Record usage (best effort)** — if `scripts/agent-guard.sh` exists, run
+   `scripts/agent-guard.sh skill-note mobile-optimization`; continue if unavailable.
+1. **Detect scope** — language, platform, code path class (table above), risk level.
+2. **Lock behavior** — list invariants per the contract; write or extend the characterization test.
+3. **Scan** — walk `catalog.md`; note only the patterns that actually apply.
+4. **Patch** — apply the minimal fix per the language overlay.
+5. **Validate** — run the targeted test command, then the project gate:
    `scripts/agent-guard.sh pre-final --run-verify --verify-scope fast`
    A red gate means the task is not complete. Do not report success on red.
 
