@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.07.04.0`
+Version: `2026.07.04.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -29,6 +29,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | `agent-hook.sh` | Runtime hook snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-hook.sh`. |
 | `agent-guard.sh` | Agent Guard Lite runtime snapshot for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
+| `agent-local-only-check.sh` | Runtime Git hygiene checker that blocks harness-kit generated files from being pushed. | Must match generated target `scripts/agent-local-only-check.sh` and pre-push hook expectations. |
 | `detect-agent-tech-stack.sh` | Runtime detector entrypoint snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/detect-agent-tech-stack.sh`. |
 | `githooks/pre-push` | Optional portable git pre-push close-out gate copied into generated target `scripts/githooks/pre-push`. | Must match generated target hook and remain opt-in via `scripts/install-git-hooks.sh`. |
 | `install-git-hooks.sh` | Optional installer that sets `core.hooksPath=scripts/githooks` without clobbering an existing hooks path unless `--force` is used. | Must match generated target `scripts/install-git-hooks.sh`. |

@@ -202,14 +202,50 @@ append_gitignore_block() {
   cat >> "$gitignore" <<'EOF'
 
 # >>> multi-agent bootstrap local state >>>
+# Harness-kit generated files and local harness source/cache copies stay local-only.
+/harness-kit/
+/.harness-kit/
+/agent-bootstrap/
+AGENTS.md
+AGENTS.md.generated.*
+CLAUDE.md
+CLAUDE.md.generated.*
+GEMINI.md
+GEMINI.md.generated.*
+.windsurfrules
+.windsurfrules.generated.*
+docs/agent-configs/
+docs/superpowers/specs/README.md
+docs/superpowers/specs/README.md.generated.*
+docs/superpowers/specs/project-tech-stack.md
+docs/superpowers/specs/project-tech-stack.md.generated.*
+docs/superpowers/specs/project-tech-stack.json
+docs/superpowers/specs/project-tech-stack.json.generated.*
+docs/superpowers/plans/README.md
+docs/superpowers/plans/README.md.generated.*
+.agents/
+.claude/
+.codex/
+.cursor/rules/
+.windsurf/rules/
+.github/workflows/agent-guard.yml
+.github/workflows/agent-guard.yml.generated.*
+scripts/agent-tech-stack-lib.sh
+scripts/detect-agent-tech-stack.sh
+scripts/agent-hook.sh
+scripts/agent-guard.sh
+scripts/agent-onboarding.sh
+scripts/agent-local-only-check.sh
+scripts/verify-ai-deps.sh
+scripts/install-git-hooks.sh
+scripts/install-rtk.sh
+scripts/rtk
+scripts/githooks/
+.gitignore.generated.*
 AGENTS.local.md
 CLAUDE.local.md
 GEMINI.local.md
 docs/agent-configs/*.local.md
-.agents/*
-!.agents/skills/
-!.agents/skills/**
-.agents/skills/**/*.bak.*
 .agents/runtime/
 .agents/state/
 .agents/cache/

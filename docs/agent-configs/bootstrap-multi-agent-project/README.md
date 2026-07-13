@@ -191,7 +191,7 @@ curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.2
 
 That script installs the pinned harness release, creates
 `codex/upgrade-harness-kit`, runs the generator without `--force`, and leaves
-`*.generated.*` candidates visible for review.
+`*.generated.*` candidates local-only for review.
 
 `--diff` materializes a temporary copy of the target, regenerates harness files
 there, normalizes volatile timestamps and temp paths, and prints generated-file
@@ -231,8 +231,11 @@ Core infra, installed by default:
 - `scripts/agent-tech-stack-lib.sh`.
 - `scripts/agent-hook.sh`.
 - `scripts/agent-guard.sh`.
+- `scripts/agent-local-only-check.sh`, which blocks tracked harness files during
+  pre-push.
 - `scripts/install-rtk.sh` and `scripts/rtk`.
-- local-only `.gitignore` block for agent/runtime state.
+- local-only `.gitignore` block for generated harness files and agent/runtime
+  state.
 
 With `--workflow full`, it also installs:
 

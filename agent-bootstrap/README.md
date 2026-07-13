@@ -106,12 +106,13 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.07.04.0/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.07.04.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
 target Git repo onto `codex/upgrade-harness-kit`, runs the full generator without
-`--force`, and leaves `*.generated.*` candidates visible for review.
+`--force`, and keeps harness-generated files local-only through the generated
+`.gitignore` block and `scripts/agent-local-only-check.sh` pre-push gate.
 
 For a one-off copy, you can also copy this entire `agent-bootstrap/` directory
 to another machine or project and run `install-agent-bootstrap-home.sh` from
@@ -133,6 +134,9 @@ Lifecycle commands are explicit: `--status --json` reports generated-file drift,
 latest reviewed bootstrap candidate for each generated path while removing older
 candidates for that same path. Candidate promotion is scoped to the generated-file
 allowlist, so unrelated project files matching `*.generated.*` are not touched.
+Harness files are local-only by policy; if a previous run already tracked them,
+run `scripts/agent-local-only-check.sh status`, remove reported paths with
+`git rm --cached -- <path>`, and commit the removal before pushing.
 The Git-backed updater adds the upstream step: `agent-update --check` compares
 the canonical home with the latest published `vYYYY.MM.DD.N` tag,
 `agent-update --self-update` refreshes the canonical home from that tag, and

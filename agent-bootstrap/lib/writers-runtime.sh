@@ -202,6 +202,8 @@ EOF
 }
 
 write_portable_enforcement() {
+  copy_bundle_file "agent-local-only-check.sh" "$TARGET_DIR/scripts/agent-local-only-check.sh"
+  make_executable "$LAST_WRITTEN_FILE"
   copy_bundle_file "githooks/pre-push" "$TARGET_DIR/scripts/githooks/pre-push"
   make_executable "$LAST_WRITTEN_FILE"
   copy_bundle_file "install-git-hooks.sh" "$TARGET_DIR/scripts/install-git-hooks.sh"
@@ -1529,6 +1531,7 @@ need_file scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
 need_executable scripts/agent-guard.sh
+need_executable scripts/agent-local-only-check.sh
 need_executable scripts/detect-agent-tech-stack.sh
 need_executable scripts/verify-ai-deps.sh
 
@@ -1537,6 +1540,7 @@ need_bash_syntax scripts/rtk
 need_bash_syntax scripts/agent-tech-stack-lib.sh
 need_bash_syntax scripts/agent-hook.sh
 need_bash_syntax scripts/agent-guard.sh
+need_bash_syntax scripts/agent-local-only-check.sh
 need_bash_syntax scripts/detect-agent-tech-stack.sh
 need_bash_syntax scripts/verify-ai-deps.sh
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then

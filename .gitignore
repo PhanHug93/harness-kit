@@ -1,5 +1,7 @@
 # Local agent / runtime state
 .tools/
+/harness-kit/
+/.harness-kit/
 .codex-mode-lock
 .codex/environments/
 .codex/*.bak.*
