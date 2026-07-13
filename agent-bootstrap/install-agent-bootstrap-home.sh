@@ -309,6 +309,7 @@ main() {
   copy_file "agent-hook.sh" "agent-hook.sh"
   copy_file "agent-guard.sh" "agent-guard.sh"
   copy_file "agent-onboarding.sh" "agent-onboarding.sh"
+  copy_file "agent-local-only-check.sh" "agent-local-only-check.sh"
   copy_file "detect-agent-tech-stack.sh" "detect-agent-tech-stack.sh"
   copy_file "githooks/pre-push" "githooks/pre-push"
   copy_file "install-git-hooks.sh" "install-git-hooks.sh"

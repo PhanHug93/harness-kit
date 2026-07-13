@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.07.04.1 — Local-only harness Git hygiene
+
+- **Local-only harness footprint.** Generated harness docs, runtime scripts,
+  skills, tool config, and harness source/cache copies are ignored in target
+  projects so they stay local by default.
+- **Pre-push protection.** Added `agent-local-only-check.sh` and wired the
+  generated pre-push hook to block already-tracked harness files before they can
+  reach a remote.
+- **Version bump.** Patch release for the gitignore optimization and agent file
+  push guard.
+
 ## 2026.07.04.0 — Optional skill skew + telemetry
 
 - **Hash-based optional skill skew.** `agent-bootstrap.lock.json` now records

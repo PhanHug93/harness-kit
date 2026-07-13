@@ -23,7 +23,8 @@ Running `--workflow full` into a target project produces:
   `docs/superpowers/specs/project-tech-stack.json` for project-specific stack
   notes filled after an agent scans the target project.
 - Skills: `agentmemory-mcp`, `doubt-driven`.
-- A `.gitignore` block + `agent-bootstrap.lock.json` recording the detected stack + version.
+- A `.gitignore` local-only block, `agent-bootstrap.lock.json` recording the detected stack + version,
+  and `scripts/agent-local-only-check.sh` so generated harness files are not pushed.
 
 `infra` (the default, i.e. no `--workflow`) installs the minimal core only.
 
@@ -126,8 +127,9 @@ fields.
 
 ## Agent Guard Lite
 
-Generated projects include `docs/agent-configs/context-policy.json` and
-`scripts/agent-guard.sh`. The guard is intentionally file-based: `preflight`
+Generated projects include `docs/agent-configs/context-policy.json`,
+`scripts/agent-guard.sh`, and `scripts/agent-local-only-check.sh`. The guard is
+intentionally file-based: `preflight`
 writes `.agents/state/context-pack.json`, `check` verifies contracts without
 writing local state, `pre-edit <path>` blocks protected context/harness paths
 until rerun with `--ack <reason>` and records the acknowledgement locally, and
@@ -154,6 +156,11 @@ commands. Results are written to `.agents/state/last-verify-report.json`, and an
 Generated Claude Code settings also register a Stop hook that runs fast
 close-out verification when the tree has changes; Gemini, Cursor, and Windsurf
 remain advisory and should run the pre-final command manually.
+Harness-kit generated files are local-only by default: the generated `.gitignore`
+block prevents new agent docs/runtime/config from being added, and the optional
+pre-push hook runs `scripts/agent-local-only-check.sh pre-push` to block files
+that were already tracked. If a harness file has already entered the Git index,
+remove it with `git rm --cached -- <path>` and commit that removal.
 The generated CI workflow is a portable skeleton: add project stack setup before
 the guard step, then mark `agent-guard / verify` as a required status check in
 branch protection.

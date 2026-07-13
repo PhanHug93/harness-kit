@@ -758,7 +758,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.07.04.0" ]] || fail "VERSION not bumped to 2026.07.04.0"
+[[ "$bundle_version" == "2026.07.04.1" ]] || fail "VERSION not bumped to 2026.07.04.1"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -773,6 +773,7 @@ AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out
 [[ -x "$CANONICAL_DIR/agent-bootstrap-update.sh" ]] || fail "canonical installer did not export updater script"
 [[ -x "$CANONICAL_DIR/agent-hook.sh" ]] || fail "canonical installer did not export agent hook snapshot"
 [[ -x "$CANONICAL_DIR/agent-onboarding.sh" ]] || fail "canonical installer did not export agent onboarding snapshot"
+[[ -x "$CANONICAL_DIR/agent-local-only-check.sh" ]] || fail "canonical installer did not export local-only checker snapshot"
 [[ -x "$CANONICAL_DIR/verify-ai-deps.sh" ]] || fail "canonical installer did not export verifier snapshot"
 [[ -f "$CANONICAL_DIR/VERSION" ]] || fail "canonical installer did not export VERSION"
 [[ -f "$CANONICAL_DIR/MANIFEST.md" ]] || fail "canonical installer did not export MANIFEST.md"
@@ -787,6 +788,7 @@ for canonical_file in \
   agent-hook.sh \
   agent-guard.sh \
   agent-onboarding.sh \
+  agent-local-only-check.sh \
   detect-agent-tech-stack.sh \
   githooks/pre-push \
   install-git-hooks.sh \
@@ -1175,6 +1177,7 @@ need_same_file "$BOOTSTRAP_BUNDLE/install-git-hooks.sh" "$TMP_DIR/scripts/instal
 [[ -f "$TMP_DIR/.github/workflows/agent-guard.yml" ]] || fail "agent-guard CI workflow not generated into target"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "pre-final --run-verify" "pre-push runs close-out verification"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "preflight" "pre-push runs preflight before pre-final"
+need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "agent-local-only-check.sh" "pre-push runs local-only harness check"
 need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "preflight" "CI workflow runs preflight before pre-final"
 need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "--verify-scope full" "CI workflow runs full close-out verification"
 need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "Add project stack setup" "CI workflow documents required stack setup"
@@ -1196,6 +1199,44 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "git restore" "
   [[ "$(git config core.hooksPath)" == "scripts/githooks" ]] || fail "installer --force did not override hooksPath"
   git config --unset core.hooksPath 2>/dev/null || true
 )
+LOCAL_ONLY_DIR="$FIXTURE_DIR/local-only-check"
+mkdir -p "$LOCAL_ONLY_DIR/scripts"
+cp "$BOOTSTRAP_BUNDLE/agent-local-only-check.sh" "$LOCAL_ONLY_DIR/scripts/agent-local-only-check.sh"
+chmod +x "$LOCAL_ONLY_DIR/scripts/agent-local-only-check.sh"
+(
+  cd "$LOCAL_ONLY_DIR"
+  git init -q
+  git config user.email "agent-bootstrap@example.invalid"
+  git config user.name "Agent Bootstrap Test"
+  printf '# Local-only Check\n' > README.md
+  git add README.md
+  git commit -m "seed local-only check repo" >/dev/null
+  printf '# Harness Instructions\n' > AGENTS.md
+  git add AGENTS.md
+  git commit -m "track harness file" >/dev/null
+  if local_only_status="$(scripts/agent-local-only-check.sh status 2>&1)"; then
+    fail "local-only checker allowed tracked AGENTS.md"
+  fi
+  need_contains "$local_only_status" "AGENTS.md" "local-only checker reports tracked AGENTS"
+  local_sha="$(git rev-parse HEAD)"
+  zero_sha="0000000000000000000000000000000000000000"
+  if pre_push_out="$(printf 'refs/heads/main %s refs/heads/main %s\n' "$local_sha" "$zero_sha" | scripts/agent-local-only-check.sh pre-push 2>&1)"; then
+    fail "local-only pre-push allowed tracked AGENTS.md"
+  fi
+  need_contains "$pre_push_out" "AGENTS.md" "local-only pre-push reports tracked AGENTS"
+  git rm --cached AGENTS.md >/dev/null
+  git commit -m "untrack harness file" >/dev/null
+  printf '%s\n' \
+    '# >>> multi-agent bootstrap local state >>>' \
+    'AGENTS.md' \
+    '# <<< multi-agent bootstrap local state <<<' > .gitignore
+  git add .gitignore
+  git commit -m "track harness gitignore marker" >/dev/null
+  if gitignore_status="$(scripts/agent-local-only-check.sh status 2>&1)"; then
+    fail "local-only checker allowed tracked harness .gitignore marker"
+  fi
+  need_contains "$gitignore_status" ".gitignore" "local-only checker reports tracked gitignore marker"
+)
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md" ]] || fail "full bootstrap did not generate agentmemory skill"
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/agents/openai.yaml" ]] || fail "full bootstrap did not generate agentmemory openai metadata"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit"' "Claude settings edit/write guard hook"
@@ -1204,8 +1245,12 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "git restore" "
 	python3 -m json.tool "$TMP_DIR/.claude/settings.json" >/dev/null || fail "generated settings.json is not valid JSON after Stop hook"
 	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "agentmemory-mcp" "full bootstrap AGENTS agentmemory routing"
 	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "advisory" "AGENTS notes non-Claude close-out surfaces stay advisory"
-need_contains "$(cat "$TMP_DIR/.gitignore")" "!.agents/skills/**" "full bootstrap gitignore tracked skills exception"
-need_not_contains "$(cat "$TMP_DIR/.gitignore")" "*.generated.*" "full bootstrap generated candidates must stay visible"
+need_contains "$(cat "$TMP_DIR/.gitignore")" "AGENTS.md" "full bootstrap gitignore keeps AGENTS local-only"
+need_contains "$(cat "$TMP_DIR/.gitignore")" ".agents/" "full bootstrap gitignore keeps generated skills local-only"
+need_contains "$(cat "$TMP_DIR/.gitignore")" "scripts/agent-local-only-check.sh" "full bootstrap gitignore keeps local-only checker local"
+need_contains "$(cat "$TMP_DIR/.gitignore")" "AGENTS.md.generated.*" "full bootstrap gitignore keeps harness candidates local-only"
+need_not_contains "$(cat "$TMP_DIR/.gitignore")" "!.agents/skills/**" "full bootstrap gitignore must not track generated skills"
+need_not_contains "$(cat "$TMP_DIR/.gitignore")" "*.generated.*" "full bootstrap gitignore must not ignore unrelated generated source files"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "/Users/admin/" "generated agentmemory skill must not contain author machine path"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "codex-cliproxy-provider" "generated agentmemory skill must not name author-only repo"
 need_not_contains "$(sed -n '1,20p' "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Android/iOS" "generated agentmemory skill description must be stack agnostic"
@@ -1710,6 +1755,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MEM_GUARD_DIR"
   git config user.email "agent-bootstrap-test@example.invalid"
   git config user.name "Agent Bootstrap Test"
   git add -A
+  git add -f scripts/agent-hook.sh
   git commit -qm baseline
   scripts/agent-guard.sh preflight >/dev/null
 )
@@ -1908,6 +1954,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_FAIL_DI
   git config user.email "agent-bootstrap-test@example.invalid"
   git config user.name "Agent Bootstrap Test"
   git add -A
+  git rm --cached -- .gitignore >/dev/null 2>&1 || true
   git commit -qm baseline
   scripts/agent-guard.sh preflight >/dev/null
 )

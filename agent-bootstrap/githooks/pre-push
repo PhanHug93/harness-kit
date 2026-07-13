@@ -6,6 +6,16 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 scope="${AGENT_GUARD_PREPUSH_SCOPE:-fast}"
+push_input="$(mktemp)"
+trap 'rm -f "$push_input"' EXIT HUP INT TERM
+
+if [[ -t 0 ]]; then
+  : > "$push_input"
+else
+  cat > "$push_input"
+fi
+
+bash "$ROOT/scripts/agent-local-only-check.sh" pre-push < "$push_input"
 
 bash "$ROOT/scripts/agent-guard.sh" preflight >/dev/null
 exec bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope"
