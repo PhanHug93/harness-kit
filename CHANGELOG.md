@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.08.10.1 — Claude-Codex collaboration flow
+
+- **Claude/Cowork-Codex contracts.** Canonical role, phase, transition, and escalation rules live in `agent-mode-contracts.md`; task packet, findings, and disposition formats live in `agent-handoff-schema.md`.
+- **Sol/Luna/Sol routing with explicit Terra fallbacks.** Three Codex routes only; Claude cross-review is host behavior, not a route.
+- **Strict profile diagnostics and an accidental nesting guard.** Command dispatch is parsed before strict profile loading so `status`, `doctor`, and `help` still report a broken profile.
+- **Journal-independent pre-final.** `agent-guard.sh pre-final` no longer reads the newest task journal for memory or recall fields.
+- **Corrected context reporters.** Both reporters use the real `6200` gate with an amber band below it instead of a looser `6500` advisory.
+- **Non-destructive candidate migration.** An existing target model profile is preserved; the new bundle profile arrives as a reviewable candidate.
+- **External pinned-release Superpowers policy.** No installer, no updater, no automatic `main` tracking.
+
 ## 2026.07.04.1 — Local-only harness Git hygiene
 
 - **Local-only harness footprint.** Generated harness docs, runtime scripts,

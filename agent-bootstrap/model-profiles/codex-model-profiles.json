@@ -4,12 +4,12 @@
   "profiles": {
     "stable": {
       "reasoning_effort": "xhigh",
-      "planning_model": "gpt-5.5",
-      "coding_model": "gpt-5.5",
-      "reviewing_model": "gpt-5.5",
-      "planning_fallback_model": "gpt-5.4",
-      "coding_fallback_model": "gpt-5.4",
-      "reviewing_fallback_model": "gpt-5.4"
+      "planning_model": "gpt-5.6-sol",
+      "coding_model": "gpt-5.6-luna",
+      "reviewing_model": "gpt-5.6-sol",
+      "planning_fallback_model": "gpt-5.6-terra",
+      "coding_fallback_model": "gpt-5.6-terra",
+      "reviewing_fallback_model": "gpt-5.6-terra"
     }
   }
 }

@@ -222,12 +222,11 @@ Implementation plans live here, one folder per topic:
 `docs/superpowers/plans/<topic>/`. Each plan breaks a spec into bite-sized,
 verifiable tasks. Reference the plan path from commits/PRs for traceability.
 
-## Task journal
+## Optional durable decisions
 
-Each task keeps a working-memory journal at `<topic>/journal.md` — append-only,
-one entry per mode step, following the schema in
-`docs/agent-configs/task-journal.md`. It survives context compaction and is the
-task's durable decision record. Keep entries concise; the journal stays in place
-when the task lands.
+When a task-specific decision should survive local collaboration-packet loss or
+context compaction, optionally keep a concise append-only
+`<topic>/journal.md`. See `docs/agent-configs/task-journal.md`; journals do not
+select the active task.
 EOF_PLANS
 }

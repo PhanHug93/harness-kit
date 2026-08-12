@@ -1,211 +1,290 @@
-# agent-bootstrap
+# Harness Kit
 
-Portable, self-testing multi-agent harness kit that generates agent runtime infrastructure (Claude, Codex,
-Gemini, Cursor, Windsurf) into any project. One command stands up agent entry
-docs, mode contracts, a tech-stack detector, runtime hooks, an onboarding
-scaffold, Agent Guard Lite, and skills — adapting to the target project's stack.
+Harness Kit is a portable, self-testing multi-agent harness kit for adding a
+predictable AI-assisted workflow to an existing project. It generates local
+instructions, routed model profiles, onboarding helpers, runtime checks, and
+handoff guidance without replacing the project's application code.
 
-Version: see [`agent-bootstrap/VERSION`](agent-bootstrap/VERSION).
+Current release: [`2026.08.10.1`](agent-bootstrap/VERSION)
 
-## What it generates
+## What changes for the user
 
-Running `--workflow full` into a target project produces:
+The full workflow gives each participant a clear responsibility:
 
-- Entry docs: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules`, `.cursor/rules/*`.
-- `docs/agent-configs/`: `project-agent-context.md` (auto-detected stack), mode
-  contracts, handoff schema, council workflow, Karpathy workflow, model profiles,
-  context policy, schema catalog, and rtk provenance manifest.
-- `.codex/` (config + mode helper + `/codex:*` bridge commands) and `.claude/commands/*`.
-- `scripts/`: tech-stack detector, agent hook, Agent Guard Lite, onboarding readiness helper, rtk wrapper + installer, AI-deps verifier.
-- Onboarding scaffold: `project-onboarding.md` + an empty `project-brief.md` + a
-  `docs/superpowers/{specs,plans}` skeleton, including
-  `docs/superpowers/specs/project-tech-stack.md` and
-  `docs/superpowers/specs/project-tech-stack.json` for project-specific stack
-  notes filled after an agent scans the target project.
-- Skills: `agentmemory-mcp`, `doubt-driven`.
-- A `.gitignore` local-only block, `agent-bootstrap.lock.json` recording the detected stack + version,
-  and `scripts/agent-local-only-check.sh` so generated harness files are not pushed.
+1. Claude analyzes the problem and prepares the specification.
+2. Codex Sol checks whether the specification is safe and complete enough to
+   implement.
+3. Codex Luna implements the approved, bounded change.
+4. A fresh Codex Sol review checks the result and its verification evidence.
+5. Claude performs an independent cross-review.
+6. The user accepts, revises, escalates, or closes the task.
 
-`infra` (the default, i.e. no `--workflow`) installs the minimal core only.
+Coding cannot start until the technical review records that the task is ready
+for the configured coding model. The coding pass may send an apparently ready
+task back for clarification, but it cannot turn a blocking verdict into an
+approval. An initial implementation may be followed by at most two remediation
+rounds before the decision returns to the user.
 
-## Quick start
+This is a coordination protocol, not an autonomous agent runner. The user opens
+each host session; Harness Kit does not launch one AI host from another.
 
-One-time per machine — export the bundle to a canonical home + shell functions:
+## Install on a new machine
+
+Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`.
+
+Export the bundle to its canonical home and install the shell helpers:
 
 ```bash
+git clone https://github.com/PhanHug93/harness-kit.git
+cd harness-kit
 agent-bootstrap/install-agent-bootstrap-home.sh --write-zshrc
 source ~/.zshrc
 ```
 
-Runtime requirements are intentionally ordinary: Bash, `python3`, Git, and a
-SHA-256 tool (`sha256sum` or `shasum`). Installing `rtk` is handled by the
-generated `scripts/install-rtk.sh`. rtk is intentionally hard-pinned to the
-bundle's audited version so generated projects stay stable instead of drifting
-with upstream latest releases.
-
-Apply to a project:
+Apply the full workflow to a project:
 
 ```bash
 cd /path/to/project
-agent-init --workflow full        # bootstrap into the current dir
-bash scripts/install-rtk.sh       # pinned git wrapper (required for the "ready" state)
-scripts/agent-hook.sh doctor      # validate
-scripts/agent-guard.sh preflight  # refresh local context pack
-scripts/agent-onboarding.sh next  # print the current onboarding gap
-# then open an agent session and run /project-onboarding
-scripts/agent-onboarding.sh check # strict gate once onboarding is filled
+agent-init --workflow full
+bash scripts/install-rtk.sh
+scripts/agent-hook.sh doctor
+scripts/agent-guard.sh preflight
+scripts/agent-onboarding.sh next
 ```
 
-The same guidance is available later with `agent-init --first-10` (or
-`agent-init --next`) and in `docs/agent-configs/first-10-minutes.md`.
-
-Inspect or upgrade an existing target:
+Open an agent session and run `/project-onboarding`, then finish the readiness
+check:
 
 ```bash
+scripts/agent-onboarding.sh check
+```
+
+The same first-run guidance remains available through `agent-init --first-10`
+or `agent-init --next`.
+
+rtk is intentionally hard-pinned to the bundle's audited version so projects
+do not drift with an unreviewed upstream release.
+
+## Upgrade an existing project to 2026.08.10.1
+
+### Option A: one-shot pinned upgrade
+
+Use this when upgrading from another machine or when the canonical Harness Kit
+home is missing or stale.
+
+1. Start in the target project's Git repository with important work committed.
+2. Run the pinned release upgrader:
+
+   ```bash
+   cd /path/to/project
+   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+   ```
+
+3. The upgrader installs release `2026.08.10.1` into
+   `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
+   reviewable candidates instead of overwriting existing managed files.
+4. Inspect the result before accepting candidates:
+
+   ```bash
+   agent-init --status
+   agent-init --status --json
+   agent-init --diff
+   agent-init --upgrade-plan
+   ```
+
+5. Apply only after reviewing the generated differences:
+
+   ```bash
+   agent-init --apply-candidates
+   ```
+
+6. Refresh local tools and verify the upgraded target:
+
+   ```bash
+   bash scripts/install-rtk.sh
+   scripts/agent-hook.sh doctor
+   scripts/agent-guard.sh preflight
+   scripts/agent-guard.sh pre-final --run-verify
+   scripts/verify-ai-deps.sh --json
+   ```
+
+7. Review `git status` before committing project-owned changes. Generated
+   harness files are local-only by default and should not be pushed accidentally.
+
+### Option B: update an existing canonical installation
+
+Use this when the `agent-update`, `agent-upgrade`, and `agent-init` shell helpers
+are already available:
+
+```bash
+cd /path/to/project
 agent-update --check
 agent-update --self-update
 agent-upgrade --plan
 agent-init --status
-agent-init --status --json
-agent-init --first-10
 agent-init --diff
-agent-init --upgrade-plan
 agent-init --apply-candidates
+scripts/agent-hook.sh doctor
+scripts/agent-guard.sh preflight
+scripts/agent-guard.sh pre-final --run-verify
+scripts/verify-ai-deps.sh --json
 ```
 
-One-shot safe upgrade from another machine/project:
+The safe order is always:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.06.24.3/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
-```
+> check → update the bundle → plan → inspect differences → apply candidates → verify
 
-The one-shot path installs the pinned release into `$HOME/dev/agent-bootstrap`,
-creates `codex/upgrade-harness-kit` in the target Git repo, generates
-non-destructive `*.generated.*` candidates, and leaves candidate application to
-review unless `--apply-candidates` is passed.
+Do not use `--force` as a routine upgrade path. It is an explicit overwrite
+mode; normal upgrades preserve existing managed files and propose changes beside
+them as `*.generated.<timestamp>` candidates.
 
-One-off without the shell function:
+## Claude Desktop/Cowork setup
 
-```bash
-bash /path/to/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh \
-  --target "$PWD" --workflow full
-```
+After a full bootstrap:
 
-## Safety
+1. Open the generated target in Cowork.
+2. In Cowork, copy the Folder Instructions from `.claude/README.md` once.
+3. Give Claude the problem so it creates or resumes the task packet.
+4. Use routed Codex for technical review, implementation, and final review.
+5. Return to Claude for independent cross-review, then make the final decision
+   as the user.
 
-Non-destructive by default: existing files are preserved; conflicts are written as
-`*.generated.<timestamp>` candidates (kept **visible** in git status for review).
-Use `--diff` to preview generated-file drift, and `--apply-candidates` to promote
-reviewed bootstrap-generated candidates into place. Candidate promotion is
-scoped to the bootstrap generated-file allowlist, so unrelated project files such
-as `src/api.generated.ts` are left alone. Filled onboarding/context files such
-as `project-brief.md` and `project-tech-stack.json` are preserved even when an
-older empty candidate exists. `--skip-existing` skips existing files
-entirely; `--force` overwrites (a `.bak` is kept unless `--no-backup`). The
-generator never deletes target files outside explicit generated-candidate
-promotion.
+Do not assume Claude Code hooks run in Cowork. If Bash is unavailable, Claude
+continues its analysis or cross-review role and records verification as blocked
+or delegated with a reason.
 
-## Token economy
+The collaboration records are coordination and audit conventions, not security controls:
+packet ownership and append-only history are conventions; host, model, and session independence are declarations rather than proof; and Sol authorization entries are audit declarations. Important durable decisions
+belong in the project's tracked specification, plan, or memory rather than only
+in the local task packet.
 
-The generated startup context is progressive: agents read a small always-on core
-first and load heavier docs/skills on demand. The generated `doctor` and verifier
-report an estimated token budget for the always-on core (target ≤4000) so harness
-context cost stays visible before it becomes a recurring per-session tax. The
-reported core is `AGENTS.md`, `project-agent-context.md`, and the project brief;
-it excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`.
+## Model routing
 
-## Onboarding contract
+The default profile uses three configurable Codex routes:
 
-Full-workflow targets include `scripts/agent-onboarding.sh`, a read-only
-readiness helper that computes status from `project-brief.md` and
-`project-tech-stack.json` instead of maintaining another state file. `status`
-and `next` guide the first 10 minutes; `check` is the strict gate and exits
-non-zero until the brief has no `UNFILLED` marker, required sections are filled,
-the tech-stack Markdown spec is filled, source evidence paths point to existing
-project files, and verification entries have non-empty command/purpose/source
-fields.
+| Work | Default | Fallback |
+| --- | --- | --- |
+| Planning and specification review | `gpt-5.6-sol` | `gpt-5.6-terra` |
+| Bounded implementation | `gpt-5.6-luna` | `gpt-5.6-terra` |
+| Final technical review | `gpt-5.6-sol` | `gpt-5.6-terra` |
 
-## Agent Guard Lite
+Defaults live in `docs/agent-configs/model-profiles.json` in a generated target.
+`CODEX_MODEL_OVERRIDE`, the mode-specific override variables,
+`CODEX_MODEL_PROFILE`, and `CODEX_REASONING_EFFORT` remain available for an
+explicit operator choice. Claude cross-review is host behavior, not a fourth
+Codex route.
 
-Generated projects include `docs/agent-configs/context-policy.json`,
-`scripts/agent-guard.sh`, and `scripts/agent-local-only-check.sh`. The guard is
-intentionally file-based: `preflight`
-writes `.agents/state/context-pack.json`, `check` verifies contracts without
-writing local state, `pre-edit <path>` blocks protected context/harness paths
-until rerun with `--ack <reason>` and records the acknowledgement locally, and
-`pre-final` catches stale context-pack or required-context drift before a
-completion claim. Generated Claude hooks route `Edit`/`Write`/`MultiEdit`
-through the same path-aware guard. It is a thin enforcement layer, not a daemon
-or broker, and not a security boundary for arbitrary Bash commands.
+## What the full workflow generates
 
-### Closed-loop pre-final
+- Entry guidance for Claude, Codex, Gemini, Cursor, and Windsurf.
+- Canonical role, mode, handoff, context, and model-profile documents under
+  `docs/agent-configs/`.
+- Routed Codex helpers and Claude command surfaces.
+- Project-stack detection, onboarding, guard, local-only, rtk, and verification
+  scripts.
+- Project brief and tech-stack templates backed by source evidence.
+- `agentmemory-mcp` and `doubt-driven` skills.
+- A local-only `.gitignore` block, a versioned bootstrap lock, and a pre-push
+  check for harness files that were already tracked.
 
-The detector emits verification candidates as structured JSON. The standard local close-out path is:
+Running without `--workflow full` installs the smaller `infra` preset.
+
+## Safe generation and upgrades
+
+Existing files are preserved by default. Conflicts become visible
+`*.generated.<timestamp>` candidates, and `agent-init --diff` previews them.
+`agent-init --apply-candidates` promotes only reviewed paths from the generated
+allowlist, leaving unrelated generated files alone. Filled project briefs,
+tech-stack evidence, and USER overlay sections survive regeneration.
+
+`agent-init --status --json` reports bundle version, installed version, drift,
+and pending candidates for tooling or CI. Existing model profiles are migrated
+through the same candidate path rather than silently replaced.
+
+## Verification and operational limits
+
+The standard local close-out path is:
 
 ```bash
 scripts/agent-guard.sh preflight
 scripts/agent-guard.sh pre-final --run-verify
 ```
 
-`pre-final --run-verify` runs concrete fast detector commands and skips
-placeholders such as `xcodebuild ... <scheme>` with a warning. Review the
-detected commands before using `--verify-scope full` to include build/full
-commands. Results are written to `.agents/state/last-verify-report.json`, and an
-`agent-guard-event/v2` event with separate `gate_status` and
-`verification.status` is appended to `.agents/state/session-events.jsonl`.
-Generated Claude Code settings also register a Stop hook that runs fast
-close-out verification when the tree has changes; Gemini, Cursor, and Windsurf
-remain advisory and should run the pre-final command manually.
-Harness-kit generated files are local-only by default: the generated `.gitignore`
-block prevents new agent docs/runtime/config from being added, and the optional
-pre-push hook runs `scripts/agent-local-only-check.sh pre-push` to block files
-that were already tracked. If a harness file has already entered the Git index,
-remove it with `git rm --cached -- <path>` and commit that removal.
-The generated CI workflow is a portable skeleton: add project stack setup before
-the guard step, then mark `agent-guard / verify` as a required status check in
-branch protection.
+`pre-final --run-verify` runs concrete fast verification commands and records
+the real report at `.agents/state/last-verify-report.json`. Placeholder commands
+are warned about rather than reported as successful. Use
+`--verify-scope full` only after reviewing heavier build commands.
 
-## Contracts and schemas
+Agent Guard protects known files and detects stale context, but it is a thin
+file-edit guardrail, not a security boundary for arbitrary Bash commands. Task
+packets are ignored, ephemeral, and convention-controlled; Git does not protect
+their append-only history.
 
-Generated targets include a JSON schema catalog for humans and external tooling.
-The built-in verifier performs manual contract validation for the bootstrap lock,
-model profiles, context policy, project tech-stack contract, schema catalog
-metadata, and rtk provenance manifest; it does not require or invoke a generic
-JSON Schema engine at runtime.
+Generated doctor and verifier commands report two estimated context budgets:
 
-Model defaults are data, not script edits: generated Codex helpers read
-`docs/agent-configs/model-profiles.json`, while `CODEX_MODEL_OVERRIDE`,
-mode-specific overrides, and `CODEX_MODEL_PROFILE` remain available for
-one-shot capacity or migration handling.
+- core startup context: gate `4000`, amber above `3800`;
+- full on-demand workflow context: gate `6200`, amber above `5900`.
 
-## Repo layout
+The core estimate covers `AGENTS.md`, project context, and the project brief. It
+excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`. Amber means
+the target still passes but should be measured again before adding more always-on
+guidance.
 
-- `agent-bootstrap/` — the copyable bundle: thin entrypoint, updater, sourced `lib/*.sh`,
-  runtime snapshots, templates, schemas, `VERSION`, `MANIFEST.md`. Copy this
-  whole folder to apply the kit elsewhere; the entrypoint sources `lib/`, so
-  never copy the script alone.
-- `scripts/` — thin wrappers that delegate into `agent-bootstrap/`, plus the drift test.
-- `docs/agent-configs/bootstrap-multi-agent-project/` — design doc + stack/workflow templates.
+## Contracts, schemas, and repository layout
 
-## Development
+The verifier performs manual contract validation for the bootstrap lock, model
+profiles, context policy, project tech-stack contract, schema catalog metadata,
+and rtk provenance manifest. Published JSON schemas remain references for people
+and external tooling; Harness Kit does not invoke a generic schema engine at
+runtime.
 
-The drift test is the gate after any change to the bundle:
+- `agent-bootstrap/` is the complete copyable bundle. Keep its entrypoint and
+  `lib/` directory together.
+- `scripts/` contains repository wrappers and release/drift tests.
+- `docs/agent-configs/bootstrap-multi-agent-project/` contains templates,
+  schemas, provenance, and operator documentation.
+
+One-off generation without installed shell helpers remains available:
 
 ```bash
+bash /path/to/harness-kit/agent-bootstrap/bootstrap-multi-agent-project.sh \
+  --target "$PWD" --workflow full
+```
+
+## Development and release gate
+
+Run all affected entrypoints before publishing bundle changes:
+
+```bash
+bash scripts/test-onboarding-fixtures.sh
+bash scripts/test-one-shot-upgrade.sh
 bash scripts/test-bootstrap-multi-agent-project.sh
 ```
 
-It verifies the canonical home export, the generated runtime snapshots, and the
-`MANIFEST.md`/installer/test inventory are all consistent, and that generated output
-stays byte-identical. It also runs a small deterministic onboarding fixture eval
-with filled source-backed `project-tech-stack.json` golden contracts, guards
-source template drift, and prevents root `scripts/` from accumulating generated
-runtime snapshots again. Bump
-`agent-bootstrap/VERSION`, the entrypoint
-`AGENT_BOOTSTRAP_VERSION`, and `MANIFEST.md` together for any bundle change.
+The main test verifies canonical-home export, generated runtime mirrors,
+manifest inventory, onboarding fixtures, model routing, non-destructive
+migration, context budgets, and version pins. Bump `agent-bootstrap/VERSION`,
+the entrypoint version, manifest version, one-shot defaults, documentation pins,
+and changelog together.
+
+## Superpowers policy
+
+Superpowers is an external upstream at <https://github.com/obra/superpowers>.
+Harness-kit does not install, update, or synchronize it and adds no updater;
+upstream owns its host-specific installation paths.
+
+- Pin a tested upstream release tag; never auto-track `main`.
+- Review quarterly, or when a relevant release is published.
+- Inspect the release diff and run two or three representative brainstorming
+  tasks before moving the pin.
+- Freeze on the last validated release when a new one gives no relevant benefit
+  or introduces regression risk.
+
+A `v5.1.0` match was reported from a separate environment comparison, not from
+this repository; reverify it before any update.
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE). The `doubt-driven` skill is adapted from
-[`addyosmani/agent-skills`](https://github.com/addyosmani/agent-skills) (MIT) — see
-[`NOTICE`](NOTICE).
+[`addyosmani/agent-skills`](https://github.com/addyosmani/agent-skills) (MIT) —
+see [`NOTICE`](NOTICE).

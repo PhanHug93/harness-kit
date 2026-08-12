@@ -113,32 +113,85 @@ evaluate_common_onboarding() {
   need_contains "$tech_json" '"source_evidence": []' "project tech-stack evidence starts empty"
   need_contains "$agents" "Read on demand" "startup progressive disclosure"
   need_contains "$agents" "roughly 4k estimated tokens" "startup budget text matches verifier budget"
+  [[ -f "$dir/docs/agent-configs/task-journal.md" ]] || fail "missing optional task journal guidance"
   local task_journal; task_journal="$(cat "$dir/docs/agent-configs/task-journal.md")"
-  need_contains "$task_journal" "## <ISO-8601 date> · <mode> · <task-id>" "task journal doc schema header"
-  need_contains "$task_journal" "status: in-progress | decided | blocked | done" "task journal doc status enum"
-  need_contains "$task_journal" "append to docs/superpowers/plans/<topic>/journal.md" "task journal doc names concrete journal file"
-  need_contains "$task_journal" "newest" "task journal doc resume/discovery rule"
+  need_contains "$task_journal" "Optional" "task journal doc optional contract"
+  need_contains "$task_journal" '`memory`' "task journal doc optional memory field"
+  need_contains "$task_journal" '`verification`' "task journal doc optional verification field"
   local mode_contracts; mode_contracts="$(cat "$dir/docs/agent-configs/agent-mode-contracts.md")"
-  need_contains "$mode_contracts" "task-journal.md" "mode contracts reference the journal close-out"
-  need_contains "$mode_contracts" "append to docs/superpowers/plans/<topic>/journal.md" "mode contracts name concrete journal file"
-  local council_doc; council_doc="$(cat "$dir/docs/agent-configs/llm-council-agent-workflow.md")"
-  need_contains "$council_doc" "task-journal.md" "council doc has journal close-out"
-  need_contains "$council_doc" "append to docs/superpowers/plans/<topic>/journal.md" "council doc names concrete journal file"
+  need_contains "$mode_contracts" "## Claude–Codex Collaboration Protocol" "mode contracts canonical collaboration protocol"
+  need_contains "$mode_contracts" '`analysis` · Claude' "mode contracts Claude analysis owner"
+  need_contains "$mode_contracts" '`technical_review` · Codex Sol' "mode contracts Sol technical review owner"
+  need_contains "$mode_contracts" '`implementation` · Codex Luna' "mode contracts Luna implementation owner"
+  need_contains "$mode_contracts" "at most two remediation rounds" "mode contracts remediation limit"
+  need_contains "$mode_contracts" "not an authorization or security boundary" "mode contracts security-boundary limitation"
+  need_contains "$agents" ".agents/tasks/" "AGENTS points to collaboration task packets"
+  need_not_contains "$agents" "## Agent Ownership Matrix" "AGENTS duplicates canonical ownership matrix"
+  need_not_contains "$agents" "newest in-progress" "AGENTS auto-selects newest journal"
+
+  local host_surface
+  for host_surface in \
+    AGENTS.md \
+    CLAUDE.md \
+    .claude/README.md \
+    .claude/commands/planning.md \
+    .claude/commands/planning-full-flow.md \
+    .claude/commands/coding.md \
+    .claude/commands/coding-full-flow.md \
+    .claude/commands/reviewing.md \
+    .claude/commands/reviewing-full-flow.md \
+    .claude/commands/codex/setup.md \
+    .claude/commands/codex/rescue.md \
+    .claude/commands/codex/status.md \
+    .codex/README.md \
+    .codex/codex-mode.sh; do
+    local host_text; host_text="$(cat "$dir/$host_surface")"
+    need_contains "$host_text" "agent-mode-contracts.md" "$host_surface points to canonical mode contracts"
+    need_contains "$host_text" "agent-handoff-schema.md" "$host_surface points to canonical handoff contract"
+    need_contains "$host_text" ".agents/tasks/" "$host_surface points to local task packets"
+    need_not_contains "$host_text" "## Claude–Codex Collaboration Protocol" "$host_surface duplicates canonical collaboration protocol"
+    need_not_contains "$host_text" "Codex is unavailable" "$host_surface copies fallback ownership policy"
+    need_not_contains "$host_text" "Claude is primary" "$host_surface copies Claude ownership policy"
+    need_not_contains "$host_text" "Codex is primary" "$host_surface copies Codex ownership policy"
+    need_not_contains "$host_text" "Codex remains the primary" "$host_surface copies legacy ownership policy"
+    need_not_contains "$host_text" "Technical Spec Adequacy Gate" "$host_surface copies canonical adequacy gate"
+    need_not_contains "$host_text" "three-round" "$host_surface copies obsolete review protocol"
+    need_not_contains "$host_text" '`analysis` · Claude' "$host_surface copies canonical transition roles"
+    need_not_contains "$host_text" "technical_review" "$host_surface copies canonical transition vocabulary"
+    need_not_contains "$host_text" "sufficient_for_coding_model" "$host_surface copies canonical adequacy fields"
+    need_not_contains "$host_text" "revision_rounds" "$host_surface copies canonical remediation state"
+    need_not_contains "$host_text" "awaiting_user" "$host_surface copies canonical resolution state"
+    need_not_contains "$host_text" "policy_exception=sol_coding" "$host_surface copies canonical escalation policy"
+    need_not_contains "$host_text" "at most two remediation" "$host_surface copies canonical remediation limit"
+  done
+
+  local claude_coding; claude_coding="$(cat "$dir/.claude/commands/coding.md")"
+  need_contains "$claude_coding" "explicit user decision" "Claude coding wrapper user authorization"
+  need_contains "$claude_coding" "blocking Sol adequacy verdict" "Claude coding wrapper Sol gate"
+
   need_contains "$(cat "$dir/.claude/commands/council.md" 2>/dev/null)" "llm-council-agent-workflow.md" "council command points to the doc"
-  local karpathy_doc; karpathy_doc="$(cat "$dir/docs/agent-configs/karpathy-llm-coding-agent-config.md")"
-  need_contains "$karpathy_doc" "task-journal.md" "karpathy doc has journal close-out"
-  need_contains "$karpathy_doc" "append to docs/superpowers/plans/<topic>/journal.md" "karpathy doc names concrete journal file"
   need_contains "$(cat "$dir/.claude/commands/karpathy.md" 2>/dev/null)" "karpathy-llm-coding-agent-config.md" "karpathy command points to the doc"
-  need_contains "$(cat "$dir/.claude/commands/planning.md" 2>/dev/null)" "append to docs/superpowers/plans/<topic>/journal.md" "planning command names concrete journal file"
-  need_contains "$(cat "$dir/.claude/commands/coding.md" 2>/dev/null)" "append to docs/superpowers/plans/<topic>/journal.md" "coding command names concrete journal file"
-  need_contains "$(cat "$dir/.claude/commands/reviewing.md" 2>/dev/null)" "append to docs/superpowers/plans/<topic>/journal.md" "reviewing command names concrete journal file"
-  need_contains "$agents" "task-journal.md" "AGENTS.md references the task journal"
   local codex_mode; codex_mode="$(cat "$dir/.codex/codex-mode.sh")"
-  need_contains "$codex_mode" "task-journal.md" "codex seeds reference the journal"
-  need_contains "$codex_mode" "append to docs/superpowers/plans/<topic>/journal.md" "codex seeds name concrete journal file"
   need_contains "$codex_mode" "docs/agent-configs/task-journal.md" "codex doctor lists the journal doc"
-  need_contains "$(cat "$dir/scripts/agent-guard.sh" 2>/dev/null)" "docs/superpowers/plans/*/journal.md" "pre-final advises on the journal"
-  need_contains "$(cat "$dir/docs/superpowers/plans/README.md" 2>/dev/null)" "journal.md" "plans README documents the journal"
+  local agentmemory_skill; agentmemory_skill="$(cat "$dir/.agents/skills/agentmemory-mcp/SKILL.md")"
+  need_contains "$agentmemory_skill" '.agents/tasks/*/state.json' "agentmemory handoff guidance points to authoritative task state"
+  need_contains "$agentmemory_skill" "optional durable-decision" "agentmemory guidance keeps journals optional"
+  need_not_contains "$agentmemory_skill" "prefer the task journal for resumable state" "agentmemory guidance makes journals authoritative"
+  local obsolete_journal_surfaces
+  obsolete_journal_surfaces="$(cat \
+    "$dir/AGENTS.md" \
+    "$dir/docs/agent-configs/agent-mode-contracts.md" \
+    "$dir/docs/agent-configs/llm-council-agent-workflow.md" \
+    "$dir/docs/agent-configs/karpathy-llm-coding-agent-config.md" \
+    "$dir/.claude/commands/planning.md" \
+    "$dir/.claude/commands/coding.md" \
+    "$dir/.claude/commands/reviewing.md" \
+    "$dir/.claude/commands/council.md" \
+    "$dir/.claude/commands/karpathy.md" \
+    "$dir/.codex/codex-mode.sh")"
+  need_not_contains "$obsolete_journal_surfaces" "append to docs/superpowers/plans/<topic>/journal.md" "generated workflow surfaces mandate journal close-out"
+  need_not_contains "$obsolete_journal_surfaces" "newest in-progress" "generated workflow surfaces auto-select newest journal"
+  need_not_contains "$mode_contracts" "Three rounds:" "ordinary review mandates three rounds"
   need_not_contains "$agents" "agents must read and apply:" "startup must not force heavy workflow docs"
   [[ -x "$dir/scripts/agent-onboarding.sh" ]] || fail "missing executable onboarding helper"
   if command -v python3 >/dev/null 2>&1; then

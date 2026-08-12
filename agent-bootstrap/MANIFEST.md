@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.07.04.1`
+Version: `2026.08.10.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this

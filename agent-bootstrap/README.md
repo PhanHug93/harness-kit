@@ -61,6 +61,21 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" \
 scripts/agent-onboarding.sh next
 ```
 
+### Claude Desktop/Cowork collaboration
+
+After a full bootstrap:
+
+1. Open the generated target in Cowork.
+2. In Cowork, copy the Folder Instructions from `.claude/README.md` once.
+3. Give Claude the problem so it creates or resumes the task packet.
+4. Use routed Codex for technical review, implementation, and final review.
+5. Return to Claude for independent cross-review, then to the user for final
+   resolution.
+
+Do not assume Claude Code hooks run in Cowork. These collaboration records are coordination and audit conventions, not security controls: packet ownership and append-only history are conventions;
+host, model, and session independence are declarations rather than proof; and
+Sol authorization entries are audit declarations.
+
 Runtime requirements are Bash, `python3`, Git, and a SHA-256 tool
 (`sha256sum` or `shasum`). The generated `scripts/install-rtk.sh` handles the
 pinned `rtk` download and checksum verification. The rtk version is hard-pinned
@@ -106,7 +121,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.07.04.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
@@ -196,3 +211,19 @@ scripts/install-agent-bootstrap-home.sh
 ```
 
 Those wrappers delegate to this bundle.
+
+## Superpowers policy
+
+Superpowers is an external upstream at <https://github.com/obra/superpowers>.
+Harness-kit does not install, update, or synchronize it and adds no updater;
+upstream already owns host-specific installation paths.
+
+- Pin a tested upstream release tag; never auto-track `main`.
+- Review quarterly, or when a relevant release is published.
+- Inspect the release diff and run two or three representative brainstorming
+  tasks before moving the pin.
+- Freeze on the last validated release when a new one gives no relevant benefit
+  or introduces regression risk.
+
+A `v5.1.0` match was reported from a separate environment comparison, not from
+this repository; reverify it before any update.

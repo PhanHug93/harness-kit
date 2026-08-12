@@ -287,9 +287,9 @@ Use a type-first shape for saved durable memories:
   invalid_if hint when known.
 - decision: a user/project choice among alternatives; include decision source,
   date, rationale, and evidence.
-- handoff: prefer the task journal for resumable state; save Layer-2 handoffs
-  only when cross-session recovery needs global recall, and include the journal
-  path/id.
+- handoff: use the selected \`.agents/tasks/*/state.json\` packet for resumable
+  state; save Layer-2 handoffs only for global recall and include the packet id.
+  A task journal is an optional durable-decision note, not active state.
 
 Always include useful metadata in saved memory:
 - type and claim,
@@ -763,25 +763,22 @@ Always read at startup:
   substantive work.
 - The output of \`scripts/agent-guard.sh preflight\` and
   \`scripts/detect-agent-tech-stack.sh --markdown\` when available.
-- If resuming a task, read its journal first: the newest in-progress \`docs/superpowers/plans/*/journal.md\` (see \`docs/agent-configs/task-journal.md\`).
 
 Read on demand:
 
 - \`docs/agent-configs/agent-mode-contracts.md\` when selecting/switching modes.
 - \`docs/agent-configs/agent-handoff-schema.md\` when ownership changes.
+- \`.agents/tasks/<task-id>/\` for the selected local collaboration packet.
 - \`docs/agent-configs/karpathy-llm-coding-agent-config.md\` before substantial
   edits or production-risk refactors.
 - \`docs/agent-configs/llm-council-agent-workflow.md\` for councils or high-risk
   architecture/security/release tradeoffs.
-- \`docs/agent-configs/task-journal.md\` when recording/resuming task memory.
 - Skills under \`.agents/skills/\` only when their descriptions match the
   current task.
-$mobile_skill_read_on_demand_bullet
 
 Keep the always-on/core startup context under roughly 4k estimated tokens.
-\`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
-current estimate. This core estimate excludes tool-specific wrappers such as
-\`CLAUDE.md\` and \`GEMINI.md\`.
+$mobile_skill_read_on_demand_bullet
+
 
 At the start of substantive work:
 
@@ -800,12 +797,8 @@ This runs the fast verification subset. For release, high-risk, or final PR
 readiness, review the detected verification commands first, then run
 \`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`. If a
 detected command is a placeholder or needs unavailable local services, record
-the skip reason in the task journal and rerun with \`--advisory\` only when the
-user or CI environment explicitly requires advisory mode.
-Claude Code auto-runs fast close-out verification through a Stop hook when the
-tree has changes; Gemini, Cursor, and Windsurf do not expose an equivalent
-close-out hook here, so their loop remains advisory and agents must run the
-pre-final command manually.
+the skip reason in the handoff or final summary and rerun with \`--advisory\`
+only when the user or CI environment explicitly requires advisory mode.
 Optional git gate: \`scripts/install-git-hooks.sh\`.
 
 Stack detection logic lives in \`scripts/agent-tech-stack-lib.sh\`; update that
@@ -831,18 +824,13 @@ For non-trivial decisions, the \`doubt-driven\` skill
 (\`.agents/skills/doubt-driven/SKILL.md\`) provides a fresh-context adversarial
 check.
 
-## Agent Ownership Matrix
+## Collaboration
 
-| Work phase | Primary owner | Secondary / fallback | Contract |
-|---|---|---|---|
-| Planning | Claude | Codex when explicitly selected or Claude unavailable | Claude owns requirements, architecture, tradeoffs, risk framing, sequencing, and Codex-ready handoff. |
-| Coding | Codex | Claude when explicitly selected or Codex unavailable | Codex owns implementation, refactors, tests, verification, and self-review. |
-| Reviewing | Codex | Claude for architecture/security/requirements/long-context second opinion | Codex owns ordinary branch/diff findings review. Claude labels fallback or second-opinion reviews. |
-| Council | Claude for synthesis | Codex for implementation-risk and mechanical diff checks | Council is advisory. One executor owns any follow-up patch. |
-
-Do not let two agents edit the same files concurrently. If ownership changes,
-leave a handoff using \`docs/agent-configs/agent-handoff-schema.md\` before the
-next agent proceeds.
+Use \`.agents/tasks/<task-id>/\` for local collaboration state. Canonical roles,
+transitions, gates, and review limits live in
+\`docs/agent-configs/agent-mode-contracts.md\`; packet and artifact formats live
+in \`docs/agent-configs/agent-handoff-schema.md\`. Do not let two agents edit the
+same files concurrently.
 
 ## Local State And No-Scan Guard
 
@@ -866,10 +854,11 @@ remain no-scan.
 - \`planning\`: strategy, specs, architecture, deep refactor planning, and
   performance improvement planning. Default is project-local full-flow.
 - \`coding\`: implementation, refactoring, bug fixes, tests, and verification.
-  Must run the technical spec adequacy gate before implementation.
-- \`reviewing\`: findings-first review with three council rounds. Review mode
-  may run project-local verification in full-flow. Remediation edits require
-  the review request to ask for fixes or an exact patch scope.
+  Follow the canonical adequacy gate before implementation.
+- \`reviewing\`: one findings-first pass. Review mode may run project-local
+  verification in full-flow. Remediation edits require the review request to
+  ask for fixes or an exact patch scope. Use council only on demand for
+  high-risk or disputed work.
 
 ## Detected Project Stack
 
@@ -1034,57 +1023,142 @@ EOF
 
 Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Use this schema whenever work moves between Claude and Codex, or between
-planning, coding, reviewing, and council phases.
+Canonical packet and artifact format. Role, transition, and gate policy lives only in
+`docs/agent-configs/agent-mode-contracts.md`.
 
-## Required Fields
+## Local packet and active-task selection
 
-- `handoff_id`
-- `from_agent`
-- `to_agent`
-- `work_phase`: `planning`, `coding`, `reviewing`, or `council`
-- `ownership`: `primary`, `fallback`, or `second-opinion`
-- `flow`: `full_flow` or `supervised`
-- `task_summary`
-- `repo_state`
-- `target_files`
-- `protected_paths`
-- `non_goals`
-- `constraints`
-- `acceptance_criteria`
-- `verification_commands`
-- `risks`
-- `open_questions`
-- `next_action`
-- `stop_conditions`
+Packets live at `.agents/tasks/<task-id>/`. They are ignored, ephemeral state
+and may be lost. Git does not enforce their rules: artifact ownership and append-only behavior are conventions, not access controls.
 
-## Template
+`.agents/tasks/ACTIVE` is a cache; each task's `state.json` is authoritative.
+On resume, scan states and select exactly one open task when only one exists.
+Repair or ignore a stale `ACTIVE` cache. Multiple open tasks require the user to choose.
+Never select the newest task automatically. Report malformed state; do not infer it.
 
-```markdown
-## Agent Handoff
+## Maximum artifact set
 
-- handoff_id:
-- from_agent:
-- to_agent:
-- work_phase:
-- ownership:
-- flow:
-- task_summary:
-- repo_state:
-- target_files:
-- protected_paths:
-- non_goals:
-- constraints:
-- acceptance_criteria:
-- verification_commands:
-- risks:
-- open_questions:
-- next_action:
-- stop_conditions:
+1. `state.json`
+2. `task.md`
+3. `codex-review.md`
+4. `implementation.md`
+5. `claude-review.md`
+6. `user-decision.md`
+
+Only `state.json` and `task.md` are created initially. Create the rest on demand.
+
+## State contract
+
+Concrete initial example:
+
+```json
+{
+  "protocol_version": "claude-codex-collaboration/v1",
+  "task_id": "checkout-timeout-fix",
+  "status": "open",
+  "phase": "analysis",
+  "owner": "claude",
+  "requested_action": "prepare the specification for Sol technical review",
+  "base_commit": null,
+  "revision_rounds": 0,
+  "spec_sufficiency": {
+    "verdict": "not_reviewed",
+    "sufficient_for_coding_model": "not_reviewed"
+  },
+  "escalation_reason": null,
+  "verification": {
+    "runner": "none",
+    "status": "not_run",
+    "reason": null,
+    "report": null
+  },
+  "updated_at": "2026-08-10T09:00:00Z"
+}
 ```
 
-Do not paste secrets, local-only permission state, or large generated logs into
-a handoff when a path and summary are sufficient.
+Allowed values are exact:
+
+- `status`: `open | awaiting_user | closed`
+- `phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`
+- `owner`: `claude | codex | user`
+- `spec_sufficiency.verdict`: `not_reviewed | sufficient | partially_sufficient | insufficient`
+- `spec_sufficiency.sufficient_for_coding_model`: `not_reviewed | yes | no`
+- `verification.runner`: `none | claude | codex`
+- `verification.status`: `not_run | pass | fail | blocked`
+
+`requested_action` names one next action. `base_commit` is captured on the first entry into implementation and anchors full-diff review. `revision_rounds` starts
+at zero and increments on return to implementation. Verification records runner,
+result, reason, and real report path.
+
+## Artifact contracts
+
+### `task.md`
+
+`task.md` starts with:
+
+```markdown
+## Request (verbatim)
+
+> <original request with secrets redacted>
+```
+
+Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
+interfaces, edge cases, migration/security/privacy impact, verification,
+assumptions, and implementation boundaries. When Sol returns `task.md` to analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)` and prior history.
+
+### `codex-review.md`
+
+`codex-review.md` has exactly two top-level sections with numbered attempts:
+
+```markdown
+## Pre-coding technical review
+
+### Attempt 1
+
+reviewer_model: <actual-model>
+model_source: default | CODEX_USE_FALLBACK | <override-variable>
+spec_sufficiency: sufficient | partially_sufficient | insufficient
+sufficient_for_coding_model: yes | no
+blocking_gaps: none | <concise list>
+
+## Final technical review
+
+### Attempt 1
+
+reviewer_model: <actual-model>
+model_source: default | CODEX_USE_FALLBACK | <override-variable>
+fresh_session_attestation: yes | no
+reviewed_base_commit: <commit>
+verdict: pass | changes_required | blocked
+```
+
+Review history is append-only and immutable within each top-level section.
+The first final review adds the `## Final technical review` heading.
+If work later returns to specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before the Final heading without modifying prior attempts.
+State sufficiency matches the latest pre-coding attempt.
+`fresh_session_attestation` is procedural-only and is not proof of session, model, account, or host independence.
+
+### `implementation.md`
+
+Append `## Implementation attempt <n>` with model/source, route, scope, files,
+verification, deviations, risks, blockers, and any adequacy downgrade. Sol coding records
+`policy_exception=sol_coding`, `authorization=user_session`, and the reason.
+Those fields are an audit-only procedural declaration and cannot provide file-based authorization; the user must open a new Sol coding session.
+
+### `claude-review.md`
+
+Append one findings-first `## Cross-review attempt <n>` checking
+state/review consistency, the `base_commit` diff, verification, and approved
+scope. It requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each. It also checks whether author/reviewer model and session declarations contradict.
+
+### `user-decision.md`
+
+When required, append the dated action, scope, authorization, and alternatives.
+
+Prior attempts remain immutable by convention. Repeated work appends the next numbered attempt.
+
+Keep secrets, local-only permission state, and large generated logs out of the
+packet when a path and concise summary are sufficient.
 EOF
 
   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
@@ -1092,82 +1166,73 @@ EOF
 
 Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Shared behavior for Codex, Claude, and other agents. Tool files may choose
-model/sandbox mechanics, but must not weaken these contracts.
+Canonical roles, transitions, and gates. Host files and launchers point here;
+packet formats live in `docs/agent-configs/agent-handoff-schema.md`.
 
 Common rules:
 - Refresh stack context with `scripts/detect-agent-tech-stack.sh --markdown`
   when available, and respect `scripts/agent-hook.sh no-scan-paths`.
-- Use `docs/agent-configs/agent-handoff-schema.md` when ownership changes.
-- If resuming, read the newest in-progress `docs/superpowers/plans/*/journal.md`.
-- At close-out, append to docs/superpowers/plans/<topic>/journal.md using the
-  schema in `docs/agent-configs/task-journal.md`. For decided/done durable facts,
-  save memory first when a backend is available and put the id on `memory:`.
+- Keep collaboration packets under `.agents/tasks/<task-id>/` and use
+  `docs/agent-configs/agent-handoff-schema.md` for their state and artifacts.
+- One phase owner writes at a time. Packet ownership is a coordination
+  convention, not an authorization or security boundary.
+- Project-local full-flow does not authorize external paths, installs, commits,
+  pushes, force operations, or local-only secret/permission changes without
+  exact user approval.
 
-## Agent Ownership Matrix
+## Claude–Codex Collaboration Protocol
 
-| Work phase | Primary owner | Secondary / fallback | Required handoff |
-|---|---|---|---|
-| Planning | Claude | Codex when explicitly selected/unavailable | Scope, assumptions, components, risks, verification, Codex-ready handoff. |
-| Coding | Codex | Claude when explicitly selected/unavailable | Changed files, rationale, tests, verification, remaining risks. |
-| Reviewing | Codex | Claude for architecture/security/requirements second opinion | Findings first; label primary, second-opinion, or fallback. |
-| Council | Claude for synthesis | Codex for implementation-risk and mechanical diff checks | Advisory output only. One executor owns follow-up patch. |
+### Constrained transitions
+
+- `analysis` · Claude -> `technical_review`
+- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`
+- `implementation` · Codex Luna -> `verification` | `resolution`
+- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`
+- `cross_review` · Claude -> `implementation` | `resolution`
+- `resolution` · User -> `closed` | user-selected prior phase
+
+`awaiting_user` is valid only with `resolution` · User. `closed` is valid only with phase `closed`.
+All other active combinations use `open` and the owner
+shown above. Claude implementation requires an explicit user decision recorded
+in the task packet.
+
+### Gates and authority
+
+- Sol owns the blocking adequacy verdict for requirements, interfaces, edge
+  cases, tests, migrations, security/privacy, and implementation boundaries.
+- Luna may downgrade `yes` when implementation evidence exposes a specification
+  gap, but may never upgrade `no`; a missing or inconsistent Sol verdict blocks
+  implementation.
+- The protocol allows the initial implementation plus at most two remediation rounds.
+  A further failure moves to `awaiting_user` resolution.
+- Verification records the runner, status, reason, and real report; unavailable
+  or skipped execution must not be reported as a pass.
+- Claude performs one findings-first cross-review pass covering state/review consistency,
+  `base_commit`, verification, any Sol-coding decision and reason, and the
+  approved scope. Claude requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
+  Claude also checks author and reviewer model declarations and author and reviewer session declarations for contradictions.
+- Sol coding is an escalation: the user must open a new Sol coding session.
+  `policy_exception=sol_coding` plus `authorization=user_session` is an
+  audit-only procedural declaration and cannot provide file-based authorization.
+- The user is the final authority for closure, bounded revision, a return to a
+  prior phase, Claude implementation, or a Sol-coding policy exception.
 
 ## Planning Mode
 
-Purpose: feature planning, refactor strategy, architecture tradeoffs, and
-performance planning. Claude is primary; Codex is fallback or user-selected.
-
-Rules: load context before deciding; explore unclear requirements; use council
-only when requested or high-risk; produce assumptions, risks, verification, stop
-conditions, and a Codex-ready handoff when coding follows.
-
-Stop when missing acceptance criteria, users, data ownership, rollback, or
-verification would change the plan; when independent subsystems need
-decomposition; or before architecture, data, security/privacy, release, or
-performance changes without council/user confirmation.
-
-Journal body: assumptions; affected components; risks; verification plan;
-stop-conditions hit; handoff target.
+Analyze the request, evidence, constraints, risks, and verification. Preserve
+packet history. Use council only on demand for high-risk or disputed work.
 
 ## Coding Mode
 
-Purpose: implementation, refactoring, bug fixes, tests, and verification. Codex
-is primary; Claude executes only when selected or Codex is unavailable.
-
-Technical Spec Adequacy Gate: before implementation, classify the spec as
-`sufficient`, `partially sufficient`, or `insufficient`. Warn on missing
-requirements, APIs, edge cases, tests, migration, security/privacy, or acceptance
-criteria; continue only when gaps are low risk or accepted.
-
-Rules: prefer root-cause fixes, small coherent patches, useful tests, narrow side
-effects, explicit failure paths, and fresh verification before success claims.
-
-Journal body: changed files + rationale; tests added/run; verification result;
-remaining risks.
+Luna implements only after the latest Sol verdict permits coding. Prefer focused
+root-cause patches, tests, and fresh verification; otherwise move to resolution.
 
 ## Reviewing Mode
 
-Purpose: findings-first branch, diff, architecture, requirement, regression, UX,
-security, and verification review. Codex is primary; Claude is second-opinion or
-fallback for architecture/security/requirements/long-context work.
-
-Default: full-flow may run project-local verification. Supervised/read-only
-review needs user-gated write actions. Remediation requires a fix request or
-exact patch scope; commits, pushes, installs, force ops, external paths, and
-local-only secrets/permission files require exact approval.
-
-Three rounds: (1) BA checks requirements/user impact, Dev Lead checks stack and
-architecture, QC checks regressions/UX/tests; (2) cross-review assumptions and
-missing evidence; (3) synthesize findings by severity with file:line, impact,
-fix guidance, open questions, and verification gaps.
-
-Stop when base/scope/target/acceptance criteria are ambiguous, before supervised
-write commands, before unrequested remediation, or for credible P0/P1 security,
-privacy, data-loss, billing, release, or compliance risk.
-
-Journal body: findings (severity, file:line); open questions; verification gaps;
-verdict.
+Ordinary review is one findings-first, evidence-backed pass. Sol owns technical
+review; Claude owns cross-review. Remediation requires exact requested scope;
+council is on demand for high-risk or disputed work.
+The `Severity trigger` finding obligation is defined by the reviewing launcher.
 
 ## Project-Specific Mode Overrides
 
@@ -1203,14 +1268,16 @@ cause, verify behavior, or state what remains unknown.
 2. State explicit assumptions and risks before editing.
 3. Make one small coherent patch; no unrelated refactors.
 4. Verify with tests or a justified substitute; review the final diff.
-5. Close out: append to docs/superpowers/plans/<topic>/journal.md using
-   `docs/agent-configs/task-journal.md` (context gathered, assumptions, risks,
-   patch scope, evidence/verification). No success claim without evidence.
+5. Hand off with `docs/agent-configs/agent-handoff-schema.md` when ownership
+   changes. No success claim without evidence.
+
+For a durable task-specific decision, an optional journal may be kept using
+`docs/agent-configs/task-journal.md`.
 
 ## Stop conditions
 
 - Stop if you cannot identify the root cause; do not prompt-code until a symptom
-  disappears. Record the unknown under the entry's next-action.
+  disappears. Record the unknown in the handoff.
 EOF
 
   write_file "$TARGET_DIR/docs/agent-configs/llm-council-agent-workflow.md" <<'EOF'
@@ -1218,116 +1285,87 @@ EOF
 
 Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Council is for decisions/review, not shared editing. One executor owns any patch.
-Council output is advisory until verified.
+Council is advisory; one executor owns any patch.
 
-Use council when the user asks for it or when a high-risk decision needs a
-checkpoint: architecture boundaries, migrations, data loss, security/privacy,
-permissions, billing, release risk, performance-sensitive paths, concurrency,
-or unclear root cause.
+Use council on demand for user-requested, high-risk, or disputed work involving
+architecture, migration, data loss, security/privacy, billing, release,
+performance, concurrency, or unclear root cause.
 
-Default roles: Planner/BA checks scope and user impact; Dev Lead checks
-architecture/stack/SOLID/integration; QC checks edge cases, regressions, UX,
-concurrency, and tests; Tester names verification evidence; Chair synthesizes.
+Planner/BA checks scope; Dev Lead checks architecture; QC checks regressions;
+Tester names evidence; Chair synthesizes.
 
-Chair is the current primary agent, or the parent/coordinating agent in delegated
-councils. Chair may override consensus only with repo evidence, direct user
-instruction, or a safer stop condition. Preserve minority objections for
-security, privacy, data loss, compliance, billing, release, architecture, or
-irreversible user impact.
+The coordinator chairs. Override only with evidence, user instruction, or a
+safer stop; preserve high-impact minority objections.
 
-For review mode, use the explicit three-round process in
-`docs/agent-configs/agent-mode-contracts.md`.
+Ordinary review remains one findings-first pass under
+`docs/agent-configs/agent-mode-contracts.md`; council is not a mandatory review
+stage.
 
 For non-trivial decisions, optionally apply the `doubt-driven` skill
-(`.agents/skills/doubt-driven/SKILL.md`) as a fresh-context adversarial
-checkpoint before the verdict stands.
+(`.agents/skills/doubt-driven/SKILL.md`) before the verdict.
 
 ## Procedure
 
-1. State the council question and why it crosses a high-risk threshold
-   (architecture, migration, data loss, security/privacy, permissions, billing,
-   release, performance, concurrency, or unclear root cause).
+1. State the question and why council is warranted.
 2. Each role gives a position with evidence (file:line) and a confidence.
 3. Cross-review the strongest assumptions and missing evidence.
 4. Chair synthesizes: selected approach, rejected alternatives, preserved
    minority objections, executor, verification commands, stop-conditions.
-5. Close out: append to docs/superpowers/plans/<topic>/journal.md using
-   `docs/agent-configs/task-journal.md`, recording step 4. If the decision is
-   durable and a backend exists, memory_save first and embed the id on `memory:`.
+5. Return the verdict to the single executor using
+   `docs/agent-configs/agent-handoff-schema.md` when ownership changes.
 
 ## Stop conditions
 
 - Stop and ask the user when the council cannot reach a verifiable position from
   repo evidence.
-- Escalate any credible P0/P1 security, privacy, data-loss, billing, release, or
-  compliance risk even if the majority deems it unlikely; record it as a
-  preserved minority objection.
+- Escalate credible P0/P1 security, privacy, data-loss, billing, release, or
+  compliance risk even when the majority disagrees.
 EOF
 
 }
 
 write_task_journal_doc() {
   write_file "$TARGET_DIR/docs/agent-configs/task-journal.md" <<'EOF'
-# Task Journal (working memory)
+# Task Journal (Optional working memory)
 
-The task journal is Layer 1 working memory: a git-tracked, append-only record for
-one in-flight task. Re-read it after compaction. It complements, but does not
-replace, Layer 2 memory (agentmemory/native durable knowledge).
+Task journals are optional, git-tracked durable-decision notes. They do not
+select the active collaboration task; `.agents/tasks/*/state.json` is the
+authoritative local workflow state described in
+`docs/agent-configs/agent-handoff-schema.md`.
 
-## Where
+When a task-specific decision should survive packet loss or context compaction,
+create `docs/superpowers/plans/<topic>/journal.md` and append a concise dated
+entry. Bootstrap never creates per-task journals.
 
-append to docs/superpowers/plans/<topic>/journal.md, one file per task/topic.
-Create it on demand when work starts; bootstrap never generates per-task
-journals.
+## Optional fields
 
-## Entry schema (append-only)
+- `memory`: a saved durable-memory id, `none`, or `n/a` when no backend exists.
+- `save_decision`: `saved`, `journal-only`, `rejected`, or `n/a`.
+- `evidence`: a supporting file, test, command, or user-decision summary.
+- `recall_verified`: `yes`, `n/a`, or `acked-deferred` when recall was relevant.
+- `verification`: the real verification report path, such as
+  `.agents/state/last-verify-report.json`, or `n/a` with a short reason.
 
-Append a new entry per mode step; never edit a prior entry. A status change is a
-new appended entry.
-
-    ## <ISO-8601 date> · <mode> · <task-id>
-    - status: in-progress | decided | blocked | done
-    - context: <1-2 lines: where we are now>
-    - <mode-specific body>
-    - next-action: <single next concrete step>
-    - memory: <saved-id | none | n/a (no backend)>
-    - save_decision: saved | journal-only | rejected | n/a
-    - evidence: <file/test/command/user decision summary | none>
-    - recall_verified: yes | n/a | acked-deferred
-    - verification: path to the verification report `.agents/state/last-verify-report.json`, or `n/a` with a short reason when delegated to CI or blocked by the local environment
-
-## Close-out (Layer 1 + Layer 2)
-
-At decided/done close-out: if a durable fact emerged and a memory backend exists,
-`memory_save`/`lesson_save` first, capture the id, then append the journal entry
-with that id on `memory:` (`none` for no durable fact, `n/a` for no backend).
-In-progress checkpoints append immediately with `memory: n/a`.
-
-Use `save_decision: saved` only when a durable memory was written and `memory:`
-contains the saved id. Use `journal-only` when the fact matters for this task but
-is not durable enough for Layer 2, `rejected` when a candidate failed the storage
-rubric, and `n/a` when no backend is available or the task is trivial.
-
-For tasks that changed protected paths, close-out must include
-`recall_verified: yes`, `recall_verified: n/a`, or `recall_verified:
-acked-deferred`. Plain `deferred:<reason>` is not sufficient for protected-path
-changes; either verify the relevant memories, state why recall is not applicable,
-or leave an explicit acknowledged exception.
-
-## Resume after compaction
-
-The active journal is the `docs/superpowers/plans/*/journal.md` whose latest
-entry is `status: in-progress`, newest by commit/mtime. Read it before
-substantive work to recover the plan and next-action. Zero in-progress ⇒ no
-active task, start fresh; multiple ⇒ pick newest and confirm against current
-context.
+If used, append new entries rather than rewriting prior decisions. Keep secrets,
+credentials, local permission state, and large generated logs out of the file.
 EOF
 }
 
 write_tool_entrypoints() {
   tool_surface_write "$TARGET_DIR/CLAUDE.md" <<'EOF'
 # Claude Instructions
+
+## Claude–Codex collaboration
+
+Claude's two default responsibilities are:
+
+- analysis/specification
+- independent cross-review
+
+Follow the canonical roles and gates in
+`docs/agent-configs/agent-mode-contracts.md`, follow the packet format in
+`docs/agent-configs/agent-handoff-schema.md`, and use `.agents/tasks/` for the
+active Claude–Codex handoff.
 
 ## First run
 
@@ -1344,28 +1382,22 @@ available, and detector output. Read on demand:
   planning/coding/reviewing mode
 - `docs/agent-configs/agent-handoff-schema.md` when handing work to another
   agent
+- `.agents/tasks/<task-id>/` for the selected local collaboration packet
 - `docs/agent-configs/karpathy-llm-coding-agent-config.md` before substantive
   code edits or production-risk refactors
 - `docs/agent-configs/llm-council-agent-workflow.md` only for council or
   high-risk review work
-- `docs/agent-configs/task-journal.md` when recording or resuming task
-  working-memory
+- `docs/agent-configs/task-journal.md` only for optional durable-decision notes
 
 Use `.claude/commands/` as mode entrypoints when the host supports project
 commands:
 
-- `/planning` for Claude-primary planning and Codex-ready handoff
-- `/coding` for Codex handoff or Claude fallback execution
-- `/reviewing` for Codex review handoff, Claude second opinion, or fallback
+- `/planning`, `/coding`, and `/reviewing` for the corresponding canonical mode
 - `/planning-full-flow`, `/coding-full-flow`, `/reviewing-full-flow` as
   legacy explicit aliases
 - `/codex:setup`, `/codex:rescue`, `/codex:status` for Codex readiness and
   schema-compliant handoffs
 - `/doctor`
-
-Claude is primary for planning. Codex is primary for coding and ordinary
-review. Claude coding/reviewing should be fallback or second-opinion unless
-the user explicitly selects Claude as executor/reviewer.
 
 Model selection is controlled by the Claude host; these files enforce behavior,
 not account-level model availability.
@@ -1437,6 +1469,19 @@ EOF
   write_file "$TARGET_DIR/.claude/README.md" <<'EOF'
 # Claude Agent Workflow
 
+## Cowork Folder Instructions
+
+Open the generated project folder in Cowork and copy the text between these
+markers into Folder Instructions once:
+
+<!-- BEGIN COWORK FOLDER INSTRUCTIONS -->
+Read the target `CLAUDE.md` first.
+Follow the canonical role and handoff docs named there.
+Use `.agents/tasks/` for active Claude–Codex handoff.
+Do not assume Claude Code hooks run in Cowork.
+If Bash is unavailable, continue analysis and cross-review, and record verification as blocked or delegated with a reason.
+<!-- END COWORK FOLDER INSTRUCTIONS -->
+
 Use Claude Code custom commands when available:
 
 ```text
@@ -1452,29 +1497,29 @@ Use Claude Code custom commands when available:
 /doctor
 ```
 
-`/planning` is Claude-primary and should produce Codex-ready handoff when
-implementation or review will follow. `/coding` is Codex-primary handoff or
-Claude fallback execution. `/reviewing` is Codex-primary handoff, Claude
-second-opinion, or Claude fallback review.
+`/planning`, `/coding`, and `/reviewing` are thin entrypoints to the canonical
+mode and handoff contracts below.
 
 Read `AGENTS.md` first. Durable mode behavior lives in
 `docs/agent-configs/agent-mode-contracts.md`; repo-specific stack context lives
 in `docs/agent-configs/project-agent-context.md`. Handoffs use
-`docs/agent-configs/agent-handoff-schema.md`.
+`docs/agent-configs/agent-handoff-schema.md`; local task packets live under
+`.agents/tasks/<task-id>/`.
 
 Claude model selection is host-controlled. Keep the same mode contract if the
 selected model is unavailable.
 
-The shared Claude hook guards Edit/Write/MultiEdit paths before protected file
-edits and delegates shell git handling to the pinned rtk wrapper. It is not a
-security boundary for arbitrary Bash commands.
+In Claude Code, the shared hook guards Edit/Write/MultiEdit paths before
+protected file edits and delegates shell git handling to the pinned rtk wrapper.
+It is not a security boundary for arbitrary Bash commands.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/planning.md" <<'EOF'
 # Planning Mode
 
 Apply `docs/agent-configs/agent-mode-contracts.md` Planning Mode.
-Claude is the primary planning owner.
+Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
+`.agents/tasks/<task-id>/`.
 
 Operate project-local full-flow by default. Add `--supervised`, `--read-only`,
 or `--propose` only when the user wants step-by-step approval.
@@ -1483,29 +1528,31 @@ requirement exploration and council checkpoints only when appropriate. End with
 a concrete plan, assumptions, risks, verification, stop conditions, and a
 Codex-ready handoff using `docs/agent-configs/agent-handoff-schema.md` when
 follow-up coding/review is expected. Respect
-`scripts/agent-hook.sh no-scan-paths` before broad search. Close out: append to docs/superpowers/plans/<topic>/journal.md using `docs/agent-configs/task-journal.md`.
+`scripts/agent-hook.sh no-scan-paths` before broad search.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/coding.md" <<'EOF'
 # Coding Mode
 
 Apply `docs/agent-configs/agent-mode-contracts.md` Coding Mode.
-Codex is the primary coding owner.
+Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
+`.agents/tasks/<task-id>/`.
 
-Default Claude behavior is Codex handoff, not direct implementation. Execute
-with Claude only when Codex is unavailable or the user explicitly selects
-Claude. If executing, run the Technical Spec Adequacy Gate, implement scoped
-changes, run relevant verification, and inspect the final diff before claiming
-success. Handoffs use `docs/agent-configs/agent-handoff-schema.md`; respect
-`scripts/agent-hook.sh no-scan-paths` before broad search. Close out: append to docs/superpowers/plans/<topic>/journal.md using `docs/agent-configs/task-journal.md`.
+Default Claude behavior is handoff, not direct implementation. Execute only
+after an explicit user decision and a blocking Sol adequacy verdict permit
+Claude implementation; unavailability alone does not change ownership. If
+selected, implement scoped changes, verify, and inspect the final diff. Respect
+`scripts/agent-hook.sh no-scan-paths`.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/planning-full-flow.md" <<'EOF'
 # Planning Full-Flow Mode
 
 Legacy alias for default `/planning` full-flow. Apply
-`docs/agent-configs/agent-mode-contracts.md` Planning Mode with project-local
-execution approval for the current user task. Run
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md` to the selected packet under
+`.agents/tasks/<task-id>/`. This alias grants bounded project-local planning
+for the current user task. Run
 `scripts/detect-agent-tech-stack.sh --markdown` when available. Do not mutate
 outside the project root, do not edit local-only permission state, and do not
 run mutating git commands without exact approval.
@@ -1514,55 +1561,56 @@ EOF
   write_file "$TARGET_DIR/.claude/commands/coding-full-flow.md" <<'EOF'
 # Coding Full-Flow Mode
 
-Legacy alias for `/coding`. Codex remains the primary coding owner. Produce a
-Codex handoff unless Codex is unavailable or the user explicitly selects Claude
-execution. If executing, apply Coding Mode with project-local implementation,
-test, verification, and self-review approval for the current user task.
+Legacy alias for `/coding`. Apply `docs/agent-configs/agent-mode-contracts.md`
+and `docs/agent-configs/agent-handoff-schema.md` to the selected packet under
+`.agents/tasks/<task-id>/`. This alias does not change canonical ownership or
+gates; it grants bounded project-local implementation, tests, and verification
+only when the packet permits execution.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/reviewing.md" <<'EOF'
 # Reviewing Mode
 
 Apply `docs/agent-configs/agent-mode-contracts.md` Reviewing Mode.
-Codex is the primary ordinary review owner.
+Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
+`.agents/tasks/<task-id>/`.
 
-Default Claude behavior is Codex review handoff or Claude second-opinion. Be
-primary only when Codex is unavailable, the user explicitly selects Claude, or
-the review is mainly architecture/security/requirements/long-context synthesis.
-Findings first, ordered by severity. Close out: append to docs/superpowers/plans/<topic>/journal.md using `docs/agent-configs/task-journal.md`.
+Follow the canonical owner and review gates for the selected packet. Report one
+findings-first pass ordered by severity.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/council.md" <<'EOF'
 ---
-description: Run the hybrid council methodology and record the verdict in the task journal.
+description: Run the on-demand hybrid council methodology.
 ---
 
 # Council
 
 Follow `docs/agent-configs/llm-council-agent-workflow.md`. Council is advisory
 until verified; the Chair preserves minority objections and one executor owns any
-patch. Close out: append to docs/superpowers/plans/<topic>/journal.md using `docs/agent-configs/task-journal.md`, and conditionally `memory_save` the decision.
+patch.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/karpathy.md" <<'EOF'
 ---
-description: Apply the context-first Karpathy coding discipline and record it in the task journal.
+description: Apply the context-first Karpathy coding discipline.
 ---
 
 # Karpathy
 
 Follow `docs/agent-configs/karpathy-llm-coding-agent-config.md`: context first,
 small coherent patches, explicit assumptions/risks, evidence before success
-claims. Close out: append to docs/superpowers/plans/<topic>/journal.md using `docs/agent-configs/task-journal.md`.
+claims.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/reviewing-full-flow.md" <<'EOF'
 # Reviewing Full-Flow Mode
 
-Legacy alias for `/reviewing`. Codex remains the primary ordinary review
-owner. Use Claude for second-opinion/fallback review unless the user explicitly
-selects Claude as primary. Do not apply remediation edits unless the request
-asks for fixes or an exact patch scope. Findings first.
+Legacy alias for `/reviewing`. Apply
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md` to the selected packet under
+`.agents/tasks/<task-id>/`. This alias does not change canonical ownership or
+gates. Do not remediate unless fixes or an exact patch scope were requested.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/codex/setup.md" <<'EOF'
@@ -1575,7 +1623,8 @@ argument-hint: [--doctor|--status] <optional Codex setup task>
 
 Read `AGENTS.md`, `CLAUDE.md`, `docs/agent-configs/agent-mode-contracts.md`,
 `docs/agent-configs/agent-handoff-schema.md`, and
-`docs/agent-configs/project-agent-context.md`.
+`docs/agent-configs/project-agent-context.md`. Use the selected packet under
+`.agents/tasks/<task-id>/`.
 
 Run:
 
@@ -1605,7 +1654,8 @@ argument-hint: [planning|coding|reviewing] <stalled task or rescue target>
 Default to handoff, not direct implementation. Read
 `docs/agent-configs/agent-mode-contracts.md`,
 `docs/agent-configs/agent-handoff-schema.md`, and
-`docs/agent-configs/project-agent-context.md`. Run
+`docs/agent-configs/project-agent-context.md`, then use the selected packet under
+`.agents/tasks/<task-id>/`. Run
 `scripts/detect-agent-tech-stack.sh --markdown` when available and
 `scripts/agent-hook.sh no-scan-paths` before broad search.
 
@@ -1627,6 +1677,10 @@ argument-hint: [--doctor] <optional status question>
 ---
 
 # Codex Status
+
+Read `docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`. Use the selected packet under
+`.agents/tasks/<task-id>/`.
 
 Run:
 
@@ -1664,8 +1718,6 @@ EOF
 
 write_codex_files() {
   write_file "$TARGET_DIR/.codex/config.toml" <<'EOF'
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
 approval_policy = "never"
 sandbox_mode = "workspace-write"
 approvals_reviewer = "user"
@@ -1674,7 +1726,7 @@ web_search = "disabled"
 
 [shell_environment_policy]
 inherit = "none"
-include_only = ["PATH", "HOME", "PWD", "SHELL"]
+include_only = ["PATH", "HOME", "PWD", "SHELL", "CODEX_HARNESS_SESSION"]
 ignore_default_excludes = false
 
 [apps._default]
@@ -1716,12 +1768,10 @@ wants to observe and approve actions.
 Reviewing is findings-first; it may run project-local verification, but applies
 remediation edits only when the request asks for fixes or an exact patch scope.
 
-Agent ownership:
-- Claude is primary for planning and Codex-ready handoff.
-- Codex is primary for coding and ordinary review.
-- Claude coding/reviewing is fallback or second-opinion unless explicitly
-  selected.
-- Handoffs use `docs/agent-configs/agent-handoff-schema.md`.
+Canonical collaboration:
+- Roles and transitions use `docs/agent-configs/agent-mode-contracts.md`.
+- Handoffs use `docs/agent-configs/agent-handoff-schema.md` with the selected
+  local packet under `.agents/tasks/<task-id>/`.
 - Agents respect `scripts/agent-hook.sh no-scan-paths` before broad search.
 
 If Codex reports `Selected model is at capacity. Please try a different model.`,
@@ -1765,15 +1815,16 @@ DEFAULT_MODE="planning"
 DEFAULT_FLOW="full_flow"
 STANDARD_APPROVAL="on-request"
 FULL_FLOW_APPROVAL="never"
-REASONING_EFFORT="xhigh"
-MODEL_PROFILE="${CODEX_MODEL_PROFILE:-stable}"
+REASONING_EFFORT=""
+MODEL_PROFILE=""
+MODEL_PROFILE_ERROR=""
 
-PLANNING_MODEL="gpt-5.5"
-CODING_MODEL="gpt-5.5"
-REVIEWING_MODEL="gpt-5.5"
-PLANNING_FALLBACK_MODEL="${CODEX_PLANNING_FALLBACK_MODEL:-gpt-5.4}"
-CODING_FALLBACK_MODEL="${CODEX_CODING_FALLBACK_MODEL:-gpt-5.4}"
-REVIEWING_FALLBACK_MODEL="${CODEX_REVIEWING_FALLBACK_MODEL:-gpt-5.4}"
+PLANNING_MODEL=""
+CODING_MODEL=""
+REVIEWING_MODEL=""
+PLANNING_FALLBACK_MODEL=""
+CODING_FALLBACK_MODEL=""
+REVIEWING_FALLBACK_MODEL=""
 
 if [[ -n "${HOME:-}" ]]; then
   export PATH="$HOME/.local/bin:$PATH"
@@ -1851,42 +1902,113 @@ fallback_requested() {
   truthy "${CODEX_USE_FALLBACK:-}"
 }
 
-profile_value() {
-  local profile="$1"
-  local key="$2"
-  [[ -f "$MODEL_PROFILES" ]] || return 0
-  awk -v profile="$profile" -v key="$key" '
-    $0 ~ "\"" profile "\"[[:space:]]*:" { in_profile = 1; next }
-    in_profile && $0 ~ /^[[:space:]]*}/ { exit }
-    in_profile {
-      pattern = "\"" key "\"[[:space:]]*:[[:space:]]*\""
-      if ($0 ~ pattern) {
-        sub(".*" pattern, "")
-        sub("\".*", "")
-        print
-        exit
-      }
-    }
-  ' "$MODEL_PROFILES"
-}
-
 load_model_profile() {
-  local profile="$1"
-  local value=""
-  value="$(profile_value "$profile" reasoning_effort)"
-  [[ -n "$value" ]] && REASONING_EFFORT="$value"
-  value="$(profile_value "$profile" planning_model)"
-  [[ -n "$value" ]] && PLANNING_MODEL="$value"
-  value="$(profile_value "$profile" coding_model)"
-  [[ -n "$value" ]] && CODING_MODEL="$value"
-  value="$(profile_value "$profile" reviewing_model)"
-  [[ -n "$value" ]] && REVIEWING_MODEL="$value"
-  value="$(profile_value "$profile" planning_fallback_model)"
-  [[ -n "$value" ]] && PLANNING_FALLBACK_MODEL="${CODEX_PLANNING_FALLBACK_MODEL:-$value}"
-  value="$(profile_value "$profile" coding_fallback_model)"
-  [[ -n "$value" ]] && CODING_FALLBACK_MODEL="${CODEX_CODING_FALLBACK_MODEL:-$value}"
-  value="$(profile_value "$profile" reviewing_fallback_model)"
-  [[ -n "$value" ]] && REVIEWING_FALLBACK_MODEL="${CODEX_REVIEWING_FALLBACK_MODEL:-$value}"
+  local requested_profile="${CODEX_MODEL_PROFILE:-}"
+  local parsed=""
+  local effective_effort=""
+  local -a fields=()
+
+  MODEL_PROFILE_ERROR=""
+  if ! command -v python3 >/dev/null 2>&1; then
+    MODEL_PROFILE_ERROR="model profile error: python3 is required to load $MODEL_PROFILES"
+    return 1
+  fi
+
+  if ! parsed="$(python3 - "$MODEL_PROFILES" "$requested_profile" 2>&1 <<'PY_MODEL_PROFILE'
+import json
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+requested = sys.argv[2]
+required_keys = (
+    "reasoning_effort",
+    "planning_model",
+    "coding_model",
+    "reviewing_model",
+    "planning_fallback_model",
+    "coding_fallback_model",
+    "reviewing_fallback_model",
+)
+allowed_efforts = {"none", "low", "medium", "high", "xhigh", "max"}
+model_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+
+try:
+    document = json.loads(path.read_text(encoding="utf-8"))
+except FileNotFoundError:
+    raise SystemExit(f"model profile error: file not found: {path}")
+except (OSError, UnicodeError) as exc:
+    raise SystemExit(f"model profile error: cannot read {path}: {exc}")
+except json.JSONDecodeError as exc:
+    raise SystemExit(
+        f"model profile error: malformed JSON in {path}: line {exc.lineno} column {exc.colno}"
+    )
+
+if not isinstance(document, dict):
+    raise SystemExit("model profile error: top-level JSON value must be an object")
+if document.get("schema") != "agent-model-profiles/v1":
+    raise SystemExit("model profile error: schema must be agent-model-profiles/v1")
+
+profile_name = requested or document.get("default_profile")
+if not isinstance(profile_name, str) or not profile_name:
+    raise SystemExit("model profile error: default_profile must be a non-empty string")
+profiles = document.get("profiles")
+if not isinstance(profiles, dict):
+    raise SystemExit("model profile error: profiles must be an object")
+profile = profiles.get(profile_name)
+if not isinstance(profile, dict):
+    raise SystemExit(f"model profile error: selected profile '{profile_name}' is missing")
+
+for key in required_keys:
+    if key not in profile:
+        raise SystemExit(
+            f"model profile error: profile '{profile_name}' is missing required field '{key}'"
+        )
+    if not isinstance(profile[key], str):
+        raise SystemExit(
+            f"model profile error: profile '{profile_name}' field '{key}' must be a string"
+        )
+
+effort = profile["reasoning_effort"]
+if effort not in allowed_efforts:
+    raise SystemExit(f"model profile error: unsupported reasoning_effort '{effort}'")
+for key in required_keys[1:]:
+    if not model_pattern.fullmatch(profile[key]):
+        raise SystemExit(f"model profile error: invalid model id for '{key}'")
+
+print("\t".join([profile_name] + [profile[key] for key in required_keys]))
+PY_MODEL_PROFILE
+  )"; then
+    MODEL_PROFILE_ERROR="$parsed"
+    return 1
+  fi
+
+  IFS=$'\t' read -r -a fields <<< "$parsed"
+  if [[ "${#fields[@]}" -ne 8 ]]; then
+    MODEL_PROFILE_ERROR="model profile error: parser returned ${#fields[@]} fields; expected 8"
+    return 1
+  fi
+
+  effective_effort="${fields[1]}"
+  if [[ -n "${CODEX_REASONING_EFFORT:-}" ]]; then
+    case "$CODEX_REASONING_EFFORT" in
+      none|low|medium|high|xhigh|max) effective_effort="$CODEX_REASONING_EFFORT" ;;
+      *)
+        MODEL_PROFILE_ERROR="model profile error: unsupported CODEX_REASONING_EFFORT '$CODEX_REASONING_EFFORT'"
+        return 1
+        ;;
+    esac
+  fi
+
+  MODEL_PROFILE="${fields[0]}"
+  REASONING_EFFORT="$effective_effort"
+  PLANNING_MODEL="${fields[2]}"
+  CODING_MODEL="${fields[3]}"
+  REVIEWING_MODEL="${fields[4]}"
+  PLANNING_FALLBACK_MODEL="${fields[5]}"
+  CODING_FALLBACK_MODEL="${fields[6]}"
+  REVIEWING_FALLBACK_MODEL="${fields[7]}"
 }
 
 model_for_mode() {
@@ -1992,16 +2114,20 @@ doctor_context_budget() {
     docs/agent-configs/llm-council-agent-workflow.md \
     docs/agent-configs/task-journal.md)"
 
-  if [[ "$core_tokens" -le 4000 ]]; then
-    doctor_ok "core startup context estimate: ${core_tokens} tokens (budget 4000)"
+  if [[ "$core_tokens" -gt 4000 ]]; then
+    doctor_warn "core startup context estimate: ${core_tokens} tokens exceeds gate 4000; the 4000 gate is enforced by the harness test suite"
+  elif [[ "$core_tokens" -gt 3800 ]]; then
+    doctor_warn "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800); measure after any edit to a counted file"
   else
-    doctor_warn "core startup context estimate: ${core_tokens} tokens exceeds budget 4000"
+    doctor_ok "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800)"
   fi
 
-  if [[ "$full_tokens" -le 6500 ]]; then
-    doctor_ok "on-demand full workflow context estimate: ${full_tokens} tokens (budget 6500)"
+  if [[ "$full_tokens" -gt 6200 ]]; then
+    doctor_warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite"
+  elif [[ "$full_tokens" -gt 5900 ]]; then
+    doctor_warn "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900); measure after any edit to a counted file"
   else
-    doctor_warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds budget 6500"
+    doctor_ok "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900)"
   fi
 }
 
@@ -2009,7 +2135,24 @@ run_doctor() {
   DOCTOR_FAIL=0
   DOCTOR_WARN=0
   local no_scan_paths=""
+  local doctor_mode=""
+  local doctor_model=""
+  local doctor_model_source=""
+  local doctor_resolved_model=""
+  local old_ifs=""
   echo "Codex helper doctor..."
+
+  if load_model_profile; then
+    doctor_mode="$(read_mode)"
+    doctor_resolved_model="$(resolve_model_for_mode "$doctor_mode")"
+    old_ifs="$IFS"
+    IFS=$'\t'
+    read -r doctor_model doctor_model_source <<< "$doctor_resolved_model"
+    IFS="$old_ifs"
+    doctor_ok "model profile $MODEL_PROFILE: route=$doctor_mode model=$doctor_model source=$doctor_model_source effort=$REASONING_EFFORT"
+  else
+    doctor_bad "$MODEL_PROFILE_ERROR"
+  fi
 
   for path in \
     AGENTS.md \
@@ -2080,12 +2223,6 @@ run_doctor() {
     else
       doctor_bad "Claude settings JSON is invalid"
     fi
-  fi
-
-  if grep -Fq 'model_reasoning_effort = "xhigh"' "$PROJECT_ROOT/.codex/config.toml"; then
-    doctor_ok "Codex config uses xhigh reasoning"
-  else
-    doctor_bad "Codex config does not use xhigh reasoning"
   fi
 
 	  if grep -Fq './scripts/agent-hook.sh claude-pretool' "$PROJECT_ROOT/.claude/settings.json"; then
@@ -2190,6 +2327,10 @@ resolve_model_for_mode() {
   fi
 }
 
+sol_coding_audit_record() {
+  printf 'policy_exception=%s authorization=%s' "sol_coding" "user_session"
+}
+
 print_launch_summary() {
   local mode="$1"
   local flow="$2"
@@ -2207,8 +2348,10 @@ print_launch_summary() {
 
   {
     echo "Codex launch: mode=$mode flow=$flow model=$model reasoning=$REASONING_EFFORT sandbox=$sandbox approval=$approval"
-    if [[ "$model_source" != "default" ]]; then
-      echo "Model source: $model_source"
+    echo "Model source: $model_source"
+    if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
+      sol_coding_audit_record
+      echo
     fi
     if [[ "$model_source" == "default" ]]; then
       echo "If Codex reports model capacity, rerun: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $mode$flow_arg"
@@ -2238,24 +2381,31 @@ resolve_codex_bin() {
 mode_prompt() {
   local mode="$1"
   local flow="$2"
+  local model="$3"
+  local model_source="$4"
+  local provenance="actual_model=$model model_source=$model_source."
+  local sol_coding_audit=""
+  if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
+    sol_coding_audit=" $(sol_coding_audit_record). Record the existing task's escalation_reason in implementation.md."
+  fi
   case "$mode:$flow" in
     planning:standard)
-      printf '%s' "MODE LOCK: PLANNING-SUPERVISED. Read-only planning. Claude is primary for planning; Codex planning is fallback/user-selected. Apply docs/agent-configs/agent-mode-contracts.md Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. Do not mutate files unless the user explicitly grants that exact action. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: PLANNING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action."
       ;;
     planning:full_flow)
-      printf '%s' "MODE LOCK: PLANNING-FULL-FLOW. Claude is primary for planning; Codex planning is fallback/user-selected. Apply Planning Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local execution only. Keep scope bounded and produce implementation-ready handoff when coding follows. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: PLANNING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local execution only; respect scripts/agent-hook.sh no-scan-paths and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes."
       ;;
     coding:standard)
-      printf '%s' "MODE LOCK: CODING-SUPERVISED. Codex is primary for coding. Read-only coding analysis. Apply Coding Mode, docs/agent-configs/agent-handoff-schema.md for handoff, run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available, respect scripts/agent-hook.sh no-scan-paths, and run the Technical Spec Adequacy Gate before proposing implementation. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: CODING-SUPERVISED. $provenance$sol_coding_audit Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action."
       ;;
     coding:full_flow)
-      printf '%s' "MODE LOCK: CODING-FULL-FLOW. Codex is primary for coding. Apply Coding Mode and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; run scripts/agent-guard.sh pre-edit <path> before protected paths and respect scripts/agent-hook.sh no-scan-paths. The current user request grants project-local implementation, tests, verification, and self-review. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: CODING-FULL-FLOW. $provenance$sol_coding_audit Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local implementation, tests, and verification only; respect pre-edit/no-scan guards and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes."
       ;;
     reviewing:standard)
-      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. Codex is primary for ordinary review. Read-only review. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. Apply Reviewing Mode with the three-round BA / Senior Dev-Tech Lead / Senior QC council and docs/agent-configs/agent-handoff-schema.md for handoff. Findings first. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope."
       ;;
     reviewing:full_flow)
-      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. Codex is primary for ordinary review. Apply Reviewing Mode with project-local full access and docs/agent-configs/agent-handoff-schema.md for handoff. Run scripts/agent-guard.sh preflight and scripts/detect-agent-tech-stack.sh --markdown when available; respect scripts/agent-hook.sh no-scan-paths. You may run project-local verification commands even when they create build/test outputs. Do not apply remediation edits unless the request asks for fixes or an exact patch scope. Read the active task journal (newest in-progress docs/superpowers/plans/*/journal.md) before substantive work, and append to docs/superpowers/plans/<topic>/journal.md using docs/agent-configs/task-journal.md at close-out."
+      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval."
       ;;
   esac
 }
@@ -2287,7 +2437,7 @@ run_codex_with_mode() {
     approval="$STANDARD_APPROVAL"
   fi
 
-  seed="$(mode_prompt "$mode" "$flow")"
+  seed="$(mode_prompt "$mode" "$flow" "$model" "$model_source")"
   codex_bin="$(resolve_codex_bin)"
   [[ "$persist" == "true" ]] && write_mode "$mode" "$flow"
   if [[ -x "$AGENT_HOOK" ]]; then
@@ -2298,16 +2448,37 @@ run_codex_with_mode() {
   local prompt=""
   if [[ $# -gt 0 ]]; then
     prompt="$*"
+    export CODEX_HARNESS_SESSION=1
     exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
   else
+    export CODEX_HARNESS_SESSION=1
     exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
   fi
 }
 
+reject_nested_launch() {
+  if [[ "${CODEX_HARNESS_SESSION:-}" == "1" ]]; then
+    echo "ERROR: accidental nested Codex launch blocked; exit the current harness session before starting another." >&2
+    return 1
+  fi
+}
+
+require_model_profile() {
+  if load_model_profile; then
+    return 0
+  fi
+  echo "ERROR: $MODEL_PROFILE_ERROR" >&2
+  return 1
+}
+
 cmd="${1:-status}"
-load_model_profile "$MODEL_PROFILE"
 case "$cmd" in
+  -h|--help|help)
+    usage
+    ;;
   planning|coding|reviewing)
+    reject_nested_launch || exit 1
+    require_model_profile || exit 1
     shift || true
     flow="$DEFAULT_FLOW"
     if [[ "${1:-}" == "-full_flow" || "${1:-}" == "--full-flow" || "${1:-}" == "--full_flow" ]]; then
@@ -2320,6 +2491,8 @@ case "$cmd" in
     run_codex_with_mode "$cmd" "$flow" true "$@"
     ;;
   run)
+    reject_nested_launch || exit 1
+    require_model_profile || exit 1
     shift || true
     flow="$(read_flow)"
     if [[ "${1:-}" == "-full_flow" || "${1:-}" == "--full-flow" || "${1:-}" == "--full_flow" ]]; then
@@ -2335,6 +2508,7 @@ case "$cmd" in
     run_doctor
     ;;
   status)
+    require_model_profile || exit 1
     current_mode="$(read_mode)"
     current_flow="$(read_flow)"
     resolved_model="$(resolve_model_for_mode "$current_mode")"
@@ -2351,9 +2525,6 @@ case "$cmd" in
     echo "Fallback model: $(fallback_model_for_mode "$current_mode")"
     echo "Capacity fallback: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $current_mode$([[ "$current_flow" == "standard" ]] && printf ' --supervised')"
     echo "Explicit override: CODEX_MODEL_OVERRIDE=<model> .codex/codex-mode.sh $current_mode$([[ "$current_flow" == "standard" ]] && printf ' --supervised')"
-    ;;
-  -h|--help|help)
-    usage
     ;;
   *)
     echo "ERROR: unknown command: $cmd" >&2

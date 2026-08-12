@@ -487,148 +487,6 @@ changed_protected_paths() {
   done < <(git -C "$PROJECT_ROOT" diff --name-only HEAD -- 2>/dev/null || true)
 }
 
-latest_journal_closeout() {
-  command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$PROJECT_ROOT" <<'PY'
-import pathlib
-import sys
-
-root = pathlib.Path(sys.argv[1])
-journals = sorted(
-    root.glob("docs/superpowers/plans/*/journal.md"),
-    key=lambda path: path.stat().st_mtime if path.exists() else 0,
-    reverse=True,
-)
-
-if not journals:
-    print("state\tnone")
-    return_code = 0
-    raise SystemExit(return_code)
-
-def emit(key, value):
-    print(f"{key}\t{str(value).replace(chr(9), ' ')}")
-
-path = journals[0]
-text = path.read_text(encoding="utf-8", errors="replace")
-entries = []
-current = []
-for line in text.splitlines():
-    if line.startswith("## "):
-        if current:
-            entries.append(current)
-        current = [line]
-    elif current:
-        current.append(line)
-if current:
-    entries.append(current)
-
-closeout = None
-for entry in entries:
-    fields = {}
-    for line in entry:
-        stripped = line.strip()
-        if not stripped.startswith("- ") or ":" not in stripped:
-            continue
-        key, value = stripped[2:].split(":", 1)
-        fields[key.strip()] = value.strip()
-    if fields.get("status") in {"decided", "done"}:
-        closeout = fields
-
-emit("journal", path.relative_to(root))
-if closeout is None:
-    emit("state", "no-closeout")
-    raise SystemExit(0)
-
-emit("state", "closeout")
-for key in ("status", "memory", "save_decision", "evidence", "recall_verified"):
-    emit(key, closeout.get(key, ""))
-PY
-}
-
-memory_gate_fail() {
-  local strict="$1"
-  shift
-  if [[ "$strict" == "true" && "$STATE_WRITABLE" == "true" ]]; then
-    fail "$*"
-  fi
-  warn "$*"
-}
-
-validate_memory_closeout() {
-  local strict="$1"
-  local changed_file="$2"
-  local high_risk=false
-  [[ -n "$changed_file" ]] && high_risk=true
-
-  local summary
-  summary="$(latest_journal_closeout || true)"
-  local journal_state="" journal_path="" status="" memory="" save_decision="" evidence="" recall_verified=""
-  local key value
-  while IFS=$'\t' read -r key value; do
-    case "$key" in
-      state) journal_state="$value" ;;
-      journal) journal_path="$value" ;;
-      status) status="$value" ;;
-      memory) memory="$value" ;;
-      save_decision) save_decision="$value" ;;
-      evidence) evidence="$value" ;;
-      recall_verified) recall_verified="$value" ;;
-    esac
-  done <<< "$summary"
-
-  case "$journal_state" in
-    none)
-      warn "no task journal found; memory close-out was not validated"
-      return 0
-      ;;
-    no-closeout)
-      warn "latest task journal has no decided/done entry; memory close-out was not validated${journal_path:+ ($journal_path)}"
-      return 0
-      ;;
-    closeout)
-      ;;
-    *)
-      warn "could not inspect task journal; memory close-out was not validated"
-      return 0
-      ;;
-  esac
-
-  if [[ -z "$memory" ]]; then
-    memory_gate_fail "$strict" "task journal decided/done entry missing memory:${journal_path:+ $journal_path}"
-  fi
-
-  if [[ "$high_risk" == "true" ]]; then
-    case "$recall_verified" in
-      yes|n/a|acked-deferred)
-        ;;
-      "")
-        memory_gate_fail "$strict" "protected-path diff requires recall_verified: yes|n/a|acked-deferred before pre-final${changed_file:+ (changed: $changed_file)}"
-        ;;
-      deferred:*)
-        memory_gate_fail "$strict" "protected-path diff cannot use recall_verified: deferred; use yes, n/a, or acked-deferred${changed_file:+ (changed: $changed_file)}"
-        ;;
-      *)
-        memory_gate_fail "$strict" "protected-path diff has invalid recall_verified value '$recall_verified'; use yes, n/a, or acked-deferred${changed_file:+ (changed: $changed_file)}"
-        ;;
-    esac
-  fi
-
-  if [[ -z "$save_decision" ]]; then
-    warn "task journal decided/done entry missing save_decision:${journal_path:+ $journal_path}"
-  fi
-  if [[ "$save_decision" == "saved" && ( -z "$evidence" || "$evidence" == "none" ) ]]; then
-    warn "task journal save_decision=saved should include evidence"
-  fi
-  case "$memory" in
-    ""|none|n/a) ;;
-    *)
-      if [[ -z "$evidence" || "$evidence" == "none" ]]; then
-        warn "task journal memory id should include evidence"
-      fi
-      ;;
-  esac
-}
-
 is_bootstrap_generated_base() {
   local relpath="$1"
   case "$relpath" in
@@ -1492,13 +1350,11 @@ pre_final() {
   if [[ -n "$pending_candidate" ]]; then
     warn "pending generated candidate requires review: $pending_candidate"
   fi
-  local protected_changes first_protected_change
+  local protected_changes
   protected_changes="$(changed_protected_paths || true)"
-  first_protected_change="$(printf '%s\n' "$protected_changes" | sed -n '1{s/\t/ /g;p;}')"
   if [[ -n "$protected_changes" ]]; then
-    warn "protected-path changes require memory recall verification before completion"
+    warn "protected-path changes detected; confirm they were intended before claiming completion"
   fi
-  validate_memory_closeout "$strict" "$first_protected_change"
   if [[ "$run_verify" == "true" ]]; then
     run_detected_verification "$strict" "$verify_scope"
   fi

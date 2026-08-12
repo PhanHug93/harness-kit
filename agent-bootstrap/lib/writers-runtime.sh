@@ -1011,16 +1011,20 @@ check_context_budget() {
     docs/agent-configs/llm-council-agent-workflow.md \
     docs/agent-configs/task-journal.md)"
 
-  if [[ "$core_tokens" -le 4000 ]]; then
-    ok "core startup context estimate: ${core_tokens} tokens (budget 4000)"
+  if [[ "$core_tokens" -gt 4000 ]]; then
+    warn "core startup context estimate: ${core_tokens} tokens exceeds gate 4000; the 4000 gate is enforced by the harness test suite"
+  elif [[ "$core_tokens" -gt 3800 ]]; then
+    warn "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800); measure after any edit to a counted file"
   else
-    warn "core startup context estimate: ${core_tokens} tokens exceeds budget 4000"
+    ok "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800)"
   fi
 
-  if [[ "$full_tokens" -le 6500 ]]; then
-    ok "on-demand full workflow context estimate: ${full_tokens} tokens (budget 6500)"
+  if [[ "$full_tokens" -gt 6200 ]]; then
+    warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite"
+  elif [[ "$full_tokens" -gt 5900 ]]; then
+    warn "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900); measure after any edit to a counted file"
   else
-    warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds budget 6500"
+    ok "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900)"
   fi
 }
 
