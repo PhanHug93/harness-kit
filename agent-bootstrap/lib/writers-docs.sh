@@ -775,10 +775,12 @@ Read on demand:
   architecture/security/release tradeoffs.
 - Skills under \`.agents/skills/\` only when their descriptions match the
   current task.
-
-Keep the always-on/core startup context under roughly 4k estimated tokens.
 $mobile_skill_read_on_demand_bullet
 
+Keep the always-on/core startup context under roughly 4k estimated tokens.
+\`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
+current estimate, which excludes tool-specific wrappers such as \`CLAUDE.md\`
+and \`GEMINI.md\`.
 
 At the start of substantive work:
 
@@ -855,10 +857,8 @@ remain no-scan.
   performance improvement planning. Default is project-local full-flow.
 - \`coding\`: implementation, refactoring, bug fixes, tests, and verification.
   Follow the canonical adequacy gate before implementation.
-- \`reviewing\`: one findings-first pass. Review mode may run project-local
-  verification in full-flow. Remediation edits require the review request to
-  ask for fixes or an exact patch scope. Use council only on demand for
-  high-risk or disputed work.
+- \`reviewing\`: one findings-first pass; may run project-local verification.
+  Remediation requires an exact requested scope.
 
 ## Detected Project Stack
 
@@ -1142,14 +1142,14 @@ State sufficiency matches the latest pre-coding attempt.
 
 Append `## Implementation attempt <n>` with model/source, route, scope, files,
 verification, deviations, risks, blockers, and any adequacy downgrade. Sol coding records
-`policy_exception=sol_coding`, `authorization=user_session`, and the reason.
-Those fields are an audit-only procedural declaration and cannot provide file-based authorization; the user must open a new Sol coding session.
+`policy_exception=sol_coding`, `authorization=user_session`, and the reason;
+its policy meaning is defined in `docs/agent-configs/agent-mode-contracts.md`.
 
 ### `claude-review.md`
 
-Append one findings-first `## Cross-review attempt <n>` checking
-state/review consistency, the `base_commit` diff, verification, and approved
-scope. It requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each. It also checks whether author/reviewer model and session declarations contradict.
+Append one findings-first `## Cross-review attempt <n>`. The cross-review
+checklist and required procedural declarations live in
+`docs/agent-configs/agent-mode-contracts.md`.
 
 ### `user-decision.md`
 
@@ -1206,7 +1206,11 @@ in the task packet.
 - The protocol allows the initial implementation plus at most two remediation rounds.
   A further failure moves to `awaiting_user` resolution.
 - Verification records the runner, status, reason, and real report; unavailable
-  or skipped execution must not be reported as a pass.
+  or skipped execution must not be reported as a pass. Only the executing host may declare a
+  pass; any other report is testimony pending fresh confirmation.
+- An equivalence or invariance guard names the production boundary its fixture
+  crosses, declares its mutation in the packet before the test is written, and
+  must fail when the fixture transform is replaced with identity.
 - Claude performs one findings-first cross-review pass covering state/review consistency,
   `base_commit`, verification, any Sol-coding decision and reason, and the
   approved scope. Claude requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
@@ -1229,9 +1233,8 @@ root-cause patches, tests, and fresh verification; otherwise move to resolution.
 
 ## Reviewing Mode
 
-Ordinary review is one findings-first, evidence-backed pass. Sol owns technical
-review; Claude owns cross-review. Remediation requires exact requested scope;
-council is on demand for high-risk or disputed work.
+Ordinary review is one findings-first, evidence-backed pass. Remediation
+requires exact requested scope.
 The `Severity trigger` finding obligation is defined by the reviewing launcher.
 
 ## Project-Specific Mode Overrides
@@ -2402,10 +2405,10 @@ mode_prompt() {
       printf '%s' "MODE LOCK: CODING-FULL-FLOW. $provenance$sol_coding_audit Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local implementation, tests, and verification only; respect pre-edit/no-scan guards and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes."
       ;;
     reviewing:standard)
-      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope."
+      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope."
       ;;
     reviewing:full_flow)
-      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval."
+      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval."
       ;;
   esac
 }

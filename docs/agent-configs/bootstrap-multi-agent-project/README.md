@@ -312,9 +312,9 @@ Generated full-workflow projects use progressive disclosure:
   the current task.
 
 `scripts/verify-ai-deps.sh` and `.codex/codex-mode.sh doctor` report estimated
-core startup tokens and on-demand full-workflow tokens. The core startup budget
-is 3k estimated tokens; the full-workflow on-demand budget is 6.5k estimated
-tokens. Estimates use a portable heuristic: max(chars/4, words*1.3).
+core startup tokens and on-demand full-workflow tokens. The core startup gate
+is 4000 estimated tokens with an amber band above 3800; the full-workflow
+on-demand gate is 6200 with an amber band above 5900. Estimates use a portable heuristic: max(chars/4, words*1.3).
 
 ## Closed-loop pre-final
 

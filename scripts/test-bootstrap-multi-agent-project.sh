@@ -173,6 +173,13 @@ assert_mobile_optimization_pointer_budget() {
     fail "$label AGENTS.md missing mobile optimization pointer line"
   assert_estimated_tokens_at_most "$agents_line" 120 "$label AGENTS.md mobile optimization pointer"
 
+  local pointer_predecessor
+  pointer_predecessor="$(grep -B1 -F "$mobile_skill_path" "$target/AGENTS.md" | head -n 1)"
+  case "$pointer_predecessor" in
+    "- "*|"  "*) : ;;
+    *) fail "$label AGENTS.md mobile optimization pointer left the read-on-demand list (preceding line: $pointer_predecessor)" ;;
+  esac
+
   local pointer
   for pointer in \
     .windsurf/rules/mobile-optimization.md \
@@ -1341,6 +1348,7 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/llm-council-agent-workflow.md"
 need_contains "$(cat "$TMP_DIR/AGENTS.md")" "## Startup Context Budget" "AGENTS token budget section"
 need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Always read at startup" "AGENTS core startup context"
 need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Read on demand" "AGENTS lazy context disclosure"
+need_contains "$(cat "$TMP_DIR/AGENTS.md")" "excludes tool-specific wrappers" "AGENTS names where the core estimate is reported and what it excludes"
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
 need_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read on demand" "CLAUDE lazy context disclosure"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"
@@ -1636,10 +1644,10 @@ need_contains "$handoff_contract" 'When Sol returns `task.md` to analysis, appen
 need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
 need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
 need_contains "$handoff_contract" "not proof of session, model, account, or host independence" "handoff fresh-session non-proof"
-need_contains "$handoff_contract" "audit-only procedural declaration" "handoff Sol-coding audit limitation"
-need_contains "$handoff_contract" "cannot provide file-based authorization" "handoff no file authorization"
-need_contains "$handoff_contract" "author/reviewer model and session declarations contradict" "handoff cross-review declaration contradiction format"
-need_contains "$handoff_contract" 'requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each' "handoff cross-review provenance declarations"
+need_contains "$handoff_contract" "checklist and required procedural declarations live in" "handoff cross-review points to canonical checklist"
+need_contains "$handoff_contract" "its policy meaning is defined in" "handoff Sol-coding points to canonical policy"
+need_not_contains "$handoff_contract" "audit-only procedural declaration" "handoff carries no duplicate Sol-coding policy"
+need_not_contains "$handoff_contract" "declarations to be present" "handoff carries no duplicate cross-review checklist"
 need_contains "$handoff_contract" "Role, transition, and gate policy lives only in" "handoff defers collaboration policy"
 
 need_contains "$mode_contracts" '- `analysis` · Claude -> `technical_review`' "analysis transition"
@@ -1656,6 +1664,8 @@ need_contains "$mode_contracts" 'Luna may downgrade `yes`' "mode contracts Luna 
 need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
 need_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode contracts remediation cap"
 need_contains "$mode_contracts" "runner, status, reason, and real report" "mode contracts verification evidence"
+need_contains "$mode_contracts" "testimony pending fresh confirmation" "mode contracts executing-host pass rule"
+need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
 need_contains "$mode_contracts" "state/review consistency" "mode contracts Claude consistency check"
 need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
 need_contains "$mode_contracts" "verification" "mode contracts Claude verification check"
