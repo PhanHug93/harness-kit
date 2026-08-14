@@ -24,3 +24,6 @@
 
 # OS / editor
 .DS_Store
+
+# kit development records stay local-only
+docs/superpowers/
