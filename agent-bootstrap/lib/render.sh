@@ -228,8 +228,6 @@ docs/superpowers/plans/README.md.generated.*
 .codex/
 .cursor/rules/
 .windsurf/rules/
-.github/workflows/agent-guard.yml
-.github/workflows/agent-guard.yml.generated.*
 scripts/agent-tech-stack-lib.sh
 scripts/detect-agent-tech-stack.sh
 scripts/agent-hook.sh

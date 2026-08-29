@@ -100,9 +100,9 @@ commands. Results are written to `.agents/state/last-verify-report.json`, and an
 Generated Claude Code settings also register a Stop hook that runs fast
 close-out verification when the tree has changes; Gemini, Cursor, and Windsurf
 remain advisory and should run the pre-final command manually.
-The generated CI workflow is a portable skeleton: add project stack setup before
-the guard step, then mark `agent-guard / verify` as a required status check in
-branch protection.
+The kit does not install or enforce remote checks. Every harness gate is local
+and opt-in: run `scripts/agent-guard.sh` directly or install the provided
+pre-push hook with `scripts/install-git-hooks.sh`.
 
 Inspect an existing target before upgrading:
 
@@ -121,7 +121,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.29.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the

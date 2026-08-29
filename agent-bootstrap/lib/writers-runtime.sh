@@ -123,7 +123,6 @@ write_template_catalog() {
   local template
   for template in \
     base/README.md \
-    ci/agent-guard.yml \
     tool-contract/shared.md \
     overlays/android_kotlin.md \
     overlays/generic.md \
@@ -208,7 +207,6 @@ write_portable_enforcement() {
   make_executable "$LAST_WRITTEN_FILE"
   copy_bundle_file "install-git-hooks.sh" "$TARGET_DIR/scripts/install-git-hooks.sh"
   make_executable "$LAST_WRITTEN_FILE"
-  copy_bundle_file "templates/ci/agent-guard.yml" "$TARGET_DIR/.github/workflows/agent-guard.yml"
 }
 
 write_schema_model_and_provenance_catalog() {
