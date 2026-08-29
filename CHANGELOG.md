@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.08.29.1 — Local-only enforcement
+
+- **No generated remote workflow.** Removed the bundled GitHub Actions template and all installer, renderer, manifest, and generator wiring that emitted it into target projects.
+- **Explicit local, opt-in gates.** Harness verification remains available through direct `agent-guard.sh` commands and the optional pre-push hook; the kit does not install or enforce remote checks.
+- **Regression coverage.** Bundle inventory, canonical export, documentation mirrors, and generated targets now assert the remote automation surface stays absent.
+
 ## 2026.08.10.1 — Claude-Codex collaboration flow
 
 - **Claude/Cowork-Codex contracts.** Canonical role, phase, transition, and escalation rules live in `agent-mode-contracts.md`; task packet, findings, and disposition formats live in `agent-handoff-schema.md`.

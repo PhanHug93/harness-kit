@@ -186,7 +186,7 @@ agent-init --apply-candidates
 One-shot safe upgrade for an old project on another machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.29.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 That script installs the pinned harness release, creates
@@ -327,7 +327,7 @@ scripts/agent-guard.sh pre-final --run-verify
 
 `pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
 
-The generated CI workflow is a portable skeleton: add project stack setup before the guard step, then mark `agent-guard / verify` as a required status check in branch protection.
+The kit does not install or enforce remote checks. Every harness gate is local and opt-in: run `scripts/agent-guard.sh` directly or install the provided pre-push hook with `scripts/install-git-hooks.sh`.
 
 ## Agent Guard Lite
 

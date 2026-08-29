@@ -780,7 +780,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.08.10.1" ]] || fail "VERSION not bumped to 2026.08.10.1"
+[[ "$bundle_version" == "2026.08.29.1" ]] || fail "VERSION not bumped to 2026.08.29.1"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -829,7 +829,6 @@ for canonical_file in \
   schemas/agent-guard-event-v2.schema.json \
   templates/base/README.md \
   templates/tool-contract/shared.md \
-  templates/ci/agent-guard.yml \
   templates/overlays/android_kotlin.md \
   templates/overlays/generic.md \
   templates/overlays/ios_swift.md \
@@ -858,6 +857,13 @@ for canonical_file in \
   lib/onboarding.sh \
   lib/overlays.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
+done
+for template_root in \
+  "$BOOTSTRAP_BUNDLE/templates" \
+  "$CANONICAL_DIR/templates" \
+  "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates"; do
+  [[ -z "$(find "$template_root" -maxdepth 1 -type d -name ci -print -quit)" ]] ||
+    fail "remote automation template directory survived in $template_root"
 done
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" "canonical installer shell snippet"
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-update()" "canonical installer update shell snippet"
@@ -1250,14 +1256,10 @@ need_same_file "$BOOTSTRAP_BUNDLE/githooks/pre-push" "$TMP_DIR/scripts/githooks/
 [[ -x "$TMP_DIR/scripts/githooks/pre-push" ]] || fail "pre-push hook is not executable"
 need_same_file "$BOOTSTRAP_BUNDLE/install-git-hooks.sh" "$TMP_DIR/scripts/install-git-hooks.sh" "generated git hook installer"
 [[ -x "$TMP_DIR/scripts/install-git-hooks.sh" ]] || fail "git hook installer is not executable"
-[[ -f "$TMP_DIR/.github/workflows/agent-guard.yml" ]] || fail "agent-guard CI workflow not generated into target"
+[[ ! -d "$TMP_DIR/.github/workflows" ]] || fail "bootstrap generated remote automation into target"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "pre-final --run-verify" "pre-push runs close-out verification"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "preflight" "pre-push runs preflight before pre-final"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "agent-local-only-check.sh" "pre-push runs local-only harness check"
-need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "preflight" "CI workflow runs preflight before pre-final"
-need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "--verify-scope full" "CI workflow runs full close-out verification"
-need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "Add project stack setup" "CI workflow documents required stack setup"
-need_contains "$(cat "$TMP_DIR/.github/workflows/agent-guard.yml")" "required status check" "CI workflow documents branch protection wiring"
 [[ -f "$TMP_DIR/docs/agent-configs/RECOVERY.md" ]] || fail "RECOVERY.md not generated into target"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "partial upgrade" "RECOVERY covers partial upgrade"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "git restore" "RECOVERY gives a concrete restore command"
