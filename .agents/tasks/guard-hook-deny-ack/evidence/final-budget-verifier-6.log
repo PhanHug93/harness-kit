@@ -1,0 +1,105 @@
+Verifying generated agent infrastructure...
+  ok    file exists: AGENTS.md
+  ok    file exists: CLAUDE.md
+  ok    file exists: docs/agent-configs/agent-bootstrap.lock.json
+  ok    file exists: docs/agent-configs/project-agent-context.md
+  ok    file exists: docs/agent-configs/context-policy.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/android_kotlin.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/python.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/ios_swift.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/node_js.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/generic.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-context-policy-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-model-profiles-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256
+  ok    file exists: docs/agent-configs/model-profiles.json
+  ok    file exists: .claude/settings.json
+  ok    file exists: .claude/README.md
+  ok    file exists: .agents/skills/agentmemory-mcp/SKILL.md
+  ok    file exists: .agents/skills/agentmemory-mcp/agents/openai.yaml
+  ok    bootstrap lock schema is agent-bootstrap-lock/v1
+  ok    bootstrap lock workflow preset is valid: full
+  ok    model profile schema is agent-model-profiles/v1
+  ok    agent context policy schema is agent-context-policy/v1
+  ok    rtk provenance manifest exists
+  ok    schema/model profile JSON parses
+  ok    bootstrap JSON contracts validate
+  ok    file exists: docs/agent-configs/agent-mode-contracts.md
+  ok    file exists: docs/agent-configs/agent-handoff-schema.md
+  ok    file exists: docs/agent-configs/karpathy-llm-coding-agent-config.md
+  ok    file exists: docs/agent-configs/llm-council-agent-workflow.md
+  ok    file exists: docs/agent-configs/task-journal.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/karpathy/README.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/council/README.md
+  ok    file exists: docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/three-mode/README.md
+  ok    file exists: docs/agent-configs/first-10-minutes.md
+  ok    file exists: docs/agent-configs/project-onboarding.md
+  ok    file exists: docs/agent-configs/project-brief.md
+  ok    file exists: .codex/config.toml
+  ok    file exists: .codex/codex-mode.sh
+  ok    file exists: .codex/README.md
+  ok    file exists: .agents/skills/doubt-driven/SKILL.md
+  ok    file exists: .claude/commands/planning.md
+  ok    file exists: .claude/commands/planning-full-flow.md
+  ok    file exists: .claude/commands/coding.md
+  ok    file exists: .claude/commands/coding-full-flow.md
+  ok    file exists: .claude/commands/reviewing.md
+  ok    file exists: .claude/commands/reviewing-full-flow.md
+  ok    file exists: .claude/commands/project-onboarding.md
+  ok    file exists: .claude/commands/codex/setup.md
+  ok    file exists: .claude/commands/codex/rescue.md
+  ok    file exists: .claude/commands/codex/status.md
+  ok    file exists: .claude/commands/doctor.md
+  ok    file exists: docs/superpowers/specs/README.md
+  ok    file exists: docs/superpowers/specs/project-tech-stack.md
+  ok    file exists: docs/superpowers/specs/project-tech-stack.json
+  ok    file exists: docs/superpowers/plans/README.md
+  ok    project tech-stack contract validates
+  warn  project brief is unfilled; run project onboarding before substantive work
+  warn  onboarding contract is unfilled; run scripts/agent-onboarding.sh next
+  ok    core startup context estimate: 2497 tokens (gate 4000, amber above 3800)
+  warn  on-demand full workflow context estimate: 6200 tokens (gate 6200, amber above 5900); measure after any edit to a counted file
+  ok    file exists: scripts/install-rtk.sh
+  ok    executable: scripts/install-rtk.sh
+  ok    executable: scripts/rtk
+  ok    file exists: scripts/agent-tech-stack-lib.sh
+  ok    executable: scripts/agent-tech-stack-lib.sh
+  ok    executable: scripts/agent-hook.sh
+  ok    executable: scripts/agent-guard.sh
+  ok    executable: scripts/agent-local-only-check.sh
+  ok    executable: scripts/detect-agent-tech-stack.sh
+  ok    executable: scripts/verify-ai-deps.sh
+  ok    bash syntax: scripts/install-rtk.sh
+  ok    bash syntax: scripts/rtk
+  ok    bash syntax: scripts/agent-tech-stack-lib.sh
+  ok    bash syntax: scripts/agent-hook.sh
+  ok    bash syntax: scripts/agent-guard.sh
+  ok    bash syntax: scripts/agent-local-only-check.sh
+  ok    bash syntax: scripts/detect-agent-tech-stack.sh
+  ok    bash syntax: scripts/verify-ai-deps.sh
+  ok    executable: scripts/agent-onboarding.sh
+  ok    bash syntax: scripts/agent-onboarding.sh
+  ok    bash syntax: .codex/codex-mode.sh
+  warn  rtk pinned binary is not installed; run: bash scripts/install-rtk.sh before using rtk-specific hooks
+  ok    Claude settings JSON is valid
+  ok    Claude PreToolUse uses shared agent hook
+  ok    Claude PreToolUse guards edit/write tools
+  ok    Codex helper calls shared hook preflight
+  ok    runtime detector runs
+  ok    runtime detector reports modules
+  ok    runtime detector summary matches bootstrap lock
+  ok    local-only agent state is not tracked
+  ok    no-scan guard exposes local/sensitive paths
+  ok    shared agent hook codex preflight passes
+  ok    agent guard check passes
+  ok    no pending generated candidates
+  ok    harness version references match lock (2026.08.29.1)
+  ok    Codex helper doctor passes
+  warn  portable bootstrap integration smoke test missing
+
+Pass: 97  Warn: 5  Fail: 0

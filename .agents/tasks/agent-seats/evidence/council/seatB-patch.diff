@@ -1,0 +1,472 @@
+--- /tmp/council/reference/agent-seats.v2.sh	2026-09-06 19:06:12.518160651 +0000
++++ /tmp/council/targets/seatB/agent-seats.patched.sh	2026-09-06 19:46:03.625659652 +0000
+@@ -70,8 +70,17 @@
+ }
+ # Grammar: values that travel through launcher interfaces can never contain
+ # whitespace or delimiters.
+-MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+-EFFORT_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
++MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
++EFFORT_RE = re.compile(r"[a-z][a-z0-9_-]*")
++OCCUPANT_KEYS = ("model", "effort", "fallback_model", "fallback_effort")
++
++
++def is_model(v):
++    return isinstance(v, str) and MODEL_RE.fullmatch(v) is not None
++
++
++def is_effort(v):
++    return isinstance(v, str) and EFFORT_RE.fullmatch(v) is not None
+ LEGACY_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
+ DEFAULT_CATALOG = {
+     "gpt-6-astra": {"host": "codex", "efforts": ["none", "low", "medium", "high", "xhigh", "ultra"], "default_effort": "ultra"},
+@@ -121,7 +130,7 @@
+ def read_json(path):
+     """Return (document, error). error is None when the file parsed."""
+     try:
+-        return json.loads(path.read_text(encoding="utf-8")), None
++        return json.loads(path.read_text(encoding="utf-8-sig")), None
+     except FileNotFoundError:
+         return None, "missing"
+     except (OSError, UnicodeError) as exc:
+@@ -147,14 +156,14 @@
+         raise SeatsError("legacy model-profiles.json has no usable default profile")
+     notes = []
+     base_effort = profile.get("reasoning_effort")
+-    if not isinstance(base_effort, str) or not EFFORT_RE.match(base_effort):
++    if not is_effort(base_effort):
+         raise SeatsError("legacy reasoning_effort is missing or malformed")
+     models = doc["catalog"]["models"]
+ 
+     def ensure(model, effort):
+-        if not isinstance(model, str) or not MODEL_RE.match(model):
++        if not is_model(model):
+             raise SeatsError(f"legacy model id is not usable: {model!r}")
+-        if not isinstance(effort, str) or not EFFORT_RE.match(effort):
++        if not is_effort(effort):
+             raise SeatsError(f"legacy effort is not usable for {model}: {effort!r}")
+         spec = models.get(model)
+         if spec is None:
+@@ -187,22 +196,25 @@
+     errors, warnings = [], []
+     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
+         return [f"schema must be {SCHEMA}"], warnings
+-    models = (doc.get("catalog") or {}).get("models")
++    catalog = doc.get("catalog")
++    models = catalog.get("models") if isinstance(catalog, dict) else None
+     if not isinstance(models, dict) or not models:
+         errors.append("catalog.models must be a non-empty object")
+         models = {}
+     for mid, spec in models.items():
+-        if not isinstance(mid, str) or not MODEL_RE.match(mid):
++        if not is_model(mid):
+             errors.append(f"catalog model id {mid!r} violates the model grammar [A-Za-z0-9][A-Za-z0-9._:/-]*")
+             continue
+         if not isinstance(spec, dict) or spec.get("host") not in HOSTS:
+             errors.append(f"catalog model {mid}: host must be one of {', '.join(HOSTS)}")
+             continue
+         efforts = spec.get("efforts")
+-        if not isinstance(efforts, list) or not efforts or not all(isinstance(e, str) and EFFORT_RE.match(e) for e in efforts):
++        if not isinstance(efforts, list) or not efforts or not all(is_effort(e) for e in efforts):
+             errors.append(f"catalog model {mid}: efforts must be a non-empty array matching [a-z][a-z0-9_-]*")
+         elif spec.get("default_effort") not in efforts:
+             errors.append(f"catalog model {mid}: default_effort must be one of its efforts")
++        elif len(set(efforts)) != len(efforts):
++            warnings.append(f"catalog model {mid}: efforts lists duplicates")
+     seats = doc.get("seats")
+     if not isinstance(seats, dict):
+         return errors + ["seats must be an object"], warnings
+@@ -224,13 +236,19 @@
+             continue
+         if seat == "owner" and host != "human":
+             errors.append("seat owner: occupant.host must be human")
++        # Every serialized field obeys the grammar whatever the host (resolve emits them all).
++        for key in OCCUPANT_KEYS:
++            if key in occ and occ[key] is not None and not (is_model(occ[key]) if "model" in key else is_effort(occ[key])):
++                errors.append(f"seat {seat}: occupant.{key} {occ[key]!r} violates the grammar")
++        if occ.get("fallback_effort") is not None and occ.get("fallback_model") is None:
++            errors.append(f"seat {seat}: fallback_effort without fallback_model")
+         if host in LAUNCHABLE:
+             for key, ekey in (("model", "effort"), ("fallback_model", "fallback_effort")):
+                 mid = occ.get(key)
+                 if key == "fallback_model" and mid is None:
+                     warnings.append(f"seat {seat}: no fallback model; CODEX_USE_FALLBACK launches will be refused")
+                     continue
+-                if not isinstance(mid, str) or not MODEL_RE.match(mid):
++                if not is_model(mid):
+                     errors.append(f"seat {seat}: occupant.{key} is required for host {host} and must match the model grammar")
+                     continue
+                 spec = models.get(mid)
+@@ -244,9 +262,14 @@
+                     errors.append(f"seat {seat}: {ekey} '{eff}' is not supported by {mid} (supported: {', '.join(spec.get('efforts') or [])})")
+         elif occ.get("model"):
+             warnings.append(f"seat {seat}: host {host} is host-controlled; model '{occ.get('model')}' is informational only")
++    def occupant_of(seat):
++        entry = seats.get(seat)
++        occ = entry.get("occupant") if isinstance(entry, dict) else None
++        return occ if isinstance(occ, dict) else {}
++
+     for reviewer in ("gate", "verify"):
+-        oa = seats.get(reviewer, {}).get("occupant", {})
+-        ob = seats.get("build", {}).get("occupant", {})
++        oa = occupant_of(reviewer)
++        ob = occupant_of("build")
+         if oa.get("host") == "codex" and ob.get("host") == "codex":
+             shared = {oa.get("model"), oa.get("fallback_model")} & {ob.get("model"), ob.get("fallback_model")} - {None}
+             if shared:
+@@ -285,13 +308,40 @@
+         print(f"agent-seats: ERROR: {e}", file=sys.stderr)
+ 
+ 
++def write_atomic(path, data):
++    """Write bytes via a sibling temp file + rename so readers never see a
++    truncated file and a failed write leaves the old content intact."""
++    path = pathlib.Path(os.path.realpath(path))  # write through symlinks, never replace the link
++    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
++    if path.exists() and not os.access(path, os.W_OK):
++        # honour a read-only file instead of renaming over it
++        raise PermissionError(f"[Errno 13] Permission denied (read-only): '{path}'")
++    try:
++        mode = path.stat().st_mode & 0o7777 if path.exists() else None
++        with open(tmp, "wb") as fh:
++            fh.write(data)
++            fh.flush()
++            os.fsync(fh.fileno())
++        if mode is not None:
++            os.chmod(tmp, mode)
++        os.replace(tmp, path)
++    finally:
++        try:
++            os.unlink(tmp)
++        except FileNotFoundError:
++            pass
++
++
+ def save(doc):
+     errors, _ = validate(doc)
+     if errors:
+         report(errors, [])
+         raise SeatsError("refusing to write an invalid seats.json")
+-    SEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+-    SEATS_FILE.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
++    try:
++        SEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
++        write_atomic(SEATS_FILE, (json.dumps(doc, indent=2) + "\n").encode("utf-8"))
++    except OSError as exc:
++        raise SeatsError(f"cannot write {SEATS_FILE}: {exc}; nothing written")
+ 
+ 
+ def load_current():
+@@ -304,15 +354,39 @@
+     return doc
+ 
+ 
+-def proposal():
++def structural_errors(doc):
++    """Errors that make the document unusable as a starting point for set."""
++    if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
++        return [f"schema must be {SCHEMA}"]
++    seats = doc.get("seats")
++    if not isinstance(seats, dict):
++        return ["seats must be an object"]
++    errs = []
++    for seat in SEAT_ORDER:
++        entry = seats.get(seat)
++        if not isinstance(entry, dict) or not isinstance(entry.get("occupant"), dict):
++            errs.append(f"seat {seat}: missing or occupant is not an object")
++    catalog = doc.get("catalog")
++    if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), dict):
++        errs.append("catalog.models must be an object")
++    return errs
++
++
++def proposal(repairing=False):
+     """Lifecycle: valid seats.json -> itself; missing -> legacy migration when a
+-    legacy profile exists, else defaults; malformed seats.json -> error."""
++    legacy profile exists, else defaults; malformed seats.json -> error.
++    repairing=True (set) accepts a structurally sound but invalid file so the
++    result can be validated instead."""
+     doc, error = read_json(SEATS_FILE)
+     if error is None:
+         errors, _ = validate(doc)
++        if errors and repairing and not structural_errors(doc):
++            for e in errors:
++                warn(f"current seats.json: {e}")
++            return doc, "current", []
+         if errors:
+             report(errors, [])
+-            raise SeatsError("current seats.json is invalid; run set/reset to repair it")
++            raise SeatsError("current seats.json is invalid; fix it by hand, repair the offending seat with set, or run reset")
+         return doc, "current", []
+     if error != "missing":
+         raise SeatsError(f"{error}; run scripts/agent-seats.sh reset to start over")
+@@ -331,9 +405,14 @@
+ def render(doc):
+     """Replace exactly one balanced roster block or append one; every byte
+     outside the block is preserved. Unbalanced markers -> exit 3, no write."""
+-    if not AGENTS_MD.is_file():
++    if not AGENTS_MD.exists():
+         raise SeatsError(f"{AGENTS_MD} is missing; cannot render the seat roster")
+-    data = AGENTS_MD.read_bytes()
++    if not AGENTS_MD.is_file():
++        raise SeatsError(f"{AGENTS_MD} is not a regular file; cannot render the seat roster")
++    try:
++        data = AGENTS_MD.read_bytes()
++    except OSError as exc:
++        raise SeatsError(f"cannot read {AGENTS_MD}: {exc}")
+     newline = "\r\n" if b"\r\n" in data else "\n"
+     begin, end = ROSTER_BEGIN.encode("utf-8"), ROSTER_END.encode("utf-8")
+     nb, ne = data.count(begin), data.count(end)
+@@ -347,7 +426,10 @@
+     else:
+         raise SeatsError(f"seat roster markers in {AGENTS_MD} are unbalanced (BEGIN={nb}, END={ne}); repair the markers by hand, then rerun render", code=3)
+     if new != data:
+-        AGENTS_MD.write_bytes(new)
++        try:
++            write_atomic(AGENTS_MD, new)
++        except OSError as exc:
++            raise SeatsError(f"cannot write {AGENTS_MD}: {exc}")
+         out("agent-seats: rendered seat roster into AGENTS.md")
+     else:
+         out("agent-seats: seat roster already current in AGENTS.md")
+@@ -361,6 +443,9 @@
+     except SeatsError as exc:
+         print(f"agent-seats: ERROR: seats.json was written but the roster was NOT rendered: {exc}", file=sys.stderr)
+         raise SeatsError(str(exc), code=2)
++    except Exception as exc:  # noqa: BLE001 - the configuration is effective; report the stale roster
++        print(f"agent-seats: ERROR: seats.json was written but the roster was NOT rendered: {exc}", file=sys.stderr)
++        raise SeatsError(str(exc), code=2)
+ 
+ 
+ def seat_from_arg(value):
+@@ -371,6 +456,9 @@
+     return key
+ 
+ 
++SET_OPTIONS = ("host", "model", "effort", "fallback_model", "fallback_effort")
++
++
+ def parse_opts(tokens):
+     opts = {}
+     it = iter(tokens)
+@@ -379,24 +467,46 @@
+             opts["no_fallback"] = True
+             continue
+         if token.startswith("--"):
++            key = token[2:].replace("-", "_")
++            if key not in SET_OPTIONS:
++                raise SeatsError(f"unknown option {token} (see --help)")
+             try:
+-                opts[token[2:].replace("-", "_")] = next(it)
++                value = next(it)
+             except StopIteration:
+                 raise SeatsError(f"{token} requires a value")
++            if not value or value.startswith("--"):
++                raise SeatsError(f"{token} requires a non-empty value")
++            opts[key] = value
+         else:
+             raise SeatsError(f"unexpected argument: {token}")
++    if opts.get("no_fallback") and ("fallback_model" in opts or "fallback_effort" in opts):
++        raise SeatsError("--no-fallback cannot be combined with --fallback-model/--fallback-effort")
+     return opts
+ 
+ 
+ def ask(prompt, default=""):
++    # input(prompt) sends the prompt to stderr on a TTY (CPython stdio readline);
++    # write it ourselves so menu and prompt share stdout and `2>/dev/null` cannot hide it.
++    sys.stdout.write(prompt)
++    sys.stdout.flush()
+     try:
+-        answer = input(prompt)
++        answer = input()
+     except EOFError:
+-        return default
++        out("")
++        raise SeatsError("wizard aborted (end of input); nothing written")
+     answer = answer.strip()
+     return answer if answer else default
+ 
+ 
++def pick_number(answer, options, what):
++    """Enter -> None (keep). A number in range -> index. Anything else -> exit 1."""
++    if not answer:
++        return None
++    if answer.isdigit() and 1 <= int(answer) <= len(options):
++        return int(answer) - 1
++    raise SeatsError(f"invalid {what} choice {answer!r}: enter a number 1-{len(options)} or press Enter; nothing written")
++
++
+ def interactive_wizard(doc):
+     models = doc["catalog"]["models"]
+     codex_models = [m for m, s in models.items() if s.get("host") == "codex"]
+@@ -405,32 +515,37 @@
+         entry = doc["seats"][seat]
+         occ = entry["occupant"]
+         out("")
+-        out(f"{entry['tag']} — {entry['duty']} (phase {entry['phase']})")
++        out(f"{entry['tag']} — {entry.get('duty') or SEAT_META[seat]['duty']} (phase {entry['phase']})")
+         out(f"  suggestion: {occupant_text(occ)}")
+         if seat == "owner":
+             out("  @owner is always the human user.")
+             continue
+         out("  hosts: 1) claude  2) codex  3) gemini  4) cursor  5) windsurf   [Enter = keep suggestion]")
+         choice = ask("  host> ")
++        if choice and choice not in host_map:
++            raise SeatsError(f"invalid host choice {choice!r}: enter a number 1-5 or press Enter; nothing written")
+         if choice in host_map and host_map[choice] != occ.get("host"):
+             new_host = host_map[choice]
+             if new_host == "codex":
+-                seed = clone(DEFAULT_SEATS[seat]) if DEFAULT_SEATS[seat].get("host") == "codex" else {"host": "codex", "model": codex_models[0], "effort": models[codex_models[0]]["default_effort"]}
+-                occ = seed
++                if not codex_models:
++                    raise SeatsError("the catalog has no codex model; add one to seats.json catalog first. Nothing written")
++                default = DEFAULT_SEATS[seat]
++                if default.get("host") == "codex" and default["model"] in models and default.get("fallback_model", default["model"]) in models:
++                    occ = clone(default)
++                else:
++                    occ = {"host": "codex", "model": codex_models[0], "effort": models[codex_models[0]]["default_effort"]}
+             else:
+                 occ = {"host": new_host}
+             entry["occupant"] = occ
+-        elif choice and choice not in host_map:
+-            out("  (unknown choice, keeping suggestion)")
+         if entry["occupant"].get("host") != "codex":
+             continue
+         occ = entry["occupant"]
+         for i, m in enumerate(codex_models, 1):
+             spec = models[m]
+             out(f"    {i}) {m}  efforts: {', '.join(spec['efforts'])}  default: {spec['default_effort']}")
+-        pick = ask(f"  model [{occ.get('model')}]> ")
+-        if pick.isdigit() and 1 <= int(pick) <= len(codex_models):
+-            m = codex_models[int(pick) - 1]
++        pick = pick_number(ask(f"  model [{occ.get('model')}]> "), codex_models, "model")
++        if pick is not None:
++            m = codex_models[pick]
+             if m != occ.get("model"):
+                 occ["model"] = m
+                 occ["effort"] = models[m]["default_effort"]
+@@ -441,7 +556,7 @@
+         if fb == "none":
+             occ.pop("fallback_model", None)
+             occ.pop("fallback_effort", None)
+-        elif fb.isdigit() and 1 <= int(fb) <= len(codex_models):
++        elif pick_number(fb, codex_models, "fallback model") is not None:
+             m = codex_models[int(fb) - 1]
+             if m != occ.get("fallback_model"):
+                 occ["fallback_model"] = m
+@@ -458,7 +573,36 @@
+     return doc
+ 
+ 
++LOCK_FD = None
++
++
++def lock_for_write(wait_seconds=10.0):
++    """One writer at a time: set/wizard/init/reset/render read-modify-write
++    seats.json and AGENTS.md. flock on the config directory itself (no lock
++    file, so ownership never matters); bounded wait instead of blocking behind
++    an interactive wizard; a filesystem without flock only costs a warning."""
++    global LOCK_FD
++    import fcntl
++    import time
++    SEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
++    LOCK_FD = os.open(str(SEATS_FILE.parent), os.O_RDONLY)
++    deadline = time.monotonic() + wait_seconds
++    while True:
++        try:
++            fcntl.flock(LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
++            return
++        except BlockingIOError:
++            if time.monotonic() >= deadline:
++                raise SeatsError(f"another agent-seats write is in progress on {SEATS_FILE.parent} (waited {wait_seconds:.0f}s); retry")
++            time.sleep(0.05)
++        except OSError as exc:  # e.g. ENOLCK/EOPNOTSUPP on a network filesystem
++            warn(f"cannot lock {SEATS_FILE.parent} ({exc}); continuing without a lock")
++            return
++
++
+ def main():
++    if cmd in ("set", "wizard", "init", "reset", "render"):
++        lock_for_write()
+     if cmd == "suggest":
+         doc, source, notes = proposal()
+         print_roster(doc, {"current": "Current seats (seats.json):", "legacy": "Suggested seats (migrated from model-profiles.json):", "defaults": "Suggested seats (bundle defaults):"}[source])
+@@ -475,7 +619,7 @@
+             errors, warnings = validate(doc)
+             report(errors, warnings)
+             if errors:
+-                raise SeatsError("existing seats.json is invalid; init does not overwrite. Run set/reset")
++                raise SeatsError("existing seats.json is invalid; init does not overwrite. Fix it by hand, repair the seat with set, or run reset")
+             out("agent-seats: seats.json present and valid; nothing written")
+             return 0
+         if error != "missing":
+@@ -506,7 +650,8 @@
+     if cmd == "show":
+         doc = load_current()
+         errors, warnings = validate(doc)
+-        print_roster(doc, "Seats:")
++        if not structural_errors(doc):
++            print_roster(doc, "Seats:")
+         report(errors, warnings)
+         return 1 if errors else 0
+     if cmd == "validate":
+@@ -551,6 +696,9 @@
+         if not args:
+             raise SeatsError("model-info requires a model id")
+         doc = load_current()
++        if structural_errors(doc):
++            report(structural_errors(doc), [])
++            raise SeatsError("seats.json is structurally invalid; run validate")
+         spec = doc["catalog"]["models"].get(args[0])
+         if not isinstance(spec, dict):
+             raise SeatsError(f"model {args[0]} is not in catalog.models; add it with scripts/agent-seats.sh (edit seats.json catalog) before launching")
+@@ -564,6 +712,9 @@
+         seat = seat_from_arg(args[0])
+         model = args[1]
+         doc = load_current()
++        if structural_errors(doc):
++            report(structural_errors(doc), [])
++            raise SeatsError("seats.json is structurally invalid; run validate")
+         if seat != "build":
+             out("0")
+             return 0
+@@ -582,14 +733,20 @@
+         if not args:
+             raise SeatsError("set requires a seat")
+         seat = seat_from_arg(args[0])
+-        doc, source, notes = proposal()
++        opts = parse_opts(args[1:])
++        doc, source, notes = proposal(repairing=True)
+         for n in notes:
+             note(n)
+-        opts = parse_opts(args[1:])
+         prev = doc["seats"][seat]["occupant"]
+         host = opts.get("host") or prev.get("host")
+         occ = {"host": host}
++        if host not in LAUNCHABLE:
++            inapplicable = [k for k in ("model", "effort", "fallback_model", "fallback_effort", "no_fallback") if k in opts]
++            if inapplicable:
++                raise SeatsError(f"host {host} is host-controlled; {', '.join('--' + k.replace('_', '-') for k in inapplicable)} do not apply; nothing written")
+         if host in LAUNCHABLE:
++            if "fallback_effort" in opts and not (opts.get("fallback_model") or prev.get("fallback_model")):
++                raise SeatsError("--fallback-effort requires a fallback model; nothing written")
+             models = doc["catalog"]["models"]
+             occ["model"] = opts.get("model", prev.get("model"))
+             if "effort" in opts:
+@@ -623,12 +780,15 @@
+ except SeatsError as exc:
+     print(f"agent-seats: ERROR: {exc}", file=sys.stderr)
+     sys.exit(exc.code)
++except KeyboardInterrupt:
++    print("\nagent-seats: ERROR: interrupted", file=sys.stderr)
++    sys.exit(130)
+ PY
+ 
+ cmd="${1:-}"
+ case "$cmd" in
+   show|validate|suggest|wizard|set|init|reset|render|roster-block|resolve|model-info|conflict)
+-    command -v python3 >/dev/null 2>&1 || fail "python3 is required"
++    python3 -c 'import sys' >/dev/null 2>&1 || fail "python3 is required (a working interpreter, not the macOS command-line-tools stub)"
+     shift
+     SEATS_FILE="$SEATS_FILE" LEGACY_PROFILES="$LEGACY_PROFILES" AGENTS_MD="$AGENTS_MD" \
+       python3 -c "$SEATS_PY" "$cmd" "$@"

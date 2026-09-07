@@ -1,0 +1,6 @@
+agent-seats: ERROR: seat gate: effort 'low' is not supported by custom-planner (supported: medium, high, xhigh)
+agent-seats: ERROR: seat gate: fallback_effort 'low' is not supported by gpt-5.6-terra (supported: medium, high, xhigh, max)
+agent-seats: ERROR: seat build: effort 'low' is not supported by gpt-5.6-luna (supported: medium, high, xhigh, max)
+agent-seats: ERROR: seat build: fallback_effort 'low' is not supported by gpt-5.6-terra (supported: medium, high, xhigh, max)
+agent-seats: ERROR: seat verify: effort 'low' is not supported by gpt-5.6-sol (supported: medium, high, xhigh, max)
+agent-seats: ERROR: seat verify: fallback_effort 'low' is not supported by gpt-5.6-terra (supported: medium, high, xhigh, max)

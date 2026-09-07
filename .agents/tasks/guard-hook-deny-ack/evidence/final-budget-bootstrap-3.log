@@ -1,0 +1,8 @@
+Target: /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.zW7B5oFS2u
+Project: tmp.zW7B5oFS2u
+Detected stacks: android_kotlin wear_os
+Detected modules: :app :feature:app :wear :wear-api
+Generated multi-agent files.
+Backups for overwritten or appended existing files use suffix: .bak.20260906-154443
+Next: review docs/agent-configs/project-agent-context.md and adjust project-specific rules.
+First 10 Minutes: run scripts/agent-onboarding.sh next, then fill the onboarding contract before substantive work.

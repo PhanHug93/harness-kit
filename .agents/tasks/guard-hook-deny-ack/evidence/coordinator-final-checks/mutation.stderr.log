@@ -1,0 +1,2 @@
+agent-guard: DENIED: protected path /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-final-checks-3noiq87h/CLAUDE.md
+Run: scripts/agent-guard.sh pre-edit --ack "<reason>" -- /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-final-checks-3noiq87h/CLAUDE.md

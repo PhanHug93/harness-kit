@@ -1,0 +1,24 @@
+{
+  "reject-nonhuman-owner": {
+    "rc": 1
+  },
+  "owner_rejected_without_mutation": true,
+  "accept-gemini-gate": {
+    "rc": 0
+  },
+  "gate_host": "gemini",
+  "validate-delimiter-model": {
+    "rc": 0
+  },
+  "resolve-delimiter-model": {
+    "rc": 0
+  },
+  "delimiter_model_tsv_columns": 10,
+  "render-orphan-1": {
+    "rc": 0
+  },
+  "render-orphan-2": {
+    "rc": 0
+  },
+  "user_overlay_preserved_after_two_renders": false
+}

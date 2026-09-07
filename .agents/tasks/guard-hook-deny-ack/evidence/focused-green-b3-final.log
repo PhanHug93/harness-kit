@@ -1,0 +1,3 @@
+bootstrap-test: --- focused guard and Claude hook regression
+guard-hook-focus: ok (/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.8oZbjlbVXn/guard-hook-focus)
+focused-b3-final-command-rc=0

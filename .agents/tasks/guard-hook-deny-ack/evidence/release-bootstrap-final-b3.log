@@ -1,0 +1,11 @@
+bootstrap-test: --- template/runtime mirror drift checks
+agent-hook: codex preflight ok (mode=reviewing flow=full_flow)
+bootstrap-test: --- agent guard status recovery and stats
+bootstrap-test: --- journal-independent pre-final
+bootstrap-test: --- pre-final verification runner and telemetry
+bootstrap-test: --- stack drift and read-only guard behavior
+bootstrap-test: --- overlay, cleanup, stale-version, and candidate lifecycle
+agent-hook: codex preflight ok (mode=planning flow=standard)
+bootstrap-test: --- model-profile candidate migration
+bootstrap-test: ok (/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.uAhJVkKu7i)
+command-rc=0

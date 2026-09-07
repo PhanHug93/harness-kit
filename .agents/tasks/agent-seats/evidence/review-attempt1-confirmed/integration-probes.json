@@ -1,0 +1,8 @@
+{
+  "legacy_low_current_launcher_rc": 0,
+  "candidate_helper_rc": 0,
+  "missing_seats_written_live": true,
+  "candidate_count": 0,
+  "legacy_planning_model": "custom-planner",
+  "written_gate_model": "gpt-6-astra"
+}

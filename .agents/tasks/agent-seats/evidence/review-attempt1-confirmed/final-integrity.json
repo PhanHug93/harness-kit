@@ -1,0 +1,17 @@
+{
+  "branch": "feature/simplify-task-relations",
+  "head": "45585fad41724334cd9e93d8c489f8946d9ec8c6",
+  "source_hashes_unchanged": {
+    ".agents/tasks/agent-seats/task.md": true,
+    ".agents/tasks/agent-seats/build-handoff.md": true,
+    ".agents/tasks/agent-seats/evidence/reference-agent-seats.sh": true,
+    "docs/superpowers/specs/2026-09-06-agent-seats-design.md": true,
+    "agent-bootstrap/lib/writers-docs.sh": true,
+    "agent-bootstrap/lib/writers-runtime.sh": true,
+    "agent-bootstrap/lib/core.sh": true
+  },
+  "task_review_index_append_only": true,
+  "packet_consistent": true,
+  "index_lock_exists": false,
+  "git_status": "## feature/simplify-task-relations\n M CHANGELOG.md\n M agent-bootstrap/agent-guard.sh\n M agent-bootstrap/agent-hook.sh\n M agent-bootstrap/lib/writers-docs.sh\n M agent-bootstrap/lib/writers-runtime.sh\n M scripts/test-bootstrap-multi-agent-project.sh\n?? .agents/\n?? docs/superpowers/specs/2026-09-06-agent-seats-design.md"
+}

@@ -1,0 +1,310 @@
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1381:
+need_not_contains "$cowork_folder_instructions" 'analysis` · Claude -> `technical_review' "Cowork Folder Instructions owner table duplication"
+                                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1390:
+need_not_contains "$cowork_claude_instructions" 'analysis` · Claude -> `technical_review' "CLAUDE owner table duplication"
+                                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1894:
+need_contains "$handoff_contract" 'Missing `source_task` is equivalent to `null`' "handoff missing source task default"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1895:
+need_contains "$handoff_contract" 'Missing `blocks` is equivalent to `[]`' "handoff missing blocks default"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1897:
+need_contains "$handoff_contract" 'Existing `claude-codex-collaboration/v1` packets remain valid' "handoff existing protocol compatibility"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1902:
+need_contains "$handoff_contract" 'Record the split rationale in `task.md`. Review retries remain in the same packet.' "handoff split rationale"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1903:
+need_contains "$handoff_contract" 'For one exact `source_task` value, at most one active child may block the same target.' "handoff duplicate active child rule"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1907:
+need_contains "$handoff_contract" 'No guard, hook, or runtime reads `source_task` or `blocks` in this phase.' "handoff relations runtime boundary"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1916:
+need_contains "$task_journal" 'manually copy the Summary, Evidence, and Effect on source from `task.md`' "task journal closure outcome copy guidance"
+                              ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1984:
+need_contains "$handoff_contract" '`status`: `open | awaiting_user | closed`' "handoff status enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1985:
+need_contains "$handoff_contract" '`phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`' "handoff phase enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1986:
+need_contains "$handoff_contract" '`owner`: `claude | codex | user`' "handoff owner enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1987:
+need_contains "$handoff_contract" '`spec_sufficiency.verdict`: `not_reviewed | sufficient | partially_sufficient | insufficient`' "handoff sufficiency verdict enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1988:
+need_contains "$handoff_contract" '`spec_sufficiency.sufficient_for_coding_model`: `not_reviewed | yes | no`' "handoff coding gate enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1989:
+need_contains "$handoff_contract" '`verification.runner`: `none | claude | codex`' "handoff verification runner enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1990:
+need_contains "$handoff_contract" '`verification.status`: `not_run | pass | fail | blocked`' "handoff verification status enum"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 1998:
+need_contains "$handoff_contract" 'Only `state.json` and `task.md` are created initially' "handoff lazy artifact creation"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2002:
+need_contains "$handoff_contract" 'stale `ACTIVE`' "handoff stale ACTIVE repair rule"
+                                  ^--------------^ SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2011:
+need_contains "$handoff_contract" 'The first final review adds the `## Final technical review` heading.' "handoff first final-review heading"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2012:
+need_contains "$handoff_contract" 'On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.' "handoff resumed specification-review placement"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2013:
+need_contains "$handoff_contract" 'When Sol returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2014:
+need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2015:
+need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
+                                  ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2023:
+need_contains "$mode_contracts" '- `analysis` · Claude -> `technical_review`' "analysis transition"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2024:
+need_contains "$mode_contracts" '- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`' "technical review transitions"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2025:
+need_contains "$mode_contracts" '- `implementation` · Codex Luna -> `verification` | `resolution`' "implementation transitions"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2026:
+need_contains "$mode_contracts" '- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`' "verification transitions"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2027:
+need_contains "$mode_contracts" '- `cross_review` · Claude -> `implementation` | `resolution`' "cross-review transitions"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2028:
+need_contains "$mode_contracts" '- `resolution` · User -> `closed` | user-selected prior phase' "resolution transitions"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2030:
+need_contains "$mode_contracts" 'only with `resolution` · User' "mode contracts awaiting-user owner restriction"
+                                ^-----------------------------^ SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2031:
+need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2033:
+need_contains "$mode_contracts" 'Luna may downgrade `yes`' "mode contracts Luna downgrade"
+                                ^------------------------^ SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2034:
+need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
+                                ^------------------^ SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2049:
+need_contains "$mode_contracts" 'Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.' "mode contracts Claude provenance declarations"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2098:
+    export PATH="$TASK3_FAKEBIN:$PATH"
+           ^--^ SC2030 (info): Modification of PATH is local (to subshell caused by (..) group).
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2099:
+    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
+           ^----------------^ SC2030 (info): Modification of CODEX_CAPTURE_FILE is local (to subshell caused by (..) group).
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2101:
+      export "$1"
+             ^--^ SC2163 (warning): This does not export '1'. Remove $/${} for that, or use ${var?} to quiet.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2127:
+need_contains "$mode_contracts" 'The `Severity trigger` finding obligation is defined by the reviewing launcher.' "mode contract reviewing obligation pointer"
+                                ^-- SC2016 (info): Expressions don't expand in single quotes, use double quotes for that.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2184:
+    export PATH="$TASK3_FAKEBIN:$PATH"
+           ^--^ SC2030 (info): Modification of PATH is local (to subshell caused by (..) group).
+           ^--^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+                                ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2185:
+    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
+           ^----------------^ SC2030 (info): Modification of CODEX_CAPTURE_FILE is local (to subshell caused by (..) group).
+           ^----------------^ SC2031 (info): CODEX_CAPTURE_FILE was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2187:
+      export CODEX_USE_FALLBACK=1
+             ^----------------^ SC2030 (info): Modification of CODEX_USE_FALLBACK is local (to subshell caused by (..) group).
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2221:
+    export PATH="$TASK3_FAKEBIN:$PATH"
+           ^--^ SC2030 (info): Modification of PATH is local (to subshell caused by (..) group).
+           ^--^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+                                ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2222:
+    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
+           ^----------------^ SC2031 (info): CODEX_CAPTURE_FILE was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2224:
+      export CODEX_USE_FALLBACK=1
+             ^----------------^ SC2031 (info): CODEX_USE_FALLBACK was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2237:
+  if ! PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" help >"$TASK3_OUTPUT" 2>&1; then
+                            ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2247:
+if PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" cross_review >"$TASK3_OUTPUT" 2>&1; then
+                        ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2257:
+  if PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" CODEX_HARNESS_SESSION=1 "$TASK3_CODEX_MODE" "$nested_cmd" >"$TASK3_OUTPUT" 2>&1; then
+                          ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2269:
+  if ! PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" CODEX_HARNESS_SESSION=1 "$TASK3_CODEX_MODE" "$nested_diagnostic_cmd" >"$TASK3_OUTPUT" 2>&1; then
+                            ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2637:
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.err
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2655:
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR"/out/bootstrap-prefinal-verify-full.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-full.err
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2672:
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh preflight >/dev/null
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2673:
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-external-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-external-state.err
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2695:
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.err; then
+                           ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2699:
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.err; then
+                           ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2736:
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.err); then
+                                                 ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2762:
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.err || true
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2773:
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" AGENT_GUARD_PREPUSH_SCOPE=fast scripts/githooks/pre-push >"$TMP_DIR"/out/bootstrap-prepush-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prepush-verify-fail.err); then
+                                                 ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2780:
+  printf '%s' '{"stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
+                                                                 ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 2841:
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+
+In scripts/test-bootstrap-multi-agent-project.sh line 3014:
+  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-prefinal-noverify.out 2>"$TMP_DIR"/out/bootstrap-prefinal-noverify.err
+                      ^---^ SC2031 (info): PATH was modified in a subshell. That change might be lost.
+
+For more information:
+  https://www.shellcheck.net/wiki/SC2163 -- This does not export '1'. Remove ...
+  https://www.shellcheck.net/wiki/SC2016 -- Expressions don't expand in singl...
+  https://www.shellcheck.net/wiki/SC2030 -- Modification of CODEX_CAPTURE_FIL...
+command-rc=1

@@ -1,0 +1,26 @@
+{
+  "command": [
+    "shellcheck",
+    "--external-sources",
+    "--exclude=SC1090,SC1091,SC2034,SC2154",
+    "agent-bootstrap/agent-guard.sh",
+    "agent-bootstrap/agent-hook.sh",
+    "agent-bootstrap/lib/writers-runtime.sh",
+    "agent-bootstrap/lib/writers-docs.sh",
+    "scripts/test-bootstrap-multi-agent-project.sh"
+  ],
+  "actual_rc": 1,
+  "baseline_diagnostics": {
+    "SC2016": 35,
+    "SC2030": 6,
+    "SC2031": 23,
+    "SC2163": 1
+  },
+  "final_diagnostics": {
+    "SC2016": 35,
+    "SC2030": 6,
+    "SC2031": 23,
+    "SC2163": 1
+  },
+  "identical_except_line_numbers": true
+}

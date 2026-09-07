@@ -1,0 +1,9 @@
+doctor-rc=0
+verifier-rc=0
+snapshot-rc=0
+smoke-deny-rc=2
+smoke-cli-ack-rc=0
+smoke-retry-rc=0
+smoke-wrong-path-rc=2
+smoke-unprotected-rc=0
+doctor-target=/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.k6QVYOLcTE

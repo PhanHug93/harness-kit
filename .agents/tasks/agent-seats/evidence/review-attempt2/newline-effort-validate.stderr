@@ -1,0 +1,2 @@
+agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+agent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding

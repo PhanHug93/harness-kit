@@ -1,0 +1,133 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-edge-pd9mp8j4",
+  "uid": 501,
+  "edge-init-defaults": {
+    "rc": 0,
+    "args": [
+      "init"
+    ],
+    "stdout_lines": 7
+  },
+  "invalid-host-number": {
+    "rc": 0,
+    "prompts": 17,
+    "config_unchanged": false
+  },
+  "invalid-model-number": {
+    "rc": 0,
+    "prompts": 17,
+    "config_unchanged": false
+  },
+  "invalid-fallback-number": {
+    "rc": 0,
+    "prompts": 17,
+    "config_unchanged": false
+  },
+  "newline-model-validate": {
+    "rc": 0,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 1
+  },
+  "newline-model-resolve": {
+    "rc": 0,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 9
+  },
+  "newline-effort-validate": {
+    "rc": 0,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 1
+  },
+  "newline-effort-resolve": {
+    "rc": 0,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 9
+  },
+  "noncodex-newline-validate": {
+    "rc": 0,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 1
+  },
+  "noncodex-newline-resolve": {
+    "rc": 0,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 9
+  },
+  "orphan-fallback-effort-validate": {
+    "rc": 0,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 1
+  },
+  "orphan-fallback-effort-resolve": {
+    "rc": 0,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 9
+  },
+  "render-before-permission-probe": {
+    "rc": 0,
+    "args": [
+      "render"
+    ],
+    "stdout_lines": 1
+  },
+  "readonly-roster-set": {
+    "rc": 1,
+    "args": [
+      "set",
+      "build",
+      "--effort",
+      "high"
+    ],
+    "stdout_lines": 7,
+    "config_changed": true,
+    "agents_unchanged": true
+  },
+  "incomplete-legacy-init": {
+    "rc": 0,
+    "args": [
+      "init"
+    ],
+    "stdout_lines": 7,
+    "config_created": true
+  },
+  "roster-before-init": {
+    "rc": 1
+  },
+  "end-of-fresh-generation-init": {
+    "rc": 0,
+    "generated_target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-generation-2qmumb41",
+    "gate": {
+      "host": "codex",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "fallback_model": "gpt-5.6-terra",
+      "fallback_effort": "xhigh"
+    },
+    "legacy_created_by_generator": true,
+    "note": "Probe of the proposed ordering using current generator and unchanged v2 reference, not an integrated seats implementation."
+  },
+  "incomplete-legacy-old-status": {
+    "rc": 1,
+    "missing_field_rejected": true
+  }
+}

@@ -1,0 +1,10 @@
+Target: /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.Mid4CX6PNe
+Project: tmp.Mid4CX6PNe
+Detected stacks: generic
+Detected modules: No Gradle modules detected
+Generated multi-agent files.
+Backups for overwritten or appended existing files use suffix: .bak.20260906-160236
+Next: review docs/agent-configs/project-agent-context.md and adjust project-specific rules.
+First 10 Minutes: run scripts/agent-onboarding.sh next, then fill the onboarding contract before substantive work.
+snapshot-target=/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.Mid4CX6PNe
+snapshot-cmp-rc=0

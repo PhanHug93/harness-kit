@@ -1,0 +1,264 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm",
+  "source_sha256": {
+    ".agents/tasks/agent-seats/task.md": "832c46d851b23613e8bc5111db9dd32b27afcac127741498d0c0db62a01ddd8d",
+    ".agents/tasks/agent-seats/build-handoff.md": "76e1cfb8d7691f110c5cc17d6c421bcfcc42e8626749d5b51eccdda00454133c",
+    ".agents/tasks/agent-seats/evidence/reference-agent-seats.sh": "16d5166c83a5b2989d70e17b9a5cb62515bc729f95f04a3c7e4a7d0e181f9c4b",
+    "docs/superpowers/specs/2026-09-06-agent-seats-design.md": "e563950c09ccb66431f9ef6b1ea379a1b313a4ca75e117613aab5ea41c3e34d5",
+    "agent-bootstrap/lib/writers-docs.sh": "8a36c497f220ca70fe803836df149307738956b6c9bf9e901c5086b9edd7e5d6",
+    "agent-bootstrap/lib/writers-runtime.sh": "90181d0ff0bf896306719c9ec30431270c36b9257772d39ae45bb2d43bcbd616",
+    "agent-bootstrap/lib/core.sh": "2e3d61d260980212abf6344643404fd2ffa2eeda0155a6433331fe179df1078d"
+  },
+  "source_unchanged": true,
+  "results": {
+    "git-init": {
+      "rc": 0,
+      "args": [
+        "git",
+        "init",
+        "-q"
+      ]
+    },
+    "bootstrap": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/Users/admin/.config/superpowers/worktrees/agent-bootstrap/simplify-task-relations/scripts/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm",
+        "--workflow",
+        "full"
+      ]
+    },
+    "bash-version": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "--version"
+      ]
+    },
+    "shellcheck": {
+      "rc": 0,
+      "args": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh"
+      ]
+    },
+    "suggest-fresh": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "suggest"
+      ]
+    },
+    "wizard-yes": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "wizard",
+        "--yes"
+      ]
+    },
+    "render-1": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "render"
+      ]
+    },
+    "render-2": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "render"
+      ]
+    },
+    "render_idempotent": true,
+    "set-invalid-effort": {
+      "rc": 1,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "set",
+        "build",
+        "--host",
+        "codex",
+        "--effort",
+        "not-supported"
+      ]
+    },
+    "invalid_set_preserves_config": true,
+    "resolve-planning": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "resolve",
+        "planning"
+      ]
+    },
+    "validate": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "validate"
+      ]
+    },
+    "wizard_pty": {
+      "outer_tty": true,
+      "finished_without_input": true,
+      "host_prompt_seen": false,
+      "rc": 0
+    },
+    "validate-no-fallback": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "validate"
+      ]
+    },
+    "resolve-no-fallback": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "resolve",
+        "build"
+      ]
+    },
+    "resolve_no_fallback_fields": [
+      "build",
+      "@build",
+      "implementation",
+      "codex",
+      "gpt-5.6-sol",
+      "xhigh",
+      "",
+      "",
+      "1"
+    ],
+    "handoff-tsv-reader": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "-c",
+        "row=\"$(/bin/bash \"$1\" resolve build)\"; IFS=$'\t' read -r -a fields <<< \"$row\"; printf \"field_count=%s\\n\" \"${#fields[@]}\"; printf \"<%s>\\n\" \"${fields[@]}\"",
+        "review-read",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh"
+      ]
+    },
+    "resolve-pre-override": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "resolve",
+        "build"
+      ]
+    },
+    "override_conflict_gap": {
+      "configured_build": "gpt-5.6-luna",
+      "gate_model": "gpt-5.6-sol",
+      "configured_conflict": "0",
+      "override_to_gate_model_would_match": true
+    },
+    "suggest-custom-legacy": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "suggest"
+      ]
+    },
+    "wizard-custom-legacy": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "wizard",
+        "--yes"
+      ]
+    },
+    "migrated_gate": {
+      "host": "codex",
+      "model": "custom-planner",
+      "effort": "high",
+      "fallback_model": "gpt-5.6-terra",
+      "fallback_effort": "high"
+    },
+    "reset-with-legacy": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "reset"
+      ]
+    },
+    "reset_gate": {
+      "host": "codex",
+      "model": "custom-planner",
+      "effort": "high",
+      "fallback_model": "gpt-5.6-terra",
+      "fallback_effort": "high"
+    },
+    "wizard-valid-legacy-low": {
+      "rc": 1,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "wizard",
+        "--yes"
+      ]
+    },
+    "reset-invalid-migration": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "reset"
+      ]
+    },
+    "validate-after-reset": {
+      "rc": 1,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "validate"
+      ]
+    },
+    "reset-without-legacy": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "reset"
+      ]
+    },
+    "wizard-valid-seats-broken-legacy": {
+      "rc": 1,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "wizard",
+        "--yes"
+      ]
+    },
+    "render-crlf": {
+      "rc": 0,
+      "args": [
+        "/bin/bash",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-review-b__yyadm/scripts/agent-seats.sh",
+        "render"
+      ]
+    },
+    "render_preserves_original_prefix_bytes": false
+  }
+}

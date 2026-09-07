@@ -1,0 +1,18 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-claude-final-4kj4_f33",
+  "source_sha256": {
+    "agent-bootstrap/agent-guard.sh": "11d3f7480b2ed7a9a5a23ccb727c2d69e25b07f19847ac49f10ecb5a77c6d835",
+    "agent-bootstrap/agent-hook.sh": "0644e13098d19161250fc2f2620ad3311bc1eea456c8c8c1e0af8ef065e66be0",
+    "agent-bootstrap/lib/writers-runtime.sh": "90181d0ff0bf896306719c9ec30431270c36b9257772d39ae45bb2d43bcbd616",
+    "agent-bootstrap/lib/writers-docs.sh": "8a36c497f220ca70fe803836df149307738956b6c9bf9e901c5086b9edd7e5d6"
+  },
+  "host_entrypoints_sha256": {
+    "AGENTS.md": "850ac08d4981c483f0ac30bf16d4c136de8e9142be1b736c80b8f54c37501294",
+    "CLAUDE.md": "94d76d6c424cc3985c58504ad22284b62b00b62a3705f0b1d3c836fe07426788",
+    ".claude/settings.json": "5d38a934caaebefee457ff3a6d92b6bdaf3da46e916675d4feb3a95ac14a4e22"
+  },
+  "host_version": "2.1.235 (Claude Code)",
+  "branch": "feature/simplify-task-relations",
+  "head": "45585fad41724334cd9e93d8c489f8946d9ec8c6",
+  "source_unchanged_during_host_run": true
+}

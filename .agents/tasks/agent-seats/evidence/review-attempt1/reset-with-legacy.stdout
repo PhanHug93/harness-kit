@@ -1,0 +1,7 @@
+seats.json reset to bundle defaults:
+- `@spec` · analysis · claude (host-controlled model)
+- `@gate` · technical_review · codex custom-planner @ high (fallback gpt-5.6-terra @ high)
+- `@build` · implementation · codex gpt-5.6-luna @ high (fallback gpt-5.6-terra @ high)
+- `@verify` · verification · codex gpt-5.6-sol @ high (fallback gpt-5.6-terra @ high)
+- `@audit` · cross_review · claude (host-controlled model)
+- `@owner` · resolution · human (user)

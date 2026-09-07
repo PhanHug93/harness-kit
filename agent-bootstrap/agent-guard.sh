@@ -54,6 +54,7 @@ SESSION_EVENTS="$STATE_DIR/session-events.jsonl"
 EMIT_CLOSEOUT=false
 GATE_STATUS=fail
 RUN_VERIFY_FLAG=false
+EXIT_PRE_EDIT_DENIED=3
 
 REQUIRED_CONTEXT=()
 RECOMMENDED_CONTEXT=()
@@ -75,6 +76,24 @@ fail() {
 
 warn() {
   printf 'agent-guard: warn: %s\n' "$*" >&2
+}
+
+deny() {
+  local canonical_path="$1"
+  local quoted_path
+  quoted_path="$(printf '%q' "$canonical_path")"
+  printf 'agent-guard: DENIED: protected path %s\n' "$quoted_path" >&2
+  printf 'Run: scripts/agent-guard.sh pre-edit --ack "<reason>" -- %s\n' "$quoted_path" >&2
+  exit "$EXIT_PRE_EDIT_DENIED"
+}
+
+tsv_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
 }
 
 json_escape() {
@@ -205,7 +224,7 @@ try:
 except ValueError:
     print("outside project root", file=sys.stderr)
     sys.exit(2)
-print(resolved)
+sys.stdout.write(str(resolved))
 PY
     return $?
   fi
@@ -236,8 +255,9 @@ PY
 
 canonical_project_relpath() {
   local raw_path="$1"
-  local absolute
-  absolute="$(canonical_project_abspath "$raw_path")" || fail "path outside project root: $raw_path"
+  local absolute=""
+  IFS= read -r -d '' absolute < <(canonical_project_abspath "$raw_path" && printf '\0') ||
+    fail "path outside project root: $raw_path"
   if [[ "$absolute" == "$PROJECT_ROOT" ]]; then
     printf '.'
   elif [[ "$absolute" == "$PROJECT_ROOT/"* ]]; then
@@ -542,17 +562,85 @@ append_ack_log() {
   local pattern="$2"
   local reason="$3"
   local ack="$4"
+  local escaped_pattern escaped_reason escaped_ack
   if [[ "$STATE_WRITABLE" != "true" ]]; then
     warn "state dir not writable; skipping ack log"
     return 0
   fi
+  if [[ "$relpath" == *$'\r'* || "$relpath" == *$'\n'* || "$relpath" == *$'\t'* ]]; then
+    warn "ack path contains a tab/newline; acknowledgement will not be reusable"
+    return 0
+  fi
   mkdir -p "$(dirname "$ACK_LOG")"
+  escaped_pattern="$(tsv_escape "$pattern")"
+  escaped_reason="$(tsv_escape "$reason")"
+  escaped_ack="$(tsv_escape "$ack")"
   printf '%s\tpath=%s\tpattern=%s\treason=%s\tack=%s\n' \
     "$(utc_now)" \
     "$relpath" \
-    "$pattern" \
-    "$reason" \
-    "$ack" >> "$ACK_LOG"
+    "$escaped_pattern" \
+    "$escaped_reason" \
+    "$escaped_ack" >> "$ACK_LOG"
+}
+
+ack_log_usable() {
+  local relpath="$1"
+  local ttl="${AGENT_GUARD_ACK_TTL_SECONDS:-3600}"
+  [[ "$ttl" =~ ^-?[0-9]+$ ]] ||
+    fail "invalid AGENT_GUARD_ACK_TTL_SECONDS: $ttl"
+  [[ -r "$ACK_LOG" ]] || return 1
+  python3 - "$ACK_LOG" "$relpath" "$ttl" <<'PY'
+import calendar
+import datetime
+import pathlib
+import re
+import sys
+import time
+
+log_path = pathlib.Path(sys.argv[1])
+target_path = sys.argv[2]
+ttl = int(sys.argv[3], 10)
+timestamp_pattern = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+latest = None
+
+if ttl <= 0:
+    sys.exit(1)
+
+try:
+    with log_path.open("r", encoding="utf-8", newline="") as handle:
+        for raw_line in handle:
+            line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
+            if "\r" in line:
+                continue
+            fields = line.split("\t")
+            if len(fields) != 5:
+                continue
+            if not fields[1].startswith("path="):
+                continue
+            if not fields[2].startswith("pattern="):
+                continue
+            if not fields[3].startswith("reason="):
+                continue
+            if not fields[4].startswith("ack=") or fields[4][4:] == "":
+                continue
+            if not timestamp_pattern.fullmatch(fields[0]):
+                continue
+            try:
+                parsed = datetime.datetime.strptime(fields[0], "%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                continue
+            if fields[1][len("path="):] != target_path:
+                continue
+            epoch = calendar.timegm(parsed.timetuple())
+            if latest is None or epoch > latest:
+                latest = epoch
+except (OSError, UnicodeError):
+    sys.exit(1)
+
+if latest is not None and int(time.time()) - latest <= ttl:
+    sys.exit(0)
+sys.exit(1)
+PY
 }
 
 required_context_json() {
@@ -754,6 +842,7 @@ check_guard() {
 
 pre_edit() {
   local strict=true
+  local use_ack_log=false
   local ack=""
   local raw_path=""
   while [[ $# -gt 0 ]]; do
@@ -770,6 +859,10 @@ pre_edit() {
         ack="${2:-}"
         [[ -n "$ack" ]] || fail "--ack requires text"
         shift 2
+        ;;
+      --use-ack-log)
+        use_ack_log=true
+        shift
         ;;
       --)
         shift
@@ -791,8 +884,11 @@ pre_edit() {
   [[ -n "$raw_path" ]] || fail "pre-edit requires a path"
   load_policy
   ensure_required_context
-  local relpath match pattern reason
-  relpath="$(canonical_project_relpath "$raw_path")"
+  local relpath="" canonical_path match pattern reason ack_source
+  IFS= read -r -d '' relpath < <(canonical_project_relpath "$raw_path" && printf '\0') ||
+    fail "path outside project root: $raw_path"
+  canonical_path="$PROJECT_ROOT/$relpath"
+  [[ "$relpath" == "." ]] && canonical_path="$PROJECT_ROOT"
   if match="$(protected_reason_for_path "$relpath")"; then
     pattern="${match%%$'\t'*}"
     if [[ "$match" == *$'\t'* ]]; then
@@ -800,16 +896,27 @@ pre_edit() {
     else
       reason=""
     fi
-    printf 'path=%s protected_path=true pattern=%s reason=%s\n' \
-      "$(json_escape "$relpath")" \
-      "$(json_escape "$pattern")" \
-      "$(json_escape "$reason")"
-    if [[ "$strict" == "true" && -z "$ack" ]]; then
-      fail "protected path requires ack; rerun with: scripts/agent-guard.sh pre-edit --ack <reason> $relpath"
-    fi
+    ack_source=none
     if [[ "$strict" == "true" && -n "$ack" ]]; then
       append_ack_log "$relpath" "$pattern" "$reason" "$ack"
+      ack_source=ack
+    elif [[ "$strict" == "true" && "$use_ack_log" == "true" ]]; then
+      if [[ "$relpath" != *$'\r'* && "$relpath" != *$'\n'* && "$relpath" != *$'\t'* ]] &&
+        ack_log_usable "$relpath"; then
+        ack_source=log
+      elif [[ "$STATE_WRITABLE" != "true" ]]; then
+        warn "ack log unavailable; protected edit allowed advisory-only"
+        ack_source=advisory
+      fi
+    elif [[ "$strict" != "true" ]]; then
+      ack_source=advisory
     fi
+    printf 'path=%s protected_path=true pattern=%s reason=%s ack_source=%s\n' \
+      "$(json_escape "$relpath")" \
+      "$(json_escape "$pattern")" \
+      "$(json_escape "$reason")" \
+      "$ack_source"
+    [[ "$ack_source" != "none" ]] || deny "$canonical_path"
   else
     printf 'path=%s protected_path=false\n' "$(json_escape "$relpath")"
   fi

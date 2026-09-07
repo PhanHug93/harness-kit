@@ -31,11 +31,18 @@ note() {
   printf 'bootstrap-test: --- %s\n' "$*" >&2
 }
 
+normalize_whitespace() {
+  LC_ALL=C tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'
+}
+
 need_contains() {
   local haystack="$1"
   local needle="$2"
   local label="$3"
-  if ! grep -Fq -- "$needle" <<<"$haystack"; then
+  local normalized_haystack normalized_needle
+  normalized_haystack="$(printf '%s' "$haystack" | normalize_whitespace)"
+  normalized_needle="$(printf '%s' "$needle" | normalize_whitespace)"
+  if ! grep -Fq -- "$normalized_needle" <<<"$normalized_haystack"; then
     fail "$label missing '$needle' in: $haystack"
   fi
 }
@@ -55,6 +62,340 @@ need_same_file() {
   local label="$3"
   cmp -s "$expected" "$actual" || fail "$label drifted from ${expected#"$ROOT_DIR"/}"
 }
+
+focus_assert_rc() {
+  local rc_file="$1"
+  local expected="$2"
+  local label="$3"
+  local actual
+  actual="$(cat "$rc_file")"
+  [[ "$actual" == "$expected" ]] ||
+    fail "$label expected rc=$expected actual rc=$actual"
+}
+
+run_guard_hook_focus() {
+  note "focused guard and Claude hook regression"
+  local focus_dir="$FIXTURE_DIR/guard-hook-focus"
+  local focus_input="$TMP_DIR/out/focus-hook-input.json"
+  local focus_fake_rtk_log="$TMP_DIR/out/focus-fake-rtk.log"
+  local focus_marker="$TMP_DIR/out/focus-shell-marker"
+  local protected_path="$focus_dir/docs/agent-configs/quoted \"path\" \$(touch $focus_marker).md"
+  local other_path="$focus_dir/docs/agent-configs/other.md"
+  local delimiter_lf_path="${focus_dir}/docs/agent-configs/delimiter-embedded-lf.md"$'\n'"segment.md"
+  local delimiter_trailing_lf_path="${focus_dir}/docs/agent-configs/delimiter-trailing-lf.md"$'\n'
+  local delimiter_tab_path="${focus_dir}/docs/agent-configs/delimiter-tab.md"$'\t'
+  local delimiter_cr_path="${focus_dir}/docs/agent-configs/delimiter-cr.md"$'\r'
+  local protected_rel="docs/agent-configs/quoted \"path\" \$(touch $focus_marker).md"
+  local other_rel="docs/agent-configs/other.md"
+  local canonical_protected_path canonical_protected_quoted
+  local output error rc_file ack_line ack_command stderr_lines
+  local log_before log_after line_before line_after ack_rc delimiter_log_before delimiter_log_after
+  local injection_reason saved_file locked_parent locked_tmp
+
+  mkdir -p "$focus_dir"
+  bash "$BOOTSTRAP" --target "$focus_dir" --workflow full >"$TMP_DIR/out/focus-bootstrap.out"
+  mkdir -p "$(dirname "$protected_path")"
+  : > "$protected_path"
+  : > "$other_path"
+  : > "$delimiter_lf_path"
+  : > "$delimiter_trailing_lf_path"
+  : > "$delimiter_tab_path"
+  : > "$delimiter_cr_path"
+  canonical_protected_path="$(python3 - "$protected_path" <<'PY'
+import pathlib
+import sys
+print(pathlib.Path(sys.argv[1]).resolve())
+PY
+)"
+  canonical_protected_quoted="$(printf '%q' "$canonical_protected_path")"
+
+  mkdir -p "$focus_dir/.tools/rtk/v0.37.2" "$focus_dir/.tools/bin"
+  cat > "$focus_dir/.tools/rtk/v0.37.2/rtk" <<'EOF_FOCUS_RTK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${FAKE_RTK_LOG:?}"
+EOF_FOCUS_RTK
+  chmod +x "$focus_dir/.tools/rtk/v0.37.2/rtk"
+  ln -sfn ../rtk/v0.37.2/rtk "$focus_dir/.tools/bin/rtk"
+
+  focus_write_hook_input() {
+    local tool_name="$1"
+    local file_path="$2"
+    FOCUS_INPUT_PATH="$focus_input" FOCUS_TOOL_NAME="$tool_name" FOCUS_FILE_PATH="$file_path" python3 - <<'PY'
+import json
+import os
+import pathlib
+
+payload = {
+    "tool_name": os.environ["FOCUS_TOOL_NAME"],
+    "tool_input": {"file_path": os.environ["FOCUS_FILE_PATH"]},
+}
+pathlib.Path(os.environ["FOCUS_INPUT_PATH"]).write_text(
+    json.dumps(payload) + "\n", encoding="utf-8"
+)
+PY
+  }
+
+  focus_run_hook() {
+    local name="$1"
+    shift
+    output="$TMP_DIR/out/focus-${name}.out"
+    error="$TMP_DIR/out/focus-${name}.err"
+    rc_file="$TMP_DIR/out/focus-${name}.rc"
+    rc=0
+    if [[ "$#" -eq 0 ]]; then
+      (cd "$focus_dir" && scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
+    else
+      (cd "$focus_dir" && env "$@" scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
+    fi
+    printf '%s\n' "$rc" >"$rc_file"
+  }
+
+  focus_write_ack_rows() {
+    local mode="$1"
+    FOCUS_ACK_LOG="$focus_dir/.agents/state/guard-ack.log" FOCUS_REL_PATH="$protected_rel" python3 - "$mode" <<'PY'
+import datetime
+import pathlib
+import sys
+import time
+import os
+
+log_path = pathlib.Path(os.environ["FOCUS_ACK_LOG"])
+rel_path = os.environ["FOCUS_REL_PATH"]
+now = int(time.time())
+
+
+def timestamp(value):
+    return datetime.datetime.fromtimestamp(value, datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def row(value, path=rel_path, pattern="docs/agent-configs/**", reason="fixture", ack="yes"):
+    return "\t".join(
+        [timestamp(value), f"path={path}", f"pattern={pattern}", f"reason={reason}", f"ack={ack}"]
+    )
+
+
+mode = sys.argv[1]
+if mode == "old":
+    rows = [row(now - 7200)]
+elif mode == "fresh":
+    rows = [row(now - 30)]
+elif mode == "future":
+    rows = [row(now + 3600)]
+elif mode == "unordered":
+    rows = [row(now - 30), row(now - 1000)]
+elif mode == "malformed":
+    rows = [f"{timestamp(now - 30)}\tpath={rel_path}\tpath=forged\treason=x\tack=yes"]
+else:
+    raise SystemExit(f"unknown focus ACK fixture: {mode}")
+
+log_path.parent.mkdir(parents=True, exist_ok=True)
+log_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+PY
+  }
+
+  focus_write_hook_input Edit "$protected_path"
+  focus_run_hook denied
+  focus_assert_rc "$TMP_DIR/out/focus-denied.rc" 2 "protected edit denial"
+  output="$(cat "$TMP_DIR/out/focus-denied.out")"
+  error="$(cat "$TMP_DIR/out/focus-denied.err")"
+  need_contains "$output" "ack_source=none" "denied guard source"
+  need_contains "$error" "DENIED" "denied marker"
+  need_contains "$error" "$canonical_protected_quoted" "denied shell-quoted canonical path"
+  need_contains "$error" "scripts/agent-guard.sh pre-edit --ack" "denied ACK command"
+  stderr_lines="$(wc -l <"$TMP_DIR/out/focus-denied.err" | tr -d '[:space:]')"
+  [[ "$stderr_lines" -le 3 ]] || fail "denied hook emitted $stderr_lines stderr lines"
+
+  ack_line="$(sed -n '2p' "$TMP_DIR/out/focus-denied.err")"
+  [[ "$ack_line" == Run:\ * ]] || fail "denied output did not provide a runnable Run command"
+  ack_command="${ack_line#Run: }"
+  ack_command="${ack_command/<reason>/reviewed}"
+  ack_rc=0
+  (cd "$focus_dir" && eval "$ack_command" >"$TMP_DIR/out/focus-cli-ack.out" 2>"$TMP_DIR/out/focus-cli-ack.err") || ack_rc=$?
+  [[ "$ack_rc" -eq 0 ]] || fail "printed CLI ACK command failed with rc=$ack_rc: $(cat "$TMP_DIR/out/focus-cli-ack.err")"
+  [[ ! -e "$focus_marker" ]] || fail "quoted ACK path executed shell metacharacters"
+
+  focus_run_hook cli-log-reuse
+  focus_assert_rc "$TMP_DIR/out/focus-cli-log-reuse.rc" 0 "CLI ACK log reuse"
+  need_contains "$(cat "$TMP_DIR/out/focus-cli-log-reuse.out")" "ack_source=log" "CLI ACK log source"
+  [[ "$(cat "$focus_dir/.agents/state/guard-ack.log")" != *ack_reused* ]] || fail "ACK reuse mutated the log"
+
+  focus_write_hook_input Edit "$other_path"
+  focus_run_hook wrong-path
+  focus_assert_rc "$TMP_DIR/out/focus-wrong-path.rc" 2 "wrong-path ACK denial"
+
+  : > "$focus_dir/.agents/state/guard-ack.log"
+  focus_write_hook_input Edit "$delimiter_lf_path"
+  delimiter_log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_run_hook delimiter-embedded-lf-explicit AGENT_GUARD_EDIT_ACK=reviewed
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-embedded-lf-explicit.rc" 0 "embedded LF explicit ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-delimiter-embedded-lf-explicit.out")" "ack_source=ack" "embedded LF explicit ACK source"
+  delimiter_log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$delimiter_log_before" == "$delimiter_log_after" ]] || fail "embedded LF ACK changed log bytes"
+  focus_run_hook delimiter-embedded-lf-retry
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-embedded-lf-retry.rc" 2 "embedded LF retry denial"
+
+  : > "$focus_dir/.agents/state/guard-ack.log"
+  focus_write_hook_input Edit "$delimiter_trailing_lf_path"
+  delimiter_log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_run_hook delimiter-trailing-lf-explicit AGENT_GUARD_EDIT_ACK=reviewed
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-trailing-lf-explicit.rc" 0 "trailing LF explicit ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-delimiter-trailing-lf-explicit.out")" "ack_source=ack" "trailing LF explicit ACK source"
+  delimiter_log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$delimiter_log_before" == "$delimiter_log_after" ]] || fail "trailing LF ACK changed log bytes"
+  focus_run_hook delimiter-trailing-lf-retry
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-trailing-lf-retry.rc" 2 "trailing LF retry denial"
+
+  : > "$focus_dir/.agents/state/guard-ack.log"
+  focus_write_hook_input Edit "$delimiter_tab_path"
+  delimiter_log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_run_hook delimiter-tab-explicit AGENT_GUARD_EDIT_ACK=reviewed
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-tab-explicit.rc" 0 "trailing TAB explicit ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-delimiter-tab-explicit.out")" "ack_source=ack" "trailing TAB explicit ACK source"
+  delimiter_log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$delimiter_log_before" == "$delimiter_log_after" ]] || fail "trailing TAB ACK changed log bytes"
+  focus_run_hook delimiter-tab-retry
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-tab-retry.rc" 2 "trailing TAB retry denial"
+
+  : > "$focus_dir/.agents/state/guard-ack.log"
+  focus_write_hook_input Edit "$delimiter_cr_path"
+  delimiter_log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_run_hook delimiter-cr-explicit AGENT_GUARD_EDIT_ACK=reviewed
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-cr-explicit.rc" 0 "trailing CR explicit ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-delimiter-cr-explicit.out")" "ack_source=ack" "trailing CR explicit ACK source"
+  delimiter_log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$delimiter_log_before" == "$delimiter_log_after" ]] || fail "trailing CR ACK changed log bytes"
+  focus_run_hook delimiter-cr-retry
+  focus_assert_rc "$TMP_DIR/out/focus-delimiter-cr-retry.rc" 2 "trailing CR retry denial"
+
+  focus_write_hook_input Edit "$protected_path"
+  focus_write_ack_rows old
+  focus_run_hook ttl-old AGENT_GUARD_ACK_TTL_SECONDS=3600
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-old.rc" 2 "clearly old positive-TTL ACK"
+  focus_write_ack_rows fresh
+  log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_run_hook ttl-fresh AGENT_GUARD_ACK_TTL_SECONDS=3600
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-fresh.rc" 0 "fresh positive-TTL ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-ttl-fresh.out")" "ack_source=log" "fresh positive-TTL log source"
+  log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$log_before" == "$log_after" ]] || fail "ACK reuse changed log bytes"
+  focus_run_hook ttl-zero AGENT_GUARD_ACK_TTL_SECONDS=0
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-zero.rc" 2 "zero TTL disables ACK reuse"
+  focus_run_hook ttl-negative AGENT_GUARD_ACK_TTL_SECONDS=-1
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-negative.rc" 2 "negative TTL disables ACK reuse"
+  focus_run_hook ttl-invalid AGENT_GUARD_ACK_TTL_SECONDS=3600x
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-invalid.rc" 1 "invalid TTL guard error"
+  focus_write_ack_rows future
+  focus_run_hook ttl-future AGENT_GUARD_ACK_TTL_SECONDS=60
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-future.rc" 0 "future timestamp ACK"
+  focus_write_ack_rows malformed
+  focus_run_hook malformed-row AGENT_GUARD_ACK_TTL_SECONDS=3600
+  focus_assert_rc "$TMP_DIR/out/focus-malformed-row.rc" 2 "malformed row ignored"
+  focus_write_ack_rows unordered
+  focus_run_hook unordered AGENT_GUARD_ACK_TTL_SECONDS=60
+  focus_assert_rc "$TMP_DIR/out/focus-unordered.rc" 0 "newest matching timestamp wins"
+
+  : > "$focus_dir/.agents/state/guard-ack.log"
+  line_before="$(wc -l <"$focus_dir/.agents/state/guard-ack.log" | tr -d '[:space:]')"
+  injection_reason=$'reviewed\tpath=docs/agent-configs/other.md\n2030-01-01T00:00:00Z\tpath=docs/agent-configs/other.md\tpattern=docs/agent-configs/**\treason=forged\tack=yes'
+  ack_rc=0
+  (cd "$focus_dir" && scripts/agent-guard.sh pre-edit --strict --use-ack-log --ack "$injection_reason" -- "$protected_path" >"$TMP_DIR/out/focus-injection.out" 2>"$TMP_DIR/out/focus-injection.err") || ack_rc=$?
+  [[ "$ack_rc" -eq 0 ]] || fail "injection ACK failed with rc=$ack_rc"
+  line_after="$(wc -l <"$focus_dir/.agents/state/guard-ack.log" | tr -d '[:space:]')"
+  [[ "$line_after" -eq $((line_before + 1)) ]] || fail "injection ACK changed physical log lines by $((line_after - line_before))"
+  log_before="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  focus_write_hook_input Edit "$protected_path"
+  focus_run_hook injection-a-reuse
+  focus_assert_rc "$TMP_DIR/out/focus-injection-a-reuse.rc" 0 "TSV injection ACK reuse"
+  need_contains "$(cat "$TMP_DIR/out/focus-injection-a-reuse.out")" "ack_source=log" "TSV injection ACK log source"
+  log_after="$(cksum <"$focus_dir/.agents/state/guard-ack.log")"
+  [[ "$log_before" == "$log_after" ]] || fail "TSV injection ACK reuse changed log bytes"
+  focus_write_hook_input Edit "$other_path"
+  focus_run_hook injection-cross-path
+  focus_assert_rc "$TMP_DIR/out/focus-injection-cross-path.rc" 2 "TSV cross-path injection denial"
+
+  focus_write_hook_input Edit "$protected_path"
+  focus_run_guard() {
+    local name="$1"
+    shift
+    output="$TMP_DIR/out/focus-${name}.out"
+    error="$TMP_DIR/out/focus-${name}.err"
+    rc_file="$TMP_DIR/out/focus-${name}.rc"
+    rc=0
+    (cd "$focus_dir" && "$@" >"$output" 2>"$error") || rc=$?
+    printf '%s\n' "$rc" >"$rc_file"
+  }
+  focus_run_guard manual-strict scripts/agent-guard.sh pre-edit --strict "$protected_path"
+  focus_assert_rc "$TMP_DIR/out/focus-manual-strict.rc" 3 "manual strict denial code"
+  focus_run_hook env-ack AGENT_GUARD_EDIT_ACK=reviewed
+  focus_assert_rc "$TMP_DIR/out/focus-env-ack.rc" 0 "explicit environment ACK"
+  need_contains "$(cat "$TMP_DIR/out/focus-env-ack.out")" "ack_source=ack" "explicit ACK source"
+
+  focus_write_hook_input Write "$focus_dir/src/main.txt"
+  focus_run_hook unprotected
+  focus_assert_rc "$TMP_DIR/out/focus-unprotected.rc" 0 "unprotected edit"
+  need_contains "$(cat "$TMP_DIR/out/focus-unprotected.out")" "protected_path=false" "unprotected classification"
+
+  : > "$focus_fake_rtk_log"
+  focus_write_hook_input Bash "$other_path"
+  focus_run_hook bash-dispatch FAKE_RTK_LOG="$focus_fake_rtk_log"
+  focus_assert_rc "$TMP_DIR/out/focus-bash-dispatch.rc" 0 "Bash hook dispatch"
+  need_contains "$(cat "$focus_fake_rtk_log")" "hook claude" "Bash detector and RTK dispatch"
+
+  saved_file="$TMP_DIR/out/focus-AGENTS.md"
+  cp "$focus_dir/AGENTS.md" "$saved_file"
+  rm "$focus_dir/AGENTS.md"
+  focus_write_hook_input Edit "$protected_path"
+  focus_run_hook missing-context
+  focus_assert_rc "$TMP_DIR/out/focus-missing-context.rc" 1 "missing required context error"
+  cp "$saved_file" "$focus_dir/AGENTS.md"
+
+  saved_file="$TMP_DIR/out/focus-context-policy.json"
+  cp "$focus_dir/docs/agent-configs/context-policy.json" "$saved_file"
+  printf '%s\n' '{ malformed policy' >"$focus_dir/docs/agent-configs/context-policy.json"
+  focus_run_hook malformed-policy
+  focus_assert_rc "$TMP_DIR/out/focus-malformed-policy.rc" 1 "malformed policy error"
+  cp "$saved_file" "$focus_dir/docs/agent-configs/context-policy.json"
+
+  focus_write_hook_input Edit "$FIXTURE_DIR/outside-focus-path.txt"
+  focus_run_hook outside-root
+  focus_assert_rc "$TMP_DIR/out/focus-outside-root.rc" 1 "outside-root path error"
+
+  locked_parent="$focus_dir/locked-state-parent"
+  locked_tmp="$focus_dir/locked-tmp"
+  mkdir -p "$locked_parent" "$locked_tmp"
+  rm -f "$focus_dir/.agents/state/guard-ack.log"
+  chmod a-w "$focus_dir/.agents/state" "$locked_parent" "$locked_tmp"
+  focus_write_hook_input Edit "$protected_path"
+  focus_run_hook advisory-unwritable \
+    AGENT_STATE_DIR="$locked_parent/missing/state" \
+    TMPDIR="$locked_tmp"
+  chmod u+w "$focus_dir/.agents/state" "$locked_parent" "$locked_tmp"
+  focus_assert_rc "$TMP_DIR/out/focus-advisory-unwritable.rc" 0 "all-state-candidates-unwritable advisory"
+  need_contains "$(cat "$TMP_DIR/out/focus-advisory-unwritable.out")" "ack_source=advisory" "unwritable-state advisory source"
+  need_contains "$(cat "$TMP_DIR/out/focus-advisory-unwritable.err")" "ack log unavailable" "unwritable-state advisory warning"
+
+  printf 'guard-hook-focus: ok (%s)\n' "$focus_dir"
+}
+
+if [[ "${BOOTSTRAP_GUARD_FOCUS_ONLY:-false}" == "true" ]]; then
+  run_guard_hook_focus
+  exit 0
+fi
+
+need_contains $'alpha\t beta\n  gamma' 'alpha beta gamma' 'need_contains wrapped haystack'
+need_contains 'alpha beta gamma' $'alpha\n beta\tgamma' 'need_contains wrapped needle'
+need_contains 'literal [a.b]' 'literal [a.b]' 'need_contains keeps literal matching'
+if (
+  need_contains 'alpha beta gamma' 'alpha beta delta' 'need_contains semantic mismatch'
+) >"$TMP_DIR/out/need-contains-negative.out" 2>&1; then
+  fail "need_contains accepted a semantic mismatch"
+fi
+grep -Fq -- \
+  'bootstrap-test: FAIL: need_contains semantic mismatch' \
+  "$TMP_DIR/out/need-contains-negative.out" || fail "need_contains negative case failed for the wrong reason"
 
 make_failing_rsync() {
   local fakebin="$1"
@@ -780,7 +1121,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.08.29.1" ]] || fail "VERSION not bumped to 2026.08.29.1"
+[[ "$bundle_version" == "2026.09.04.1" ]] || fail "VERSION not bumped to 2026.09.04.1"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -1548,15 +1889,42 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "recall_ver
 handoff_contract="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md")"
 mode_contracts="$(cat "$TMP_DIR/docs/agent-configs/agent-mode-contracts.md")"
 
+need_contains "$handoff_contract" '"source_task": null' "handoff optional source task"
+need_contains "$handoff_contract" '"blocks": []' "handoff blocks default"
+need_contains "$handoff_contract" 'Missing `source_task` is equivalent to `null`' "handoff missing source task default"
+need_contains "$handoff_contract" 'Missing `blocks` is equivalent to `[]`' "handoff missing blocks default"
+need_contains "$handoff_contract" 'The task-id portion must name an existing packet when it is available.' "handoff source task packet reference"
+need_contains "$handoff_contract" 'Existing `claude-codex-collaboration/v1` packets remain valid' "handoff existing protocol compatibility"
+need_contains "$handoff_contract" "A closed packet's \`blocks\` edges are inactive and no edit to the blocked packet is required." "handoff closed blocks edges"
+need_contains "$handoff_contract" 'Missing referenced packets do not invalidate the current packet; agents record uncertainty and continue.' "handoff missing referenced packets"
+need_contains "$handoff_contract" 'Continue the current task when the root cause and implementation scope are unchanged.' "handoff continue current task"
+need_contains "$handoff_contract" 'Open a child task only for a distinct finding with independently closable scope.' "handoff child task scope"
+need_contains "$handoff_contract" 'Record the split rationale in `task.md`. Review retries remain in the same packet.' "handoff split rationale"
+need_contains "$handoff_contract" 'For one exact `source_task` value, at most one active child may block the same target.' "handoff duplicate active child rule"
+need_contains "$handoff_contract" 'A task cannot source from or block itself.' "handoff self relation rule"
+need_contains "$handoff_contract" 'Active blocking edges must be acyclic.' "handoff acyclic blocking rule"
+need_contains "$handoff_contract" 'Relations are authoring conventions.' "handoff relations authoring convention"
+need_contains "$handoff_contract" 'No guard, hook, or runtime reads `source_task` or `blocks` in this phase.' "handoff relations runtime boundary"
+need_contains "$handoff_contract" 'canonical packet artifacts, not a hard maximum' "handoff canonical artifact set"
+task_journal="$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")"
+need_contains "$handoff_contract" '## Outcome' "handoff closure outcome heading"
+need_contains "$handoff_contract" '- Summary: <what changed or what was learned>' "handoff closure outcome summary field"
+need_contains "$handoff_contract" '- Evidence: <test, report, or review path>' "handoff closure outcome evidence field"
+need_contains "$handoff_contract" '- Effect on source: <what the source task can decide or do next>' "handoff closure outcome effect field"
+need_contains "$handoff_contract" 'The fields are prose, not enums, and do not drive an automatic transition.' "handoff closure outcome prose rule"
+need_contains "$handoff_contract" 'manually mirror its Summary, Evidence, and Effect on source into the optional task journal' "handoff closure outcome journal mirror guidance"
+need_contains "$task_journal" 'manually copy the Summary, Evidence, and Effect on source from `task.md`' "task journal closure outcome copy guidance"
+need_contains "$task_journal" 'Mirroring is optional, not a closure gate.' "task journal optional outcome mirror"
+
 python3 - "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" <<'PY_HANDOFF_ARTIFACTS'
 import pathlib
 import re
 import sys
 
 text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-marker = "## Maximum artifact set"
+marker = "## Canonical artifact set"
 if marker not in text:
-    raise SystemExit("handoff contract missing Maximum artifact set")
+    raise SystemExit("handoff contract missing Canonical artifact set")
 section = text.split(marker, 1)[1].split("\n## ", 1)[0]
 artifacts = re.findall(r"^\d+\. `([^`]+)`$", section, flags=re.MULTILINE)
 expected = [
@@ -1641,7 +2009,7 @@ need_contains "$handoff_contract" "Prior attempts remain" "handoff prior attempt
 need_contains "$handoff_contract" "next numbered attempt" "handoff numbered remediation attempts"
 need_contains "$handoff_contract" "Review history is append-only and immutable within each top-level section." "handoff sectioned review history"
 need_contains "$handoff_contract" 'The first final review adds the `## Final technical review` heading.' "handoff first final-review heading"
-need_contains "$handoff_contract" 'insert the next numbered pre-coding `### Attempt <n>` immediately before the Final heading without modifying prior attempts.' "handoff resumed specification-review placement"
+need_contains "$handoff_contract" 'On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.' "handoff resumed specification-review placement"
 need_contains "$handoff_contract" 'When Sol returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
 need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
 need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
@@ -1664,7 +2032,10 @@ need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mod
 need_contains "$mode_contracts" "Sol owns the blocking adequacy verdict" "mode contracts Sol adequacy ownership"
 need_contains "$mode_contracts" 'Luna may downgrade `yes`' "mode contracts Luna downgrade"
 need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
-need_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode contracts remediation cap"
+need_contains "$mode_contracts" 'After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost.' "mode remediation checkpoint"
+need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
+need_contains "$mode_contracts" "The user may authorize another pass in the same task." "mode remediation same-task authorization"
+need_contains "$mode_contracts" "Do not create a child task or a new lifecycle state solely because the checkpoint was reached." "mode remediation no forced child or state"
 need_contains "$mode_contracts" "runner, status, reason, and real report" "mode contracts verification evidence"
 need_contains "$mode_contracts" "testimony pending fresh confirmation" "mode contracts executing-host pass rule"
 need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
@@ -1674,8 +2045,8 @@ need_contains "$mode_contracts" "verification" "mode contracts Claude verificati
 need_contains "$mode_contracts" "declarations" "mode contracts Claude declarations check"
 need_contains "$mode_contracts" "Sol-coding decision and reason" "mode contracts Claude escalation check"
 need_contains "$mode_contracts" "approved scope" "mode contracts Claude scope check"
-need_contains "$mode_contracts" "author and reviewer model declarations and author and reviewer session declarations for contradictions" "mode contracts Claude declaration contradiction check"
-need_contains "$mode_contracts" 'requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each' "mode contracts Claude provenance declarations"
+need_contains "$mode_contracts" "Check author/reviewer model and session declarations for contradictions." "mode contracts Claude declaration contradiction check"
+need_contains "$mode_contracts" 'Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.' "mode contracts Claude provenance declarations"
 need_contains "$mode_contracts" "user must open a new Sol coding session" "mode contracts new-session escalation"
 need_contains "$mode_contracts" "audit-only procedural declaration" "mode contracts Sol-coding audit limitation"
 need_contains "$mode_contracts" "cannot provide file-based authorization" "mode contracts no file authorization"
@@ -2140,15 +2511,20 @@ PY
 	generated_neighbor_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi2/client.ts) 2>&1 || true)"
 	need_contains "$generated_neighbor_guard_out" "protected_path=false" "pre-edit does not overmatch project-specific generated file neighbor"
 
+	: > "$GUARD_DIR/.agents/state/guard-ack.log"
 	printf '{"tool_name":"Edit","tool_input":{"file_path":"AGENTS.md"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-protected.json"
-	if (cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-protected.out 2>"$TMP_DIR"/out/bootstrap-claude-edit-protected.err); then
-	  fail "Claude edit hook allowed protected path without acknowledgement"
-	fi
+	claude_hook_rc=0
+	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-protected.out 2>"$TMP_DIR"/out/bootstrap-claude-edit-protected.err) || claude_hook_rc=$?
+	[[ "$claude_hook_rc" -eq 2 ]] || fail "Claude edit hook expected rc=2 without acknowledgement, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-protected.err")" "ack" "Claude edit hook protected ack guidance"
-	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-ack.out)
+	claude_hook_rc=0
+	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-ack.out) || claude_hook_rc=$?
+	[[ "$claude_hook_rc" -eq 0 ]] || fail "Claude edit hook explicit ACK expected rc=0, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-ack.out")" "protected_path=true" "Claude edit hook ack still classifies protected path"
 	printf '{"tool_name":"Write","tool_input":{"file_path":"src/main.txt"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json"
-	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-unprotected.out)
+	claude_hook_rc=0
+	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-unprotected.out) || claude_hook_rc=$?
+	[[ "$claude_hook_rc" -eq 0 ]] || fail "Claude edit hook unprotected path expected rc=0, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-unprotected.out")" "protected_path=false" "Claude edit hook allows unprotected path"
 
 	rm -rf "$GUARD_DIR/.agents/state"

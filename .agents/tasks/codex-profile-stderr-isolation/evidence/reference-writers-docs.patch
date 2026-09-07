@@ -1,0 +1,45 @@
+--- a/agent-bootstrap/lib/writers-docs.sh
++++ b/agent-bootstrap/lib/writers-docs.sh
+@@ -1927,7 +1927,19 @@
+     return 1
+   fi
+ 
+-  if ! parsed="$(python3 - "$MODEL_PROFILES" "$requested_profile" 2>&1 <<'PY_MODEL_PROFILE'
++  # Keep the TSV payload (stdout) separate from Python diagnostics (stderr): a
++  # warning such as macOS "confstr() failed ... DARWIN_USER_TEMP_DIR" exits 0 and
++  # must not corrupt the parsed fields. The temp file and its EXIT trap live in
++  # this command-substitution subshell only.
++  local capture_rc=0
++  parsed="$(
++    profile_stderr="$(mktemp "${TMPDIR:-/tmp}/codex-mode-profile.XXXXXX")" || {
++      printf 'model profile error: cannot create a temporary file under %s\n' "${TMPDIR:-/tmp}"
++      exit 1
++    }
++    trap 'rm -f "$profile_stderr"' EXIT
++    profile_rc=0
++    python3 - "$MODEL_PROFILES" "$requested_profile" 2>"$profile_stderr" <<'PY_MODEL_PROFILE' || profile_rc=$?
+ import json
+ import pathlib
+ import re
+@@ -1992,7 +2004,20 @@
+ 
+ print("\t".join([profile_name] + [profile[key] for key in required_keys]))
+ PY_MODEL_PROFILE
+-  )"; then
++    if [[ "$profile_rc" -eq 0 ]]; then
++      if [[ -s "$profile_stderr" ]]; then
++        cat "$profile_stderr" >&2
++      fi
++      exit 0
++    fi
++    if [[ -s "$profile_stderr" ]]; then
++      cat "$profile_stderr"
++    else
++      printf 'model profile error: python3 exited with status %s without diagnostics\n' "$profile_rc"
++    fi
++    exit 1
++  )" || capture_rc=$?
++  if [[ "$capture_rc" -ne 0 ]]; then
+     MODEL_PROFILE_ERROR="$parsed"
+     return 1
+   fi

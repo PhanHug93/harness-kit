@@ -1,0 +1,3 @@
+bootstrap-test: --- focused guard and Claude hook regression
+bootstrap-test: FAIL: embedded LF ACK changed log bytes
+focused-b3-red-command-rc=1

@@ -1,0 +1,5 @@
+mutation-expected-hook-rc=2
+mutation-actual-hook-rc=1
+mutation-assertion-rc=1
+mutation-result=assertion-failed-as-required
+mutation-target=/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.OvtxNO1Owm

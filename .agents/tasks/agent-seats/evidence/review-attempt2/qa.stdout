@@ -1,0 +1,45 @@
+PASS B3 init: missing seats + legacy -> migrated — seats.json created from legacy:
+PASS B3 init: existing valid seats -> no write
+PASS B3 suggest: legacy unknown model + low effort -> valid proposal with notes
+PASS B3 wizard --yes migrates legacy low effort and stays valid — agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+agent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+PASS B3 reset ignores legacy (bundle defaults) and validates
+PASS B3 malformed legacy does not block wizard --yes on valid seats — agent-seats: note: starting from the current seats.json
+PASS B3 malformed legacy does not block set on valid seats — agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+agent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+PASS B3 init: missing seats + malformed legacy -> error, nothing written
+PASS B3 init: missing seats, no legacy -> defaults
+PASS B3 malformed seats -> show rc 1 with reset guidance
+PASS B3 malformed seats -> init refuses to overwrite
+PASS B3 reset repairs malformed seats
+PASS B2 resolve: 8 lines with empty fallback fields preserved — ['gate', '@gate', 'technical_review', 'codex', 'gpt-6-astra', 'ultra', '', '']
+PASS B2 bash line reader keeps empty columns — count=8 model=[gpt-6-astra] fallback=[] fbeff=[]
+PASS B2 resolve non-codex host: 8 lines, host claude, empty model fields — ['gate', '@gate', 'technical_review', 'claude', '', '', '', '']
+PASS B2 model id with TAB rejected by grammar
+PASS B2 model-info gives host/default_effort/efforts — codex
+xhigh
+none low medium high xhigh max
+
+PASS B2 model-info unknown model -> rc 1 with guidance
+PASS B5 conflict: build with luna -> 0
+PASS B5 conflict: build effective astra (gate primary) -> 1
+PASS B5 conflict: build effective terra (gate fallback) -> 1
+PASS B5 conflict: non-build seat -> 0
+PASS B5 conflict: reviewers on claude -> 0 even for astra
+PASS B6 render appends block, preserves prefix bytes, idempotent
+PASS B6 set re-renders only the block
+PASS B6 CRLF file keeps CRLF everywhere
+PASS B6 orphan BEGIN -> exit 3 twice, file untouched, overlay intact
+PASS B6 duplicate blocks -> exit 3, untouched
+PASS B6 set with broken markers -> seats written, exit 2, explicit message
+PASS B1 wizard on PTY shows host prompt and waits for input — prompts=26 rc=0
+PASS B1 wizard applies non-default choices (@spec -> codex luna xhigh fallback terra) — {"host": "codex", "model": "gpt-5.6-luna", "effort": "xhigh", "fallback_model": "gpt-5.6-terra", "fallback_effort": "xhigh"}
+PASS B1 wizard Enter keeps suggestion (@gate astra ultra) — {"host": "codex", "model": "gpt-6-astra", "effort": "ultra", "fallback_model": "gpt-5.6-terra", "fallback_effort": "xhigh"}
+PASS B1 wizard model change adopts default effort and 'none' drops fallback (@build astra ultra) — {"host": "codex", "model": "gpt-6-astra", "effort": "ultra"}
+PASS B1 wizard host change to claude drops model (@verify) — {"host": "claude"}
+PASS B1 wizard exits 0 and validates
+FAIL B1 re-choosing the same host keeps the suggested model — {"host": "codex", "model": "gpt-6-astra", "effort": "ultra", "fallback_model": "gpt-5.6-terra", "fallback_effort": "xhigh"}
+PASS B1 non-TTY wizard accepts suggestions
+FAIL B1 invalid interactive effort -> rc 1, nothing written — rc=-1
+
+36 passed, 2 failed

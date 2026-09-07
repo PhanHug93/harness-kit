@@ -1,0 +1,198 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-v2-review-w8v0h495",
+  "script_sha256": "22a2e39fe6149d95583f12310f57947fc89c1950dc2b9fc92abd3748bcd568ee",
+  "checks": [
+    {
+      "check": "B3 init: missing seats + legacy -> migrated",
+      "ok": true,
+      "detail": "seats.json created from legacy:"
+    },
+    {
+      "check": "B3 init: existing valid seats -> no write",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 suggest: legacy unknown model + low effort -> valid proposal with notes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 wizard --yes migrates legacy low effort and stays valid",
+      "ok": true,
+      "detail": "agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding\nagent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding"
+    },
+    {
+      "check": "B3 reset ignores legacy (bundle defaults) and validates",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 malformed legacy does not block wizard --yes on valid seats",
+      "ok": true,
+      "detail": "agent-seats: note: starting from the current seats.json"
+    },
+    {
+      "check": "B3 malformed legacy does not block set on valid seats",
+      "ok": true,
+      "detail": "agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding\nagent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding"
+    },
+    {
+      "check": "B3 init: missing seats + malformed legacy -> error, nothing written",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 init: missing seats, no legacy -> defaults",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 malformed seats -> show rc 1 with reset guidance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 malformed seats -> init refuses to overwrite",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B3 reset repairs malformed seats",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B2 resolve: 8 lines with empty fallback fields preserved",
+      "ok": true,
+      "detail": "['gate', '@gate', 'technical_review', 'codex', 'gpt-6-astra', 'ultra', '', '']"
+    },
+    {
+      "check": "B2 bash line reader keeps empty columns",
+      "ok": true,
+      "detail": "count=8 model=[gpt-6-astra] fallback=[] fbeff=[]"
+    },
+    {
+      "check": "B2 resolve non-codex host: 8 lines, host claude, empty model fields",
+      "ok": true,
+      "detail": "['gate', '@gate', 'technical_review', 'claude', '', '', '', '']"
+    },
+    {
+      "check": "B2 model id with TAB rejected by grammar",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B2 model-info gives host/default_effort/efforts",
+      "ok": true,
+      "detail": "codex\nxhigh\nnone low medium high xhigh max\n"
+    },
+    {
+      "check": "B2 model-info unknown model -> rc 1 with guidance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B5 conflict: build with luna -> 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B5 conflict: build effective astra (gate primary) -> 1",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B5 conflict: build effective terra (gate fallback) -> 1",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B5 conflict: non-build seat -> 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B5 conflict: reviewers on claude -> 0 even for astra",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 render appends block, preserves prefix bytes, idempotent",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 set re-renders only the block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 CRLF file keeps CRLF everywhere",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 orphan BEGIN -> exit 3 twice, file untouched, overlay intact",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 duplicate blocks -> exit 3, untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B6 set with broken markers -> seats written, exit 2, explicit message",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B1 wizard on PTY shows host prompt and waits for input",
+      "ok": true,
+      "detail": "prompts=23 rc=0"
+    },
+    {
+      "check": "B1 wizard applies non-default choices (@spec -> codex luna xhigh fallback terra)",
+      "ok": true,
+      "detail": "{\"host\": \"codex\", \"model\": \"gpt-5.6-luna\", \"effort\": \"xhigh\", \"fallback_model\": \"gpt-5.6-terra\", \"fallback_effort\": \"xhigh\"}"
+    },
+    {
+      "check": "B1 wizard Enter keeps suggestion (@gate astra ultra)",
+      "ok": true,
+      "detail": "{\"host\": \"codex\", \"model\": \"gpt-6-astra\", \"effort\": \"ultra\", \"fallback_model\": \"gpt-5.6-terra\", \"fallback_effort\": \"xhigh\"}"
+    },
+    {
+      "check": "B1 wizard model change adopts default effort and 'none' drops fallback (@build astra ultra)",
+      "ok": true,
+      "detail": "{\"host\": \"codex\", \"model\": \"gpt-6-astra\", \"effort\": \"ultra\"}"
+    },
+    {
+      "check": "B1 wizard host change to claude drops model (@verify)",
+      "ok": true,
+      "detail": "{\"host\": \"claude\"}"
+    },
+    {
+      "check": "B1 wizard exits 0 and validates",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B1 re-choosing the same host keeps the suggested model",
+      "ok": true,
+      "detail": "{\"host\": \"codex\", \"model\": \"gpt-6-astra\", \"effort\": \"ultra\", \"fallback_model\": \"gpt-5.6-terra\", \"fallback_effort\": \"xhigh\"}"
+    },
+    {
+      "check": "B1 non-TTY wizard accepts suggestions",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "B1 invalid interactive effort -> rc 1, nothing written",
+      "ok": true,
+      "detail": "rc=1"
+    }
+  ],
+  "passed": 38,
+  "failed": 0
+}
