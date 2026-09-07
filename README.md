@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, routed model profiles, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.08.29.1`](agent-bootstrap/VERSION)
+Current release: [`2026.09.07.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -65,7 +65,7 @@ or `agent-init --next`.
 rtk is intentionally hard-pinned to the bundle's audited version so projects
 do not drift with an unreviewed upstream release.
 
-## Upgrade an existing project to 2026.08.29.1
+## Upgrade an existing project to 2026.09.07.1
 
 ### Option A: one-shot pinned upgrade
 
@@ -77,10 +77,10 @@ home is missing or stale.
 
    ```bash
    cd /path/to/project
-   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.08.29.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.07.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
    ```
 
-3. The upgrader installs release `2026.08.29.1` into
+3. The upgrader installs release `2026.09.07.1` into
    `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
    reviewable candidates instead of overwriting existing managed files.
 4. Inspect the result before accepting candidates:

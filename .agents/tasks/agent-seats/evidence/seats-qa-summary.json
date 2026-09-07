@@ -1,0 +1,44 @@
+{
+  "reference": "agent-seats.sh v3",
+  "harness": "seats-qa.py v2 (103 checks)",
+  "runs": [
+    {
+      "file": "/tmp/qa3-1/summary.json",
+      "passed": 103,
+      "failed": 0,
+      "skipped": 0,
+      "user": "tester"
+    },
+    {
+      "file": "/tmp/qa3-2/summary.json",
+      "passed": 103,
+      "failed": 0,
+      "skipped": 0,
+      "user": "tester"
+    },
+    {
+      "file": "/tmp/qa3-3/summary.json",
+      "passed": 103,
+      "failed": 0,
+      "skipped": 0,
+      "user": "tester"
+    },
+    {
+      "file": "/tmp/qa3-root/summary.json",
+      "passed": 103,
+      "failed": 0,
+      "skipped": 1,
+      "user": "root"
+    }
+  ],
+  "mutation_red_counts": {
+    "m1-stdin": 14,
+    "m2-markers": 2,
+    "m3-conflict": 1,
+    "m4-grammar": 3,
+    "m5-legacy-keys": 1,
+    "m6-atomic": "many (os.replace path removed \u2192 every write fails)",
+    "m7-set-missing": 1
+  },
+  "environment": "cloud container, Linux, bash 5.2, python 3.11; non-root user 'tester' for permission cases; macOS bash 3.2 NOT run here"
+}

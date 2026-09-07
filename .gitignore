@@ -25,5 +25,8 @@
 # OS / editor
 .DS_Store
 
-# kit development records stay local-only
-docs/superpowers/
+# Kit development records: only the policy README and specs are tracked.
+docs/superpowers/*
+!docs/superpowers/README.md
+!docs/superpowers/specs/
+!docs/superpowers/specs/**

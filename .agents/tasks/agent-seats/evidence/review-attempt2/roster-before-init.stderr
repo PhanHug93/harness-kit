@@ -1,0 +1,1 @@
+agent-seats: ERROR: /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-generation-2qmumb41/docs/agent-configs/seats.json is missing; run scripts/agent-seats.sh init (or wizard --yes)

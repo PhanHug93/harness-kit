@@ -1,0 +1,2 @@
+bootstrap-test: --- template/runtime mirror drift checks
+agent-hook: codex preflight ok (mode=reviewing flow=full_flow)

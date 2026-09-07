@@ -1,0 +1,18 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-v2-review-w8v0h495",
+  "bash": "/bin/bash",
+  "source_sha256": {
+    "CHANGELOG.md": "b9b56cc2484d83eca97d1bac6b8f66a078ead048dcf7e6e33c9975c582cf867e",
+    "agent-bootstrap/agent-guard.sh": "11d3f7480b2ed7a9a5a23ccb727c2d69e25b07f19847ac49f10ecb5a77c6d835",
+    "agent-bootstrap/agent-hook.sh": "0644e13098d19161250fc2f2620ad3311bc1eea456c8c8c1e0af8ef065e66be0",
+    "agent-bootstrap/lib/writers-docs.sh": "8a36c497f220ca70fe803836df149307738956b6c9bf9e901c5086b9edd7e5d6",
+    "agent-bootstrap/lib/writers-runtime.sh": "90181d0ff0bf896306719c9ec30431270c36b9257772d39ae45bb2d43bcbd616",
+    "agent-bootstrap/lib/core.sh": "2e3d61d260980212abf6344643404fd2ffa2eeda0155a6433331fe179df1078d",
+    "scripts/test-bootstrap-multi-agent-project.sh": "d0b67e7d04a0931ad5e5fd795bb69ebaae5b929632b9a76a783bcca99ae39184",
+    "docs/superpowers/specs/2026-09-06-agent-seats-design.md": "4ec979bbde2cdd7c52e4eca3f27dcb9f2a8e868d39bef66b4ff1d793ee7591b6",
+    ".agents/tasks/agent-seats/task.md": "70fc2912610484721cbc23b43c3eea2119e17ab6adaa21619e6e50f13986b1a4",
+    ".agents/tasks/agent-seats/build-handoff.md": "5cba40a5fa8da5d805449b23ebef8564750fbb72aa69993031d89e13965cf2ba",
+    ".agents/tasks/agent-seats/evidence/reference-agent-seats.sh": "22a2e39fe6149d95583f12310f57947fc89c1950dc2b9fc92abd3748bcd568ee",
+    ".agents/tasks/agent-seats/evidence/seats-qa.py": "67573944c09f851eba3d20ec17b5fdac8e76b3f50d935a83645a74a0e884596f"
+  }
+}

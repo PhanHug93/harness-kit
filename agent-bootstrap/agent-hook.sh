@@ -231,44 +231,48 @@ if not isinstance(tool_name, str):
     tool_name = ""
 if not isinstance(file_path, str):
     file_path = ""
-print(f"{tool_name}\t{file_path}")
+sys.stdout.buffer.write((tool_name + "\0" + file_path + "\0").encode("utf-8"))
 PY
     return $?
   fi
   local tool_name file_path
   tool_name="$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
   file_path="$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  printf '%s\t%s\n' "$tool_name" "$file_path"
+  printf '%s\0%s\0' "$tool_name" "$file_path"
 }
 
 guard_claude_edit_tool() {
-  local edit_path="$1"
+  local edit_path="$1" rc=0
   [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
   if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
-    "$AGENT_GUARD" pre-edit --strict --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path"
+    "$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path" || rc=$?
   else
-    "$AGENT_GUARD" pre-edit --strict "$edit_path"
+    "$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path" || rc=$?
   fi
+  case "$rc" in
+    0) return 0 ;;
+    3) exit 2 ;;
+    *) exit "$rc" ;;
+  esac
 }
 
 claude_pretool() {
   required_executable "$DETECTOR"
   required_executable "$AGENT_GUARD"
   local hook_input=""
-  local parsed=""
   local tool_name=""
   local edit_path=""
-  local old_ifs
   if [[ ! -t 0 ]]; then
     hook_input="$(cat || true)"
   fi
   "$AGENT_GUARD" preflight >/dev/null
   if [[ -n "$hook_input" ]]; then
-    parsed="$(parse_claude_hook_input "$hook_input" || true)"
-    old_ifs="$IFS"
-    IFS=$'\t'
-    read -r tool_name edit_path <<< "$parsed"
-    IFS="$old_ifs"
+    tool_name=""
+    edit_path=""
+    exec 3< <(parse_claude_hook_input "$hook_input" || true)
+    IFS= read -r -d '' tool_name <&3 || true
+    IFS= read -r -d '' edit_path <&3 || true
+    exec 3<&-
     case "$tool_name" in
       Edit|Write|MultiEdit)
         guard_claude_edit_tool "$edit_path"

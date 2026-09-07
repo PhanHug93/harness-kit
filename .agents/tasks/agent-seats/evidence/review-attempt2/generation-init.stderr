@@ -1,0 +1,4 @@
+agent-seats: note: catalog: added gpt-5.6-sol from legacy model-profiles.json (efforts none, low, medium, high, xhigh, max; default xhigh)
+agent-seats: note: @gate: seeded from legacy route 'planning'
+agent-seats: note: @build: seeded from legacy route 'coding'
+agent-seats: note: @verify: seeded from legacy route 'reviewing'

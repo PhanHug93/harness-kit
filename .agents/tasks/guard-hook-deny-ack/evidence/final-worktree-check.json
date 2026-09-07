@@ -1,0 +1,27 @@
+{
+  "branch": "feature/simplify-task-relations",
+  "head": "45585fad41724334cd9e93d8c489f8946d9ec8c6",
+  "changed_files": [
+    "CHANGELOG.md",
+    "agent-bootstrap/agent-guard.sh",
+    "agent-bootstrap/agent-hook.sh",
+    "agent-bootstrap/lib/writers-docs.sh",
+    "agent-bootstrap/lib/writers-runtime.sh",
+    "scripts/test-bootstrap-multi-agent-project.sh"
+  ],
+  "source_sha256": {
+    "CHANGELOG.md": "b9b56cc2484d83eca97d1bac6b8f66a078ead048dcf7e6e33c9975c582cf867e",
+    "agent-bootstrap/agent-guard.sh": "11d3f7480b2ed7a9a5a23ccb727c2d69e25b07f19847ac49f10ecb5a77c6d835",
+    "agent-bootstrap/agent-hook.sh": "0644e13098d19161250fc2f2620ad3311bc1eea456c8c8c1e0af8ef065e66be0",
+    "agent-bootstrap/lib/writers-docs.sh": "8a36c497f220ca70fe803836df149307738956b6c9bf9e901c5086b9edd7e5d6",
+    "agent-bootstrap/lib/writers-runtime.sh": "90181d0ff0bf896306719c9ec30431270c36b9257772d39ae45bb2d43bcbd616",
+    "scripts/test-bootstrap-multi-agent-project.sh": "d0b67e7d04a0931ad5e5fd795bb69ebaae5b929632b9a76a783bcca99ae39184"
+  },
+  "exact_six_file_scope": true,
+  "diff_check_rc": 0,
+  "index_unchanged_rc": 0,
+  "production_matches_final_host": true,
+  "original_task_packet_unchanged": true,
+  "status": "M CHANGELOG.md\n M agent-bootstrap/agent-guard.sh\n M agent-bootstrap/agent-hook.sh\n M agent-bootstrap/lib/writers-docs.sh\n M agent-bootstrap/lib/writers-runtime.sh\n M scripts/test-bootstrap-multi-agent-project.sh\n?? .agents/",
+  "pass": true
+}

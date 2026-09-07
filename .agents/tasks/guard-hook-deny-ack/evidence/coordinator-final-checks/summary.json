@@ -1,0 +1,133 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-final-checks-3noiq87h",
+  "source_sha256": {
+    "agent-bootstrap/agent-guard.sh": "11d3f7480b2ed7a9a5a23ccb727c2d69e25b07f19847ac49f10ecb5a77c6d835",
+    "agent-bootstrap/agent-hook.sh": "0644e13098d19161250fc2f2620ad3311bc1eea456c8c8c1e0af8ef065e66be0",
+    "agent-bootstrap/lib/writers-runtime.sh": "90181d0ff0bf896306719c9ec30431270c36b9257772d39ae45bb2d43bcbd616",
+    "agent-bootstrap/lib/writers-docs.sh": "8a36c497f220ca70fe803836df149307738956b6c9bf9e901c5086b9edd7e5d6"
+  },
+  "source_unchanged_during_checks": true,
+  "snapshot_equal_before_and_after": true,
+  "checks": [
+    {
+      "name": "git-init",
+      "command": [
+        "git",
+        "init",
+        "-q"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 0.018
+    },
+    {
+      "name": "bootstrap",
+      "command": [
+        "bash",
+        "/Users/admin/.config/superpowers/worktrees/agent-bootstrap/simplify-task-relations/scripts/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-final-checks-3noiq87h",
+        "--workflow",
+        "full"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 1.927
+    },
+    {
+      "name": "doctor",
+      "command": [
+        "bash",
+        ".codex/codex-mode.sh",
+        "doctor"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 2.724
+    },
+    {
+      "name": "verifier",
+      "command": [
+        "bash",
+        "scripts/verify-ai-deps.sh"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 5.037
+    },
+    {
+      "name": "smoke-deny",
+      "command": [
+        "bash",
+        "scripts/agent-hook.sh",
+        "claude-pretool"
+      ],
+      "expected_rc": 2,
+      "actual_rc": 2,
+      "seconds": 1.897
+    },
+    {
+      "name": "smoke-cli-ack",
+      "command": [
+        "bash",
+        "scripts/agent-guard.sh",
+        "pre-edit",
+        "--ack",
+        "coordinator final verification",
+        "--",
+        "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-final-checks-3noiq87h/AGENTS.md"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 0.338
+    },
+    {
+      "name": "smoke-allow",
+      "command": [
+        "bash",
+        "scripts/agent-hook.sh",
+        "claude-pretool"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 1.938
+    },
+    {
+      "name": "smoke-wrong-path",
+      "command": [
+        "bash",
+        "scripts/agent-hook.sh",
+        "claude-pretool"
+      ],
+      "expected_rc": 2,
+      "actual_rc": 2,
+      "seconds": 1.908
+    },
+    {
+      "name": "smoke-unprotected",
+      "command": [
+        "bash",
+        "scripts/agent-hook.sh",
+        "claude-pretool"
+      ],
+      "expected_rc": 0,
+      "actual_rc": 0,
+      "seconds": 1.891
+    },
+    {
+      "name": "mutation",
+      "command": [
+        "bash",
+        "scripts/agent-hook.sh",
+        "claude-pretool"
+      ],
+      "expected_rc": 1,
+      "actual_rc": 1,
+      "seconds": 2.041
+    }
+  ],
+  "mutation_expected_original_rc": 2,
+  "mutation_actual_rc": 1,
+  "mutation_exact_rc_assertion_rc": 1,
+  "pass": true
+}

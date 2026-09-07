@@ -1,0 +1,9 @@
+Current mode: planning
+Current flow: full_flow
+Model profile: stable
+Reasoning effort: low
+Default model: custom-planner
+Effective model: custom-planner (default)
+Fallback model: gpt-5.6-terra
+Capacity fallback: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh planning
+Explicit override: CODEX_MODEL_OVERRIDE=<model> .codex/codex-mode.sh planning

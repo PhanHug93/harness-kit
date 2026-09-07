@@ -1,0 +1,14 @@
+{
+  "target": "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/guard-claude-host-ecjyj61l",
+  "source_sha256": {
+    "agent-bootstrap/agent-guard.sh": "8d1074fbc12fa9028382676b985d652945eb1088424ef6e9d51b276268b6cb63",
+    "agent-bootstrap/agent-hook.sh": "2d2d046b85db5249c671b62162172b05210f63444c3886da817ef0cab85db88c",
+    "agent-bootstrap/lib/writers-runtime.sh": "9e6088647a35a15e7d40a7300491e1c9b7df837f3d3ad70398450c94b6d61bc5"
+  },
+  "host_entrypoints_sha256": {
+    "AGENTS.md": "850ac08d4981c483f0ac30bf16d4c136de8e9142be1b736c80b8f54c37501294",
+    "CLAUDE.md": "94d76d6c424cc3985c58504ad22284b62b00b62a3705f0b1d3c836fe07426788",
+    ".claude/settings.json": "5d38a934caaebefee457ff3a6d92b6bdaf3da46e916675d4feb3a95ac14a4e22"
+  },
+  "host_version": "2.1.235"
+}

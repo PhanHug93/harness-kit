@@ -610,10 +610,9 @@ $stack_overlay_content
 
 - If the project needs formal cross-agent handoff, rerun bootstrap with
   \`--workflow full\` to install \`docs/agent-configs/agent-handoff-schema.md\`.
-- Run \`scripts/agent-guard.sh pre-edit <path>\` before changing protected
-  context, harness, CI, release, or generated-runtime paths. For intentional
-  protected edits, rerun with \`--ack <reason>\` and keep the reason in the
-  handoff or final summary.
+- Before protected edits, run \`scripts/agent-guard.sh pre-edit <path>\`; use
+  \`--ack <reason>\` and log it. Claude Code denies unacked edits
+  (exit 2); per-path reuse: \`AGENT_GUARD_ACK_TTL_SECONDS\` (1-hour default).
 - Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
@@ -749,8 +748,8 @@ write_agent_docs() {
   write_overlay_file "$TARGET_DIR/AGENTS.md" <<EOF
 # Agent Conventions - $PROJECT_NAME
 
-Portable multi-agent workflow for Codex, Claude, and thin tool adapters. Durable
-behavior belongs in \`docs/agent-configs/\`.
+Codex/Claude workflow with thin tool adapters. Durable rules:
+\`docs/agent-configs/\`.
 
 ## Startup Context Budget
 
@@ -758,29 +757,25 @@ Always read at startup:
 
 - This file.
 - \`docs/agent-configs/project-agent-context.md\`.
-- \`docs/agent-configs/project-brief.md\` when filled; if it still has
-  \`<!-- UNFILLED -->\`, run \`docs/agent-configs/project-onboarding.md\` before
-  substantive work.
-- The output of \`scripts/agent-guard.sh preflight\` and
-  \`scripts/detect-agent-tech-stack.sh --markdown\` when available.
+- \`docs/agent-configs/project-brief.md\`; if \`<!-- UNFILLED -->\`, run
+  \`docs/agent-configs/project-onboarding.md\` before substantive work.
+- Available preflight and stack-detector output (commands below).
 
 Read on demand:
 
-- \`docs/agent-configs/agent-mode-contracts.md\` when selecting/switching modes.
-- \`docs/agent-configs/agent-handoff-schema.md\` when ownership changes.
-- \`.agents/tasks/<task-id>/\` for the selected local collaboration packet.
+- \`docs/agent-configs/agent-mode-contracts.md\` to select/switch modes.
+- \`docs/agent-configs/agent-handoff-schema.md\` for ownership changes.
+- \`.agents/tasks/<task-id>/\`: selected local collaboration packet.
 - \`docs/agent-configs/karpathy-llm-coding-agent-config.md\` before substantial
   edits or production-risk refactors.
-- \`docs/agent-configs/llm-council-agent-workflow.md\` for councils or high-risk
+- \`docs/agent-configs/llm-council-agent-workflow.md\` for councils/high-risk
   architecture/security/release tradeoffs.
-- Skills under \`.agents/skills/\` only when their descriptions match the
-  current task.
+- \`.agents/skills/\` only for task-matching skill descriptions.
 $mobile_skill_read_on_demand_bullet
 
-Keep the always-on/core startup context under roughly 4k estimated tokens.
+Keep core startup context under roughly 4k estimated tokens.
 \`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
-current estimate, which excludes tool-specific wrappers such as \`CLAUDE.md\`
-and \`GEMINI.md\`.
+estimate, which excludes tool-specific wrappers (\`CLAUDE.md\`, \`GEMINI.md\`).
 
 At the start of substantive work:
 
@@ -795,70 +790,59 @@ Before claiming ordinary completion:
 scripts/agent-guard.sh pre-final --run-verify
 \`\`\`
 
-This runs the fast verification subset. For release, high-risk, or final PR
-readiness, review the detected verification commands first, then run
-\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`. If a
-detected command is a placeholder or needs unavailable local services, record
-the skip reason in the handoff or final summary and rerun with \`--advisory\`
-only when the user or CI environment explicitly requires advisory mode.
+For release/high-risk/final PR readiness, review detected commands, then replace
+this fast verification with
+\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`. For
+placeholders/unavailable local services, record why in the handoff or final
+summary. Rerun with \`--advisory\` only if the user or CI explicitly requires it.
 Optional git gate: \`scripts/install-git-hooks.sh\`.
 
-Stack detection logic lives in \`scripts/agent-tech-stack-lib.sh\`; update that
-library rather than duplicating detection rules in multiple scripts.
-Runtime detector output is bound by
-\`docs/agent-configs/agent-bootstrap.lock.json\`; refresh the lock intentionally
-with \`bash scripts/bootstrap-multi-agent-project.sh --refresh-lock\` after
-stack or module changes.
+Keep detection logic in \`scripts/agent-tech-stack-lib.sh\`, without duplication.
+\`docs/agent-configs/agent-bootstrap.lock.json\` binds runtime detector output;
+after stack/module changes, intentionally refresh it with
+\`bash scripts/bootstrap-multi-agent-project.sh --refresh-lock\`.
 
-If the script is unavailable, infer from build/config files and state
-uncertainty instead of guessing.
+If detection is unavailable, infer from build/config files and state uncertainty.
 
 ## Agentmemory Usage
 
-Agentmemory is the long-term memory layer for project context when the global
-MCP tools are available. The bootstrap installs
-\`.agents/skills/agentmemory-mcp/SKILL.md\` automatically; agents should use
-that skill for recall/save rules. Store shared product/domain requirements with
-platform_scope=shared, and keep implementation details in platform-specific
-memories such as platform_scope=android or platform_scope=ios.
+With global Agentmemory MCP, use auto-installed
+\`.agents/skills/agentmemory-mcp/SKILL.md\` for long-term recall/save.
+Shared product/domain requirements use platform_scope=shared; implementation
+memories use platform-specific scopes, e.g. platform_scope=android or
+platform_scope=ios.
 
-For non-trivial decisions, the \`doubt-driven\` skill
-(\`.agents/skills/doubt-driven/SKILL.md\`) provides a fresh-context adversarial
-check.
+For non-trivial decisions, \`doubt-driven\`
+(\`.agents/skills/doubt-driven/SKILL.md\`) offers a fresh-context adversarial check.
 
 ## Collaboration
 
-Use \`.agents/tasks/<task-id>/\` for local collaboration state. Canonical roles,
-transitions, gates, and review limits live in
-\`docs/agent-configs/agent-mode-contracts.md\`; packet and artifact formats live
-in \`docs/agent-configs/agent-handoff-schema.md\`. Do not let two agents edit the
-same files concurrently.
+Canonical sources above: mode contract for roles/transitions/gates/review limits;
+handoff schema for local packet/artifact formats. No concurrent same-file edits.
 
 ## Local State And No-Scan Guard
 
-Agents must not scan, read, grep, diff, summarize, or print local-only state,
-tool caches, generated output, or sensitive machine files unless the user names
-the exact path and asks for that exact inspection.
+Do not scan/read/grep/diff/summarize/print local-only state, tool caches,
+generated output, or sensitive machine files without an exact user-requested
+path and inspection.
 
 \`\`\`bash
 scripts/agent-hook.sh no-scan-paths
 scripts/agent-hook.sh guard-local-state
 \`\`\`
 
-The no-scan list covers local worktrees, vendor runtime state, personal
-overrides, tool caches, build output, local Codex state, \`.env*\`,
-\`local.properties\`, \`keystore.properties\`, and key/keystore material. The
-tracked-state guard fails on agent runtime state; sensitive project files
-remain no-scan.
+No-scan: local worktrees, vendor runtime state, personal overrides, tool caches,
+build output, local Codex state, \`.env*\`, \`local.properties\`,
+\`keystore.properties\`, keys/keystores. The tracked-state guard fails on agent
+runtime state; sensitive project files remain no-scan.
 
 ## Work Modes
 
-- \`planning\`: strategy, specs, architecture, deep refactor planning, and
-  performance improvement planning. Default is project-local full-flow.
-- \`coding\`: implementation, refactoring, bug fixes, tests, and verification.
-  Follow the canonical adequacy gate before implementation.
-- \`reviewing\`: one findings-first pass; may run project-local verification.
-  Remediation requires an exact requested scope.
+- \`planning\`: strategy, specs, architecture, deep refactor/performance plans.
+- \`coding\`: implementation, refactors, fixes, tests, verification; first pass
+  the canonical adequacy gate.
+- \`reviewing\`: one findings-first pass; project-local verification allowed.
+  Remediate only the exact requested scope.
 
 ## Detected Project Stack
 
@@ -884,42 +868,39 @@ $warning_bullets
 
 ## Human Approval Policy
 
-Default posture for planning/coding/reviewing is project-local full-flow.
-Use supervised/read-only/propose arguments only when the user wants
-step-by-step approval. Full-flow does not authorize external-path mutations,
-installs, commits, pushes, force operations, or local-only secret/permission
-file changes without exact approval.
+Default: project-local full-flow in all modes. Use supervised/read-only/propose
+only for user-requested step-by-step approval. Exact approval is required for
+external-path mutations, installs,
+commits, pushes, force operations, or local-only secret/permission file changes.
 
 ## Git Workflow
 
-All shell git commands must go through:
+Run all shell git commands through:
 
 \`\`\`bash
 ./scripts/rtk git ...
 \`\`\`
 
-If \`./scripts/rtk\` is missing or cannot resolve the pinned rtk binary, run:
+If missing or unable to resolve pinned rtk, run:
 
 \`\`\`bash
 bash scripts/install-rtk.sh
 \`\`\`
 
 - One branch, one commit: fold work with \`git commit --amend\` (or
-  \`git reset --soft <base>\` for several) so the branch stays a single commit.
-- Branch names: \`feature/<slug>\` for features, \`bugfix/<slug>\` for fixes;
-  branch off the latest default branch; keep one logical change per branch.
+  \`git reset --soft <base>\` for several commits).
+- Branches: \`feature/<slug>\` for features, \`bugfix/<slug>\` for fixes; start
+  from the latest default branch, one logical change per branch.
 - Commit messages: Conventional Commits \`type(scope): subject\`
   (\`feat|fix|docs|refactor|test|chore|release\`).
-- No agent identity: never put AI/agent names or \`Co-Authored-By\` agent
-  trailers in commit messages or branch names.
-- Amended push: \`git push --force-with-lease\` (never plain \`--force\`), only on
-  your own \`feature/\`/\`bugfix/\` branch, never the default or shared branch.
-- Approval: do not commit, push, tag, or merge without explicit human approval
-  (these are outward-facing).
+- No agent identity: no AI/agent names or \`Co-Authored-By\` agent trailers in
+  commit messages or branch names.
+- Amended push: \`git push --force-with-lease\`, never \`--force\`; only your own
+  \`feature/\`/\`bugfix/\` branch, never default/shared branches.
+- Approval: commits, pushes, tags, and merges require explicit human approval.
 
-Never silently revert user work. Never hide uncertainty behind confident
-wording. No success claim without fresh verification or a clearly stated reason
-why verification was not run.
+Never silently revert user work or hide uncertainty. No success claim without
+fresh verification or a clear reason it was not run.
 
 ## Project-Specific Conventions
 
@@ -943,12 +924,10 @@ $stack_bullets
 
 ## Deep Project Context
 
-Detected facts above are the seed. The durable deep context lives in
-\`docs/agent-configs/project-brief.md\`. If that file still carries its
-\`<!-- UNFILLED -->\` marker, run project onboarding
-(\`docs/agent-configs/project-onboarding.md\`) before substantive work. The
-onboarding pass also updates project-specific tech-stack notes in this file and
-fills \`docs/superpowers/specs/project-tech-stack.md\`.
+Detection seeds \`docs/agent-configs/project-brief.md\` (durable context).
+If \`<!-- UNFILLED -->\`, run \`docs/agent-configs/project-onboarding.md\` before
+substantive work; it updates this file's tech-stack notes and fills
+\`docs/superpowers/specs/project-tech-stack.md\`.
 
 ## Detected Modules
 
@@ -956,9 +935,8 @@ fills \`docs/superpowers/specs/project-tech-stack.md\`.
 $module_bullets
 <!-- END MANAGED: multi-agent-bootstrap:detected-modules -->
 
-Detection is file-signature based. Treat it as a starting point, then refine
-this file after inspecting the actual architecture, modules, test layout, and
-deployment process.
+Refine file-signature detection here after inspecting architecture, modules,
+tests, and deployment.
 
 ## Verification Commands
 
@@ -966,9 +944,8 @@ deployment process.
 $verify_bullets
 <!-- END MANAGED: multi-agent-bootstrap:verification-candidates -->
 
-Agents must prefer these commands when relevant. If a command is not valid for
-this project, update this file in the same change that introduces the correct
-workflow.
+Prefer relevant commands; replace invalid ones here with workflow fixes in the
+same change.
 
 ## Detection Warnings
 
@@ -984,13 +961,12 @@ $stack_overlay_content
 
 ## Agent Safety Bridge
 
-- Use \`docs/agent-configs/agent-handoff-schema.md\` when transferring work
-  between agents or phases.
-- Run \`scripts/agent-guard.sh pre-edit <path>\` before changing protected
-  context, harness, CI, release, or generated-runtime paths. For intentional
-  protected edits, rerun with \`--ack <reason>\` and keep the reason in the
-  handoff or final summary.
-- Run \`scripts/agent-hook.sh no-scan-paths\` before broad search and avoid
+- Transfers between agents/phases follow
+  \`docs/agent-configs/agent-handoff-schema.md\`.
+- Before protected edits, run \`scripts/agent-guard.sh pre-edit <path>\`; use
+  \`--ack <reason>\` and log it. Claude Code denies unacked edits
+  (exit 2); per-path reuse: \`AGENT_GUARD_ACK_TTL_SECONDS\` (1-hour default).
+- Before broad search, run \`scripts/agent-hook.sh no-scan-paths\`; avoid
   local-only/tool-cache/generated/sensitive paths unless explicitly requested.
 
 ## Project-Specific Rules To Fill In
@@ -1005,38 +981,32 @@ $stack_overlay_content
 
 ## Tech-Stack Customization Rule
 
-At the start of substantive work, agents should run:
+At substantive-work startup, run \`scripts/agent-guard.sh preflight\` and
+\`scripts/detect-agent-tech-stack.sh --markdown\`.
 
-\`\`\`bash
-scripts/agent-guard.sh preflight
-scripts/detect-agent-tech-stack.sh --markdown
-\`\`\`
-
-When agentmemory MCP tools are available, agents should also recall relevant
-project context. If agentmemory is unavailable, agents should combine this file,
-the detector output, and nearby build/config files, then state uncertainty
-instead of guessing.
+Recall relevant context with available agentmemory MCP tools. Otherwise combine
+this file, detector output, and nearby build/config files; state uncertainty.
 EOF
 
   write_file "$TARGET_DIR/docs/agent-configs/agent-handoff-schema.md" <<'EOF'
 # Agent Handoff Schema
 
-Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
+Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Canonical packet and artifact format. Role, transition, and gate policy lives only in
+Role, transition, and gate policy lives only in
 `docs/agent-configs/agent-mode-contracts.md`.
 
 ## Local packet and active-task selection
 
-Packets live at `.agents/tasks/<task-id>/`. They are ignored, ephemeral state
-and may be lost. Git does not enforce their rules: artifact ownership and append-only behavior are conventions, not access controls.
+Packets at `.agents/tasks/<task-id>/` are ignored, ephemeral, and may be lost.
+Git does not enforce their rules: ownership and append-only behavior are conventions, not access controls.
 
 `.agents/tasks/ACTIVE` is a cache; each task's `state.json` is authoritative.
-On resume, scan states and select exactly one open task when only one exists.
+On resume, scan states; select exactly one open task if it is the only one.
 Repair or ignore a stale `ACTIVE` cache. Multiple open tasks require the user to choose.
 Never select the newest task automatically. Report malformed state; do not infer it.
 
-## Maximum artifact set
+## Canonical artifact set
 
 1. `state.json`
 2. `task.md`
@@ -1046,6 +1016,10 @@ Never select the newest task automatically. Report malformed state; do not infer
 6. `user-decision.md`
 
 Only `state.json` and `task.md` are created initially. Create the rest on demand.
+
+These are the canonical packet artifacts, not a hard maximum. A supporting
+evidence file is allowed when `task.md` links it and states its purpose. Do not
+add a machine-readable attachment registry.
 
 ## State contract
 
@@ -1060,6 +1034,8 @@ Concrete initial example:
   "owner": "claude",
   "requested_action": "prepare the specification for Sol technical review",
   "base_commit": null,
+  "source_task": null,
+  "blocks": [],
   "revision_rounds": 0,
   "spec_sufficiency": {
     "verdict": "not_reviewed",
@@ -1076,7 +1052,7 @@ Concrete initial example:
 }
 ```
 
-Allowed values are exact:
+Exact allowed values:
 
 - `status`: `open | awaiting_user | closed`
 - `phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`
@@ -1086,9 +1062,44 @@ Allowed values are exact:
 - `verification.runner`: `none | claude | codex`
 - `verification.status`: `not_run | pass | fail | blocked`
 
-`requested_action` names one next action. `base_commit` is captured on the first entry into implementation and anchors full-diff review. `revision_rounds` starts
-at zero and increments on return to implementation. Verification records runner,
-result, reason, and real report path.
+`requested_action` names one next action. `base_commit` is captured on the first entry into implementation for full-diff review. `revision_rounds` starts at zero;
+increment on return to implementation. Verification records runner, result,
+reason, and real report path.
+
+### Task relations
+
+`source_task` is `null`, a task id, or `<task-id>#<finding-id>`. It records why
+the task exists; finding details, evidence, and scope remain in `task.md`.
+The task-id portion must name an existing packet when it is available.
+Missing `source_task` is equivalent to `null`.
+
+`blocks` is a unique list of task ids that cannot continue while this packet
+is active. Missing `blocks` is equivalent to `[]`. A closed packet's `blocks`
+edges are inactive and no edit to the blocked packet is required. Closing a
+child returns control with an outcome to evaluate; it does not claim that the
+source finding was resolved or automatically advance the blocked task.
+
+Existing `claude-codex-collaboration/v1` packets remain valid. No protocol-version
+bump, bulk migration, or reverse relationship write is required. Missing
+referenced packets do not invalidate the current packet; agents record
+uncertainty and continue.
+
+1. Continue the current task when the root cause and implementation scope are
+   unchanged.
+2. Open a child task only for a distinct finding with independently closable
+   scope. Record the split rationale in `task.md`. Review retries remain in the
+   same packet.
+3. For one exact `source_task` value, at most one active child may block the
+   same target.
+4. A task cannot source from or block itself.
+5. Active blocking edges must be acyclic.
+6. A child must not create another child merely because its review produced a
+   new attempt. Attempts stay in the same packet.
+
+Relations are authoring conventions. Self-reference, duplicate active
+children, and cycles are avoided by the agent writing the packet and checked
+by the reviewer reading it. No guard, hook, or runtime reads `source_task` or
+`blocks` in this phase.
 
 ## Artifact contracts
 
@@ -1106,9 +1117,25 @@ Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
 interfaces, edge cases, migration/security/privacy impact, verification,
 assumptions, and implementation boundaries. When Sol returns `task.md` to analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)` and prior history.
 
+Before marking the task `closed`, append one concise section to `task.md`:
+
+```markdown
+## Outcome
+
+- Summary: <what changed or what was learned>
+- Evidence: <test, report, or review path>
+- Effect on source: <what the source task can decide or do next>
+```
+
+The fields are prose, not enums, and do not drive an automatic transition.
+If an outcome should survive packet loss, manually mirror its Summary,
+Evidence, and Effect on source into the optional task journal described in
+`docs/agent-configs/task-journal.md`. Mirroring is optional, not a closure gate.
+No automatic synchronization or per-task journal creation is introduced.
+
 ### `codex-review.md`
 
-`codex-review.md` has exactly two top-level sections with numbered attempts:
+Exactly two top-level sections with numbered attempts:
 
 ```markdown
 ## Pre-coding technical review
@@ -1134,7 +1161,7 @@ verdict: pass | changes_required | blocked
 
 Review history is append-only and immutable within each top-level section.
 The first final review adds the `## Final technical review` heading.
-If work later returns to specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before the Final heading without modifying prior attempts.
+On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.
 State sufficiency matches the latest pre-coding attempt.
 `fresh_session_attestation` is procedural-only and is not proof of session, model, account, or host independence.
 
@@ -1153,32 +1180,30 @@ checklist and required procedural declarations live in
 
 ### `user-decision.md`
 
-When required, append the dated action, scope, authorization, and alternatives.
+When required, append dated action, scope, authorization, and alternatives.
 
-Prior attempts remain immutable by convention. Repeated work appends the next numbered attempt.
+Prior attempts remain immutable by convention; repeats append the next numbered attempt.
 
-Keep secrets, local-only permission state, and large generated logs out of the
-packet when a path and concise summary are sufficient.
+Exclude secrets, local-only permission state, and large generated logs when a
+path and concise summary suffice.
 EOF
 
   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
 # Agent Mode Contracts
 
-Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
+Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Canonical roles, transitions, and gates. Host files and launchers point here;
-packet formats live in `docs/agent-configs/agent-handoff-schema.md`.
+Canonical roles, transitions, and gates for host files/launchers.
 
 Common rules:
-- Refresh stack context with `scripts/detect-agent-tech-stack.sh --markdown`
-  when available, and respect `scripts/agent-hook.sh no-scan-paths`.
-- Keep collaboration packets under `.agents/tasks/<task-id>/` and use
-  `docs/agent-configs/agent-handoff-schema.md` for their state and artifacts.
-- One phase owner writes at a time. Packet ownership is a coordination
+- Refresh stack context via `scripts/detect-agent-tech-stack.sh --markdown`
+  when available; respect `scripts/agent-hook.sh no-scan-paths`.
+- Packets: `.agents/tasks/<task-id>/`; state/artifact formats:
+  `docs/agent-configs/agent-handoff-schema.md`.
+- One phase owner writes at a time. Ownership is a coordination
   convention, not an authorization or security boundary.
-- Project-local full-flow does not authorize external paths, installs, commits,
-  pushes, force operations, or local-only secret/permission changes without
-  exact user approval.
+- Project-local full-flow requires exact user approval for external paths,
+  installs, commits, pushes, force operations, and local-only secret/permission changes.
 
 ## Claude–Codex Collaboration Protocol
 
@@ -1192,49 +1217,46 @@ Common rules:
 - `resolution` · User -> `closed` | user-selected prior phase
 
 `awaiting_user` is valid only with `resolution` · User. `closed` is valid only with phase `closed`.
-All other active combinations use `open` and the owner
-shown above. Claude implementation requires an explicit user decision recorded
-in the task packet.
+Other active combinations use `open` and the listed owner. Claude implementation
+requires an explicit user decision in the packet.
 
 ### Gates and authority
 
 - Sol owns the blocking adequacy verdict for requirements, interfaces, edge
   cases, tests, migrations, security/privacy, and implementation boundaries.
-- Luna may downgrade `yes` when implementation evidence exposes a specification
-  gap, but may never upgrade `no`; a missing or inconsistent Sol verdict blocks
-  implementation.
-- The protocol allows the initial implementation plus at most two remediation rounds.
-  A further failure moves to `awaiting_user` resolution.
-- Verification records the runner, status, reason, and real report; unavailable
-  or skipped execution must not be reported as a pass. Only the executing host may declare a
-  pass; any other report is testimony pending fresh confirmation.
+- Luna may downgrade `yes` for a spec gap found during implementation,
+  but may never upgrade `no`; missing/inconsistent Sol verdicts block coding.
+- After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost. The user may authorize another pass in the same task. Do not create a child task or a new lifecycle state solely because the checkpoint was reached.
+- Record verification runner, status, reason, and real report. Unavailable/skipped
+  execution cannot pass. Only the executing host may declare a pass; other
+  reports are testimony pending fresh confirmation.
 - An equivalence or invariance guard names the production boundary its fixture
   crosses, declares its mutation in the packet before the test is written, and
   must fail when the fixture transform is replaced with identity.
-- Claude performs one findings-first cross-review pass covering state/review consistency,
-  `base_commit`, verification, any Sol-coding decision and reason, and the
-  approved scope. Claude requires these procedural declarations to be present: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
-  Claude also checks author and reviewer model declarations and author and reviewer session declarations for contradictions.
+- Claude's one findings-first cross-review covers state/review consistency,
+  `base_commit`, verification, any Sol-coding decision and reason, and
+  approved scope. Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
+  Check author/reviewer model and session declarations for contradictions.
 - Sol coding is an escalation: the user must open a new Sol coding session.
   `policy_exception=sol_coding` plus `authorization=user_session` is an
   audit-only procedural declaration and cannot provide file-based authorization.
-- The user is the final authority for closure, bounded revision, a return to a
-  prior phase, Claude implementation, or a Sol-coding policy exception.
+- The user is the final authority for closure, bounded revision, prior-phase
+  return, Claude implementation, or a Sol-coding policy exception.
 
 ## Planning Mode
 
-Analyze the request, evidence, constraints, risks, and verification. Preserve
-packet history. Use council only on demand for high-risk or disputed work.
+Analyze request/evidence/constraints/risks/verification. Preserve packet history.
+Council is on-demand for high-risk/disputed work.
 
 ## Coding Mode
 
-Luna implements only after the latest Sol verdict permits coding. Prefer focused
-root-cause patches, tests, and fresh verification; otherwise move to resolution.
+Luna needs the latest Sol coding approval. Prefer focused root-cause patches,
+tests, and fresh verification; otherwise move to resolution.
 
 ## Reviewing Mode
 
-Ordinary review is one findings-first, evidence-backed pass. Remediation
-requires exact requested scope.
+Ordinary review: one findings-first, evidence-backed pass. Remediate only the
+exact requested scope.
 The `Severity trigger` finding obligation is defined by the reviewing launcher.
 
 ## Project-Specific Mode Overrides
@@ -1247,80 +1269,64 @@ EOF
   write_file "$TARGET_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" <<'EOF'
 # LLM Coding Workflow
 
-Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
+Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Treat natural language as a control plane, not as a substitute for engineering
-understanding. Before changing code, read relevant files, nearby tests, project
-rules, and current diffs. Preserve user work.
-
-Production work requires:
-- context gathering before edits,
-- small coherent patches,
-- explicit assumptions and risks,
-- no unrelated refactors,
-- tests or a justified verification substitute,
-- final diff review before success claims.
-
-Do not prompt-code random fixes until a symptom disappears. Identify the root
-cause, verify behavior, or state what remains unknown.
+Natural language is a control plane, not engineering understanding. Preserve
+user work. Production changes require this procedure.
 
 ## Procedure
 
-1. Gather context first: read the relevant files, nearby tests, project rules,
-   and current diffs. State what you read.
+1. Before edits, read relevant files, nearby tests, project rules, and current
+   diffs. State what you read.
 2. State explicit assumptions and risks before editing.
 3. Make one small coherent patch; no unrelated refactors.
 4. Verify with tests or a justified substitute; review the final diff.
 5. Hand off with `docs/agent-configs/agent-handoff-schema.md` when ownership
    changes. No success claim without evidence.
 
-For a durable task-specific decision, an optional journal may be kept using
+Optional durable task-decision journal:
 `docs/agent-configs/task-journal.md`.
 
 ## Stop conditions
 
-- Stop if you cannot identify the root cause; do not prompt-code until a symptom
-  disappears. Record the unknown in the handoff.
+- Identify the root cause or stop; never prompt-code until symptoms disappear.
+  Record unknowns in the handoff.
 EOF
 
   write_file "$TARGET_DIR/docs/agent-configs/llm-council-agent-workflow.md" <<'EOF'
 # Hybrid Council Workflow
 
-Portable agent config version: see `docs/agent-configs/agent-bootstrap.lock.json`.
+Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
 
-Council is advisory; one executor owns any patch.
+Council is advisory: one patch executor. Use on demand for user-requested,
+high-risk, or disputed architecture, migration, data loss,
+security/privacy, billing, release, performance, concurrency, or unclear root cause.
 
-Use council on demand for user-requested, high-risk, or disputed work involving
-architecture, migration, data loss, security/privacy, billing, release,
-performance, concurrency, or unclear root cause.
-
-Planner/BA checks scope; Dev Lead checks architecture; QC checks regressions;
-Tester names evidence; Chair synthesizes.
+Planner/BA: scope; Dev Lead: architecture; QC: regressions; Tester: evidence;
+Chair: synthesis.
 
 The coordinator chairs. Override only with evidence, user instruction, or a
-safer stop; preserve high-impact minority objections.
+safer stop. Preserve high-impact minority objections.
 
-Ordinary review remains one findings-first pass under
-`docs/agent-configs/agent-mode-contracts.md`; council is not a mandatory review
-stage.
+Ordinary review is one findings-first pass under
+`docs/agent-configs/agent-mode-contracts.md`; council is optional.
 
-For non-trivial decisions, optionally apply the `doubt-driven` skill
-(`.agents/skills/doubt-driven/SKILL.md`) before the verdict.
+Before non-trivial verdicts, optionally apply `doubt-driven`
+(`.agents/skills/doubt-driven/SKILL.md`).
 
 ## Procedure
 
-1. State the question and why council is warranted.
-2. Each role gives a position with evidence (file:line) and a confidence.
+1. State the question and council rationale.
+2. Each role states its position, evidence (file:line), and confidence.
 3. Cross-review the strongest assumptions and missing evidence.
-4. Chair synthesizes: selected approach, rejected alternatives, preserved
+4. Chair synthesizes: approach, rejected alternatives, preserved
    minority objections, executor, verification commands, stop-conditions.
-5. Return the verdict to the single executor using
+5. Return the verdict to the executor using
    `docs/agent-configs/agent-handoff-schema.md` when ownership changes.
 
 ## Stop conditions
 
-- Stop and ask the user when the council cannot reach a verifiable position from
-  repo evidence.
+- Stop and ask the user if repo evidence cannot support a verifiable position.
 - Escalate credible P0/P1 security, privacy, data-loss, billing, release, or
   compliance risk even when the majority disagrees.
 EOF
@@ -1331,26 +1337,30 @@ write_task_journal_doc() {
   write_file "$TARGET_DIR/docs/agent-configs/task-journal.md" <<'EOF'
 # Task Journal (Optional working memory)
 
-Task journals are optional, git-tracked durable-decision notes. They do not
-select the active collaboration task; `.agents/tasks/*/state.json` is the
-authoritative local workflow state described in
+Optional git-tracked journals preserve decisions, never select active tasks.
+`.agents/tasks/*/state.json` is authoritative; see
 `docs/agent-configs/agent-handoff-schema.md`.
 
-When a task-specific decision should survive packet loss or context compaction,
-create `docs/superpowers/plans/<topic>/journal.md` and append a concise dated
-entry. Bootstrap never creates per-task journals.
+For task decisions to survive packet loss/compaction, create
+`docs/superpowers/plans/<topic>/journal.md`; append concise dated entries.
+Bootstrap never creates per-task journals.
+
+To preserve a closure outcome, manually copy the Summary, Evidence, and Effect
+on source from `task.md` into a concise dated journal entry. Mirroring is
+optional, not a closure gate. No automatic synchronization or per-task journal
+creation is introduced.
 
 ## Optional fields
 
-- `memory`: a saved durable-memory id, `none`, or `n/a` when no backend exists.
+- `memory`: saved durable-memory id, `none`, or `n/a` without a backend.
 - `save_decision`: `saved`, `journal-only`, `rejected`, or `n/a`.
-- `evidence`: a supporting file, test, command, or user-decision summary.
+- `evidence`: supporting file, test, command, or user-decision summary.
 - `recall_verified`: `yes`, `n/a`, or `acked-deferred` when recall was relevant.
-- `verification`: the real verification report path, such as
-  `.agents/state/last-verify-report.json`, or `n/a` with a short reason.
+- `verification`: real verification report path, e.g.
+  `.agents/state/last-verify-report.json`, or `n/a` with a reason.
 
-If used, append new entries rather than rewriting prior decisions. Keep secrets,
-credentials, local permission state, and large generated logs out of the file.
+Never rewrite prior decisions. Exclude secrets, credentials, local permission
+state, and large generated logs.
 EOF
 }
 
@@ -1512,9 +1522,9 @@ in `docs/agent-configs/project-agent-context.md`. Handoffs use
 Claude model selection is host-controlled. Keep the same mode contract if the
 selected model is unavailable.
 
-In Claude Code, the shared hook guards Edit/Write/MultiEdit paths before
-protected file edits and delegates shell git handling to the pinned rtk wrapper.
-It is not a security boundary for arbitrary Bash commands.
+In Claude Code, the shared hook denies protected Edit/Write/MultiEdit paths with
+exit 2 unless \`pre-edit --ack <reason> <path>\` exists for that path, and
+delegates shell git handling to pinned rtk. It is not a security boundary for Bash.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/planning.md" <<'EOF'

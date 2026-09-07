@@ -1,0 +1,3 @@
+path=AGENTS.md protected_path=true pattern=AGENTS.md reason=agent entrypoint ack_source=none
+agent-guard: DENIED: protected path /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.k6QVYOLcTE/AGENTS.md
+Run: scripts/agent-guard.sh pre-edit --ack "<reason>" -- /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.k6QVYOLcTE/AGENTS.md

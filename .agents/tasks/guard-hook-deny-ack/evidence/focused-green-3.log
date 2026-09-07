@@ -1,0 +1,9 @@
+bootstrap-test: --- focused guard and Claude hook regression
+bootstrap-test: FAIL: unwritable-state advisory source missing 'ack_source=advisory' in: path=docs/agent-configs/quoted \"path\" $(touch /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.a33C6dRjAv/out/focus-shell-marker).md protected_path=true pattern=docs/agent-configs/** reason=agent context ack_source=log
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX/guard-hook-focus/.agents/state/context-pack.json: Permission denied
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX/guard-hook-focus/.agents/state/guard-ack.log: Permission denied
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX/guard-hook-focus/.agents/state: Directory not empty
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX/guard-hook-focus/.agents: Directory not empty
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX/guard-hook-focus: Directory not empty
+rm: /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.BXOCBDmZVX: Directory not empty
+focused-command-rc=1

@@ -1,0 +1,14 @@
+--- seats-qa.py
++++ seats-qa-reaped.py
+@@ -71,6 +71,11 @@
+         elif proc.poll() is not None:
+             break
+     if proc.poll() is None:
++        try:
++            proc.wait(timeout=1)
++        except subprocess.TimeoutExpired:
++            pass
++    if proc.poll() is None:
+         proc.kill()
+         proc.wait()
+         os.close(master)

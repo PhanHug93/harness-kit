@@ -1,0 +1,24 @@
+{
+  "protocol_version": "claude-codex-collaboration/v1",
+  "task_id": "codex-profile-stderr-isolation",
+  "status": "open",
+  "phase": "technical_review",
+  "owner": "codex",
+  "requested_action": "@gate pre-coding technical review of Specification revision 3 (scope = stderr isolation bug fix only; Astra/effort/rename moved to agent-seats)",
+  "base_commit": null,
+  "source_task": null,
+  "blocks": [],
+  "revision_rounds": 0,
+  "spec_sufficiency": {
+    "verdict": "not_reviewed",
+    "sufficient_for_coding_model": "not_reviewed"
+  },
+  "escalation_reason": null,
+  "verification": {
+    "runner": "none",
+    "status": "not_run",
+    "reason": null,
+    "report": null
+  },
+  "updated_at": "2026-09-06T17:16:24Z"
+}

@@ -1,0 +1,4 @@
+bootstrap-test: --- focused guard and Claude hook regression
+bootstrap-test: FAIL: denied canonical path missing '/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.cCOaJY9P7N/guard-hook-focus/docs/agent-configs/quoted "path" $(touch /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.c8B47aOmLB/out/focus-shell-marker).md' in: agent-guard: DENIED: protected path /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.cCOaJY9P7N/guard-hook-focus/docs/agent-configs/quoted\ \"path\"\ \$\(touch\ /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.c8B47aOmLB/out/focus-shell-marker\).md
+Run: scripts/agent-guard.sh pre-edit --ack "<reason>" -- /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.cCOaJY9P7N/guard-hook-focus/docs/agent-configs/quoted\ \"path\"\ \$\(touch\ /var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.c8B47aOmLB/out/focus-shell-marker\).md
+focused-command-rc=1

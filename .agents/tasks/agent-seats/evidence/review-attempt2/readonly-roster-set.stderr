@@ -1,0 +1,22 @@
+agent-seats: warn: @gate and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+agent-seats: warn: @verify and @build share gpt-5.6-terra: review independence is by session only; such @build launches carry policy_exception=gate_coding
+Traceback (most recent call last):
+  File "<string>", line 579, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "<string>", line 573, in main
+    write_and_render(doc, f"agent-seats: {SEAT_META[seat]['tag']} -> {occupant_text(occ)}")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 317, in write_and_render
+    render(doc)
+    ~~~~~~^^^^^
+  File "<string>", line 307, in render
+    AGENTS_MD.write_bytes(new)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/pathlib/_abc.py", line 641, in write_bytes
+    with self.open(mode='wb') as f:
+         ~~~~~~~~~^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.2/Frameworks/Python.framework/Versions/3.13/lib/python3.13/pathlib/_local.py", line 537, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: '/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-edge-pd9mp8j4/AGENTS.md'

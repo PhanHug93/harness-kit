@@ -1,0 +1,2 @@
+path=AGENTS.md protected_path=true pattern=AGENTS.md reason=agent entrypoint ack_source=ack
+path=AGENTS.md protected_path=true pattern=AGENTS.md reason=agent entrypoint ack_source=log

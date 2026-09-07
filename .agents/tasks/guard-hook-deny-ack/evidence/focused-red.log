@@ -1,0 +1,3 @@
+bootstrap-test: --- focused guard and Claude hook regression
+bootstrap-test: FAIL: protected edit denial expected rc=2 actual rc=1
+focused-red-command-rc=1

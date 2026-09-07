@@ -1,0 +1,24 @@
+{
+  "protocol_version": "claude-codex-collaboration/v1",
+  "task_id": "agent-seats",
+  "status": "open",
+  "phase": "technical_review",
+  "owner": "codex",
+  "requested_action": "@gate pre-coding technical review attempt 3 of Specification revision 2 (R1-R4 + council findings resolved; reference v3, harness v2 103/103 x3, 7 mutations, generator reference hunks); confirm or overturn chair decisions; decide sufficient_for_coding_model for @build",
+  "base_commit": null,
+  "source_task": null,
+  "blocks": [],
+  "revision_rounds": 0,
+  "spec_sufficiency": {
+    "verdict": "partially_sufficient",
+    "sufficient_for_coding_model": "no"
+  },
+  "escalation_reason": null,
+  "verification": {
+    "runner": "none",
+    "status": "not_run",
+    "reason": null,
+    "report": null
+  },
+  "updated_at": "2026-09-06T20:18:35Z"
+}

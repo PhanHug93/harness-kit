@@ -1,0 +1,24 @@
+{
+  "stdin-mutant": {
+    "rc": 1,
+    "passed": 33,
+    "failed": 5,
+    "failed_checks": [
+      "B1 wizard on PTY shows host prompt and waits for input",
+      "B1 wizard applies non-default choices (@spec -> codex luna xhigh fallback terra)",
+      "B1 wizard model change adopts default effort and 'none' drops fallback (@build astra ultra)",
+      "B1 wizard host change to claude drops model (@verify)",
+      "B1 invalid interactive effort -> rc 1, nothing written"
+    ]
+  },
+  "marker-mutant": {
+    "rc": 1,
+    "passed": 35,
+    "failed": 3,
+    "failed_checks": [
+      "B6 orphan BEGIN -> exit 3 twice, file untouched, overlay intact",
+      "B6 duplicate blocks -> exit 3, untouched",
+      "B6 set with broken markers -> seats written, exit 2, explicit message"
+    ]
+  }
+}

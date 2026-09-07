@@ -1,0 +1,626 @@
+diff -ruN -x .git -x '*.orig' wt-pristine/README.md wt2/README.md
+--- a/README.md	2026-08-31 16:45:20.000000000 +0000
++++ b/README.md	2026-09-06 15:34:10.545394683 +0000
+@@ -12,10 +12,10 @@
+ The full workflow gives each participant a clear responsibility:
+ 
+ 1. Claude analyzes the problem and prepares the specification.
+-2. Codex Sol checks whether the specification is safe and complete enough to
++2. Codex Astra checks whether the specification is safe and complete enough to
+    implement.
+ 3. Codex Luna implements the approved, bounded change.
+-4. A fresh Codex Sol review checks the result and its verification evidence.
++4. A fresh Codex Astra review checks the result and its verification evidence.
+ 5. Claude performs an independent cross-review.
+ 6. The user accepts, revises, escalates, or closes the task.
+ 
+@@ -154,7 +154,7 @@
+ or delegated with a reason.
+ 
+ The collaboration records are coordination and audit conventions, not security controls:
+-packet ownership and append-only history are conventions; host, model, and session independence are declarations rather than proof; and Sol authorization entries are audit declarations. Important durable decisions
++packet ownership and append-only history are conventions; host, model, and session independence are declarations rather than proof; and Astra authorization entries are audit declarations. Important durable decisions
+ belong in the project's tracked specification, plan, or memory rather than only
+ in the local task packet.
+ 
+@@ -164,11 +164,15 @@
+ 
+ | Work | Default | Fallback |
+ | --- | --- | --- |
+-| Planning and specification review | `gpt-5.6-sol` | `gpt-5.6-terra` |
+-| Bounded implementation | `gpt-5.6-luna` | `gpt-5.6-terra` |
+-| Final technical review | `gpt-5.6-sol` | `gpt-5.6-terra` |
++| Planning and specification review | `gpt-6-astra` @ `ultra` | `gpt-5.6-terra` @ `xhigh` |
++| Bounded implementation | `gpt-5.6-luna` @ `xhigh` | `gpt-5.6-terra` @ `xhigh` |
++| Final technical review | `gpt-6-astra` @ `ultra` | `gpt-5.6-terra` @ `xhigh` |
+ 
+ Defaults live in `docs/agent-configs/model-profiles.json` in a generated target.
++`ultra` is an Astra-only effort: it binds to the Astra routes, while fallback
++and override launches use the profile's fallback or default effort unless
++`CODEX_REASONING_EFFORT` is set explicitly (the launcher warns when `ultra` is
++forced onto another model).
+ `CODEX_MODEL_OVERRIDE`, the mode-specific override variables,
+ `CODEX_MODEL_PROFILE`, and `CODEX_REASONING_EFFORT` remain available for an
+ explicit operator choice. Claude cross-review is host behavior, not a fourth
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/README.md wt2/agent-bootstrap/README.md
+--- a/agent-bootstrap/README.md	2026-08-29 14:11:16.000000000 +0000
++++ b/agent-bootstrap/README.md	2026-09-06 14:03:58.217231931 +0000
+@@ -74,7 +74,7 @@
+ 
+ Do not assume Claude Code hooks run in Cowork. These collaboration records are coordination and audit conventions, not security controls: packet ownership and append-only history are conventions;
+ host, model, and session independence are declarations rather than proof; and
+-Sol authorization entries are audit declarations.
++Astra authorization entries are audit declarations.
+ 
+ Runtime requirements are Bash, `python3`, Git, and a SHA-256 tool
+ (`sha256sum` or `shasum`). The generated `scripts/install-rtk.sh` handles the
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/lib/writers-docs.sh wt2/agent-bootstrap/lib/writers-docs.sh
+--- a/agent-bootstrap/lib/writers-docs.sh	2026-09-06 08:47:50.000000000 +0000
++++ b/agent-bootstrap/lib/writers-docs.sh	2026-09-06 15:34:10.545133681 +0000
+@@ -991,8 +991,6 @@
+   write_file "$TARGET_DIR/docs/agent-configs/agent-handoff-schema.md" <<'EOF'
+ # Agent Handoff Schema
+ 
+-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
+-
+ Role, transition, and gate policy lives only in
+ `docs/agent-configs/agent-mode-contracts.md`.
+ 
+@@ -1032,7 +1030,7 @@
+   "status": "open",
+   "phase": "analysis",
+   "owner": "claude",
+-  "requested_action": "prepare the specification for Sol technical review",
++  "requested_action": "prepare the specification for Astra technical review",
+   "base_commit": null,
+   "source_task": null,
+   "blocks": [],
+@@ -1115,7 +1113,7 @@
+ 
+ Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
+ interfaces, edge cases, migration/security/privacy impact, verification,
+-assumptions, and implementation boundaries. When Sol returns `task.md` to analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)` and prior history.
++assumptions, and implementation boundaries. When Astra returns `task.md` to analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)` and prior history.
+ 
+ Before marking the task `closed`, append one concise section to `task.md`:
+ 
+@@ -1168,7 +1166,7 @@
+ ### `implementation.md`
+ 
+ Append `## Implementation attempt <n>` with model/source, route, scope, files,
+-verification, deviations, risks, blockers, and any adequacy downgrade. Sol coding records
++verification, deviations, risks, blockers, and any adequacy downgrade. Astra coding records
+ `policy_exception=sol_coding`, `authorization=user_session`, and the reason;
+ its policy meaning is defined in `docs/agent-configs/agent-mode-contracts.md`.
+ 
+@@ -1191,8 +1189,6 @@
+   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
+ # Agent Mode Contracts
+ 
+-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
+-
+ Canonical roles, transitions, and gates for host files/launchers.
+ 
+ Common rules:
+@@ -1210,9 +1206,9 @@
+ ### Constrained transitions
+ 
+ - `analysis` · Claude -> `technical_review`
+-- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`
++- `technical_review` · Codex Astra -> `analysis` | `implementation` | `resolution`
+ - `implementation` · Codex Luna -> `verification` | `resolution`
+-- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`
++- `verification` · Codex Astra -> `implementation` | `cross_review` | `resolution`
+ - `cross_review` · Claude -> `implementation` | `resolution`
+ - `resolution` · User -> `closed` | user-selected prior phase
+ 
+@@ -1222,10 +1218,10 @@
+ 
+ ### Gates and authority
+ 
+-- Sol owns the blocking adequacy verdict for requirements, interfaces, edge
++- Astra owns the blocking adequacy verdict for requirements, interfaces, edge
+   cases, tests, migrations, security/privacy, and implementation boundaries.
+ - Luna may downgrade `yes` for a spec gap found during implementation,
+-  but may never upgrade `no`; missing/inconsistent Sol verdicts block coding.
++  but may never upgrade `no`; missing/inconsistent Astra verdicts block coding.
+ - After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost. The user may authorize another pass in the same task. Do not create a child task or a new lifecycle state solely because the checkpoint was reached.
+ - Record verification runner, status, reason, and real report. Unavailable/skipped
+   execution cannot pass. Only the executing host may declare a pass; other
+@@ -1234,14 +1230,14 @@
+   crosses, declares its mutation in the packet before the test is written, and
+   must fail when the fixture transform is replaced with identity.
+ - Claude's one findings-first cross-review covers state/review consistency,
+-  `base_commit`, verification, any Sol-coding decision and reason, and
++  `base_commit`, verification, any Astra-coding decision and reason, and
+   approved scope. Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
+   Check author/reviewer model and session declarations for contradictions.
+-- Sol coding is an escalation: the user must open a new Sol coding session.
++- Astra coding is an escalation: the user must open a new Astra coding session.
+   `policy_exception=sol_coding` plus `authorization=user_session` is an
+   audit-only procedural declaration and cannot provide file-based authorization.
+ - The user is the final authority for closure, bounded revision, prior-phase
+-  return, Claude implementation, or a Sol-coding policy exception.
++  return, Claude implementation, or an Astra-coding policy exception.
+ 
+ ## Planning Mode
+ 
+@@ -1250,7 +1246,7 @@
+ 
+ ## Coding Mode
+ 
+-Luna needs the latest Sol coding approval. Prefer focused root-cause patches,
++Luna needs the latest Astra coding approval. Prefer focused root-cause patches,
+ tests, and fresh verification; otherwise move to resolution.
+ 
+ ## Reviewing Mode
+@@ -1269,8 +1265,6 @@
+   write_file "$TARGET_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" <<'EOF'
+ # LLM Coding Workflow
+ 
+-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
+-
+ Natural language is a control plane, not engineering understanding. Preserve
+ user work. Production changes require this procedure.
+ 
+@@ -1296,8 +1290,6 @@
+   write_file "$TARGET_DIR/docs/agent-configs/llm-council-agent-workflow.md" <<'EOF'
+ # Hybrid Council Workflow
+ 
+-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
+-
+ Council is advisory: one patch executor. Use on demand for user-requested,
+ high-risk, or disputed architecture, migration, data loss,
+ security/privacy, billing, release, performance, concurrency, or unclear root cause.
+@@ -1552,7 +1544,7 @@
+ `.agents/tasks/<task-id>/`.
+ 
+ Default Claude behavior is handoff, not direct implementation. Execute only
+-after an explicit user decision and a blocking Sol adequacy verdict permit
++after an explicit user decision and a blocking Astra adequacy verdict permit
+ Claude implementation; unavailability alone does not change ownership. If
+ selected, implement scoped changes, verify, and inspect the final diff. Respect
+ `scripts/agent-hook.sh no-scan-paths`.
+@@ -1796,8 +1788,11 @@
+ CODEX_USE_FALLBACK=1 .codex/codex-mode.sh reviewing
+ ```
+ 
+-Fallback defaults come from `docs/agent-configs/model-profiles.json`. Override
+-per launch when capacity or rollout needs a one-shot change:
++Fallback defaults come from `docs/agent-configs/model-profiles.json`. Route
++efforts bind to the route's primary model: `ultra` is Astra-only, so a fallback
++launch uses the profile's fallback effort and a model override uses the profile
++default effort unless `CODEX_REASONING_EFFORT` is set explicitly. Override per
++launch when capacity or rollout needs a one-shot change:
+ 
+ ```bash
+ CODEX_MODEL_OVERRIDE=gpt-5.4 .codex/codex-mode.sh planning
+@@ -1829,6 +1824,13 @@
+ STANDARD_APPROVAL="on-request"
+ FULL_FLOW_APPROVAL="never"
+ REASONING_EFFORT=""
++PLANNING_EFFORT=""
++CODING_EFFORT=""
++REVIEWING_EFFORT=""
++PLANNING_FALLBACK_EFFORT=""
++CODING_FALLBACK_EFFORT=""
++REVIEWING_FALLBACK_EFFORT=""
++EXPLICIT_EFFORT=""
+ MODEL_PROFILE=""
+ MODEL_PROFILE_ERROR=""
+ 
+@@ -1859,7 +1861,7 @@
+     "Capacity handling:" \
+     "- CODEX_USE_FALLBACK=1 uses the configured fallback model for the selected mode." \
+     "- CODEX_MODEL_OVERRIDE=<model> selects an explicit model for one launch." \
+-    "- CODEX_REASONING_EFFORT=<effort> overrides xhigh only when capacity requires it."
++    "- CODEX_REASONING_EFFORT=<effort> overrides the selected route effort for one launch (capacity or rollout)."
+ }
+ 
+ is_valid_mode() {
+@@ -1927,7 +1929,19 @@
+     return 1
+   fi
+ 
+-  if ! parsed="$(python3 - "$MODEL_PROFILES" "$requested_profile" 2>&1 <<'PY_MODEL_PROFILE'
++  # Keep the TSV payload (stdout) separate from Python diagnostics (stderr): a
++  # warning such as macOS "confstr() failed ... DARWIN_USER_TEMP_DIR" exits 0 and
++  # must not corrupt the parsed fields. The temp file and its EXIT trap live in
++  # this command-substitution subshell only.
++  local capture_rc=0
++  parsed="$(
++    profile_stderr="$(mktemp "${TMPDIR:-/tmp}/codex-mode-profile.XXXXXX")" || {
++      printf 'model profile error: cannot create a temporary file under %s\n' "${TMPDIR:-/tmp}"
++      exit 1
++    }
++    trap 'rm -f "$profile_stderr"' EXIT
++    profile_rc=0
++    python3 - "$MODEL_PROFILES" "$requested_profile" 2>"$profile_stderr" <<'PY_MODEL_PROFILE' || profile_rc=$?
+ import json
+ import pathlib
+ import re
+@@ -1944,7 +1958,17 @@
+     "coding_fallback_model",
+     "reviewing_fallback_model",
+ )
+-allowed_efforts = {"none", "low", "medium", "high", "xhigh", "max"}
++allowed_efforts = {"none", "low", "medium", "high", "xhigh", "ultra", "max"}
++route_effort_keys = (
++    "planning_reasoning_effort",
++    "coding_reasoning_effort",
++    "reviewing_reasoning_effort",
++)
++fallback_effort_keys = (
++    "planning_fallback_reasoning_effort",
++    "coding_fallback_reasoning_effort",
++    "reviewing_fallback_reasoning_effort",
++)
+ model_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+ 
+ try:
+@@ -1986,27 +2010,50 @@
+ effort = profile["reasoning_effort"]
+ if effort not in allowed_efforts:
+     raise SystemExit(f"model profile error: unsupported reasoning_effort '{effort}'")
++route_efforts = []
++for key in route_effort_keys + fallback_effort_keys:
++    value = profile.get(key, effort)
++    if not isinstance(value, str) or not value:
++        raise SystemExit(
++            f"model profile error: profile '{profile_name}' field '{key}' must be a non-empty string"
++        )
++    if value not in allowed_efforts:
++        raise SystemExit(f"model profile error: unsupported {key} '{value}'")
++    route_efforts.append(value)
+ for key in required_keys[1:]:
+     if not model_pattern.fullmatch(profile[key]):
+         raise SystemExit(f"model profile error: invalid model id for '{key}'")
+ 
+-print("\t".join([profile_name] + [profile[key] for key in required_keys]))
++print("\t".join([profile_name] + [profile[key] for key in required_keys] + route_efforts))
+ PY_MODEL_PROFILE
+-  )"; then
++    if [[ "$profile_rc" -eq 0 ]]; then
++      if [[ -s "$profile_stderr" ]]; then
++        cat "$profile_stderr" >&2
++      fi
++      exit 0
++    fi
++    if [[ -s "$profile_stderr" ]]; then
++      cat "$profile_stderr"
++    else
++      printf 'model profile error: python3 exited with status %s without diagnostics\n' "$profile_rc"
++    fi
++    exit 1
++  )" || capture_rc=$?
++  if [[ "$capture_rc" -ne 0 ]]; then
+     MODEL_PROFILE_ERROR="$parsed"
+     return 1
+   fi
+ 
+   IFS=$'\t' read -r -a fields <<< "$parsed"
+-  if [[ "${#fields[@]}" -ne 8 ]]; then
+-    MODEL_PROFILE_ERROR="model profile error: parser returned ${#fields[@]} fields; expected 8"
++  if [[ "${#fields[@]}" -ne 14 ]]; then
++    MODEL_PROFILE_ERROR="model profile error: parser returned ${#fields[@]} fields; expected 14"
+     return 1
+   fi
+ 
+-  effective_effort="${fields[1]}"
++  effective_effort=""
+   if [[ -n "${CODEX_REASONING_EFFORT:-}" ]]; then
+     case "$CODEX_REASONING_EFFORT" in
+-      none|low|medium|high|xhigh|max) effective_effort="$CODEX_REASONING_EFFORT" ;;
++      none|low|medium|high|xhigh|ultra|max) effective_effort="$CODEX_REASONING_EFFORT" ;;
+       *)
+         MODEL_PROFILE_ERROR="model profile error: unsupported CODEX_REASONING_EFFORT '$CODEX_REASONING_EFFORT'"
+         return 1
+@@ -2015,7 +2062,14 @@
+   fi
+ 
+   MODEL_PROFILE="${fields[0]}"
+-  REASONING_EFFORT="$effective_effort"
++  EXPLICIT_EFFORT="$effective_effort"
++  REASONING_EFFORT="${fields[1]}"
++  PLANNING_EFFORT="${fields[8]}"
++  CODING_EFFORT="${fields[9]}"
++  REVIEWING_EFFORT="${fields[10]}"
++  PLANNING_FALLBACK_EFFORT="${fields[11]}"
++  CODING_FALLBACK_EFFORT="${fields[12]}"
++  REVIEWING_FALLBACK_EFFORT="${fields[13]}"
+   PLANNING_MODEL="${fields[2]}"
+   CODING_MODEL="${fields[3]}"
+   REVIEWING_MODEL="${fields[4]}"
+@@ -2033,6 +2087,57 @@
+   esac
+ }
+ 
++effort_for_mode() {
++  case "$1" in
++    planning) printf '%s' "$PLANNING_EFFORT" ;;
++    coding) printf '%s' "$CODING_EFFORT" ;;
++    reviewing) printf '%s' "$REVIEWING_EFFORT" ;;
++    *) return 1 ;;
++  esac
++}
++
++fallback_effort_for_mode() {
++  case "$1" in
++    planning) printf '%s' "$PLANNING_FALLBACK_EFFORT" ;;
++    coding) printf '%s' "$CODING_FALLBACK_EFFORT" ;;
++    reviewing) printf '%s' "$REVIEWING_FALLBACK_EFFORT" ;;
++    *) return 1 ;;
++  esac
++}
++
++# Route efforts bind to the route's primary model (ultra is Astra-only). Any
++# other effective model uses the fallback effort (fallback) or the profile
++# default (override) unless CODEX_REASONING_EFFORT is set explicitly.
++effort_for_launch() {
++  local mode="$1"
++  local model_source="$2"
++  if [[ -n "$EXPLICIT_EFFORT" ]]; then
++    printf '%s' "$EXPLICIT_EFFORT"
++    return 0
++  fi
++  case "$model_source" in
++    default) effort_for_mode "$mode" ;;
++    CODEX_USE_FALLBACK) fallback_effort_for_mode "$mode" ;;
++    *) printf '%s' "$REASONING_EFFORT" ;;
++  esac
++}
++
++warn_ultra_model_mismatch() {
++  local effort="$1"
++  local model="$2"
++  [[ "$effort" == "ultra" ]] || return 0
++  if { [[ "$PLANNING_EFFORT" == "ultra" && "$model" == "$PLANNING_MODEL" ]] ||
++    [[ "$REVIEWING_EFFORT" == "ultra" && "$model" == "$REVIEWING_MODEL" ]] ||
++    [[ "$CODING_EFFORT" == "ultra" && "$model" == "$CODING_MODEL" ]]; }; then
++    return 0
++  fi
++  echo "warn: reasoning effort ultra was selected explicitly for $model; ultra is currently supported only by the profile's ultra routes (Astra)." >&2
++}
++
++review_route_model() {
++  [[ "$1" == "$REVIEWING_MODEL" || "$1" == "$PLANNING_MODEL" ]]
++}
++
+ fallback_model_for_mode() {
+   case "$1" in
+     planning) printf '%s' "$PLANNING_FALLBACK_MODEL" ;;
+@@ -2162,7 +2267,7 @@
+     IFS=$'\t'
+     read -r doctor_model doctor_model_source <<< "$doctor_resolved_model"
+     IFS="$old_ifs"
+-    doctor_ok "model profile $MODEL_PROFILE: route=$doctor_mode model=$doctor_model source=$doctor_model_source effort=$REASONING_EFFORT"
++    doctor_ok "model profile $MODEL_PROFILE: route=$doctor_mode model=$doctor_model source=$doctor_model_source effort=$(effort_for_launch "$doctor_mode" "$doctor_model_source") (planning=$PLANNING_EFFORT coding=$CODING_EFFORT reviewing=$REVIEWING_EFFORT; fallback planning=$PLANNING_FALLBACK_EFFORT coding=$CODING_FALLBACK_EFFORT reviewing=$REVIEWING_FALLBACK_EFFORT)"
+   else
+     doctor_bad "$MODEL_PROFILE_ERROR"
+   fi
+@@ -2360,9 +2465,9 @@
+   fi
+ 
+   {
+-    echo "Codex launch: mode=$mode flow=$flow model=$model reasoning=$REASONING_EFFORT sandbox=$sandbox approval=$approval"
++    echo "Codex launch: mode=$mode flow=$flow model=$model reasoning=$(effort_for_launch "$mode" "$model_source") sandbox=$sandbox approval=$approval"
+     echo "Model source: $model_source"
+-    if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
++    if [[ "$mode" == "coding" ]] && review_route_model "$model"; then
+       sol_coding_audit_record
+       echo
+     fi
+@@ -2398,7 +2503,7 @@
+   local model_source="$4"
+   local provenance="actual_model=$model model_source=$model_source."
+   local sol_coding_audit=""
+-  if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
++  if [[ "$mode" == "coding" ]] && review_route_model "$model"; then
+     sol_coding_audit=" $(sol_coding_audit_record). Record the existing task's escalation_reason in implementation.md."
+   fi
+   case "$mode:$flow" in
+@@ -2450,6 +2555,9 @@
+     approval="$STANDARD_APPROVAL"
+   fi
+ 
++  local launch_effort
++  launch_effort="$(effort_for_launch "$mode" "$model_source")"
++  warn_ultra_model_mismatch "$launch_effort" "$model"
+   seed="$(mode_prompt "$mode" "$flow" "$model" "$model_source")"
+   codex_bin="$(resolve_codex_bin)"
+   [[ "$persist" == "true" ]] && write_mode "$mode" "$flow"
+@@ -2462,10 +2570,10 @@
+   if [[ $# -gt 0 ]]; then
+     prompt="$*"
+     export CODEX_HARNESS_SESSION=1
+-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
++    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$launch_effort\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
+   else
+     export CODEX_HARNESS_SESSION=1
+-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
++    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$launch_effort\"" -s "$sandbox" -a "$approval" "$seed"
+   fi
+ }
+ 
+@@ -2532,7 +2640,7 @@
+     echo "Current mode: $current_mode"
+     echo "Current flow: $current_flow"
+     echo "Model profile: $MODEL_PROFILE"
+-    echo "Reasoning effort: $REASONING_EFFORT"
++    echo "Reasoning effort: $(effort_for_launch "$current_mode" "$current_model_source") (planning=$PLANNING_EFFORT coding=$CODING_EFFORT reviewing=$REVIEWING_EFFORT; fallback planning=$PLANNING_FALLBACK_EFFORT coding=$CODING_FALLBACK_EFFORT reviewing=$REVIEWING_FALLBACK_EFFORT)"
+     echo "Default model: $(model_for_mode "$current_mode")"
+     echo "Effective model: $current_model ($current_model_source)"
+     echo "Fallback model: $(fallback_model_for_mode "$current_mode")"
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/lib/writers-runtime.sh wt2/agent-bootstrap/lib/writers-runtime.sh
+--- a/agent-bootstrap/lib/writers-runtime.sh	2026-09-06 09:01:27.000000000 +0000
++++ b/agent-bootstrap/lib/writers-runtime.sh	2026-09-06 15:33:03.104567993 +0000
+@@ -1135,6 +1135,9 @@
+             if isinstance(profile, dict):
+                 for key in required_profile_keys:
+                     require(non_empty_string(profile.get(key)), f"model profile {name}.{key} must be a non-empty string")
++                for key in ("planning_reasoning_effort", "coding_reasoning_effort", "reviewing_reasoning_effort", "planning_fallback_reasoning_effort", "coding_fallback_reasoning_effort", "reviewing_fallback_reasoning_effort"):
++                    if key in profile:
++                        require(non_empty_string(profile.get(key)), f"model profile {name}.{key} must be a non-empty string when present")
+ else:
+     require(False, "model profiles must be a JSON object")
+ 
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/model-profiles/codex-model-profiles.json wt2/agent-bootstrap/model-profiles/codex-model-profiles.json
+--- a/agent-bootstrap/model-profiles/codex-model-profiles.json	2026-08-28 06:22:45.000000000 +0000
++++ b/agent-bootstrap/model-profiles/codex-model-profiles.json	2026-09-06 15:33:02.972458567 +0000
+@@ -4,9 +4,15 @@
+   "profiles": {
+     "stable": {
+       "reasoning_effort": "xhigh",
+-      "planning_model": "gpt-5.6-sol",
++      "planning_reasoning_effort": "ultra",
++      "coding_reasoning_effort": "xhigh",
++      "reviewing_reasoning_effort": "ultra",
++      "planning_fallback_reasoning_effort": "xhigh",
++      "coding_fallback_reasoning_effort": "xhigh",
++      "reviewing_fallback_reasoning_effort": "xhigh",
++      "planning_model": "gpt-6-astra",
+       "coding_model": "gpt-5.6-luna",
+-      "reviewing_model": "gpt-5.6-sol",
++      "reviewing_model": "gpt-6-astra",
+       "planning_fallback_model": "gpt-5.6-terra",
+       "coding_fallback_model": "gpt-5.6-terra",
+       "reviewing_fallback_model": "gpt-5.6-terra"
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/schemas/agent-model-profiles-v1.schema.json wt2/agent-bootstrap/schemas/agent-model-profiles-v1.schema.json
+--- a/agent-bootstrap/schemas/agent-model-profiles-v1.schema.json	2026-08-28 06:22:45.000000000 +0000
++++ b/agent-bootstrap/schemas/agent-model-profiles-v1.schema.json	2026-09-06 15:33:03.045281424 +0000
+@@ -28,7 +28,13 @@
+           "reviewing_model": { "type": "string", "minLength": 1 },
+           "planning_fallback_model": { "type": "string", "minLength": 1 },
+           "coding_fallback_model": { "type": "string", "minLength": 1 },
+-          "reviewing_fallback_model": { "type": "string", "minLength": 1 }
++          "reviewing_fallback_model": { "type": "string", "minLength": 1 },
++          "planning_reasoning_effort": { "type": "string", "minLength": 1 },
++          "coding_reasoning_effort": { "type": "string", "minLength": 1 },
++          "reviewing_reasoning_effort": { "type": "string", "minLength": 1 },
++          "planning_fallback_reasoning_effort": { "type": "string", "minLength": 1 },
++          "coding_fallback_reasoning_effort": { "type": "string", "minLength": 1 },
++          "reviewing_fallback_reasoning_effort": { "type": "string", "minLength": 1 }
+         },
+         "additionalProperties": true
+       }
+diff -ruN -x .git -x '*.orig' wt-pristine/agent-bootstrap/verify-ai-deps.sh wt2/agent-bootstrap/verify-ai-deps.sh
+--- a/agent-bootstrap/verify-ai-deps.sh	2026-08-28 06:22:45.000000000 +0000
++++ b/agent-bootstrap/verify-ai-deps.sh	2026-09-06 15:33:03.105231491 +0000
+@@ -383,6 +383,9 @@
+             if isinstance(profile, dict):
+                 for key in required_profile_keys:
+                     require(non_empty_string(profile.get(key)), f"model profile {name}.{key} must be a non-empty string")
++                for key in ("planning_reasoning_effort", "coding_reasoning_effort", "reviewing_reasoning_effort", "planning_fallback_reasoning_effort", "coding_fallback_reasoning_effort", "reviewing_fallback_reasoning_effort"):
++                    if key in profile:
++                        require(non_empty_string(profile.get(key)), f"model profile {name}.{key} must be a non-empty string when present")
+ else:
+     require(False, "model profiles must be a JSON object")
+ 
+diff -ruN -x .git -x '*.orig' wt-pristine/scripts/test-bootstrap-multi-agent-project.sh wt2/scripts/test-bootstrap-multi-agent-project.sh
+--- a/scripts/test-bootstrap-multi-agent-project.sh	2026-09-06 09:10:39.000000000 +0000
++++ b/scripts/test-bootstrap-multi-agent-project.sh	2026-09-06 14:03:58.258837362 +0000
+@@ -1421,9 +1421,9 @@
+ root_model_profiles="$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json")"
+ need_contains "$root_model_profiles" '"default_profile": "stable"' "model profiles default profile"
+ need_contains "$root_model_profiles" '"reasoning_effort": "xhigh"' "model profiles reasoning effort"
+-need_contains "$root_model_profiles" '"planning_model": "gpt-5.6-sol"' "model profiles planning model"
++need_contains "$root_model_profiles" '"planning_model": "gpt-6-astra"' "model profiles planning model"
+ need_contains "$root_model_profiles" '"coding_model": "gpt-5.6-luna"' "model profiles coding model"
+-need_contains "$root_model_profiles" '"reviewing_model": "gpt-5.6-sol"' "model profiles reviewing model"
++need_contains "$root_model_profiles" '"reviewing_model": "gpt-6-astra"' "model profiles reviewing model"
+ need_contains "$root_model_profiles" '"planning_fallback_model": "gpt-5.6-terra"' "model profiles planning fallback"
+ need_contains "$root_model_profiles" '"coding_fallback_model": "gpt-5.6-terra"' "model profiles coding fallback"
+ need_contains "$root_model_profiles" '"reviewing_fallback_model": "gpt-5.6-terra"' "model profiles reviewing fallback"
+@@ -1736,7 +1736,7 @@
+   need_contains "$(cat "$operator_readme")" "Return to Claude for independent cross-review" "operator README Claude cross-review step"
+   need_contains "$(cat "$operator_readme")" "packet ownership and append-only history are conventions" "operator README convention limitation"
+   need_contains "$(cat "$operator_readme")" "host, model, and session independence are declarations rather than proof" "operator README independence limitation"
+-  need_contains "$(cat "$operator_readme")" "Sol authorization entries are audit declarations" "operator README Sol authorization limitation"
++  need_contains "$(cat "$operator_readme")" "Astra authorization entries are audit declarations" "operator README Sol authorization limitation"
+   need_contains "$(cat "$operator_readme")" "not security controls" "operator README security-control limitation"
+   need_contains "$(cat "$operator_readme")" "Do not assume Claude Code hooks run in Cowork." "operator README Cowork hook limitation"
+ done
+@@ -2010,7 +2010,7 @@
+ need_contains "$handoff_contract" "Review history is append-only and immutable within each top-level section." "handoff sectioned review history"
+ need_contains "$handoff_contract" 'The first final review adds the `## Final technical review` heading.' "handoff first final-review heading"
+ need_contains "$handoff_contract" 'On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.' "handoff resumed specification-review placement"
+-need_contains "$handoff_contract" 'When Sol returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
++need_contains "$handoff_contract" 'When Astra returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
+ need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
+ need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
+ need_contains "$handoff_contract" "not proof of session, model, account, or host independence" "handoff fresh-session non-proof"
+@@ -2021,15 +2021,15 @@
+ need_contains "$handoff_contract" "Role, transition, and gate policy lives only in" "handoff defers collaboration policy"
+ 
+ need_contains "$mode_contracts" '- `analysis` · Claude -> `technical_review`' "analysis transition"
+-need_contains "$mode_contracts" '- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`' "technical review transitions"
++need_contains "$mode_contracts" '- `technical_review` · Codex Astra -> `analysis` | `implementation` | `resolution`' "technical review transitions"
+ need_contains "$mode_contracts" '- `implementation` · Codex Luna -> `verification` | `resolution`' "implementation transitions"
+-need_contains "$mode_contracts" '- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`' "verification transitions"
++need_contains "$mode_contracts" '- `verification` · Codex Astra -> `implementation` | `cross_review` | `resolution`' "verification transitions"
+ need_contains "$mode_contracts" '- `cross_review` · Claude -> `implementation` | `resolution`' "cross-review transitions"
+ need_contains "$mode_contracts" '- `resolution` · User -> `closed` | user-selected prior phase' "resolution transitions"
+ need_contains "$mode_contracts" "awaiting_user" "mode contracts awaiting-user invariant"
+ need_contains "$mode_contracts" 'only with `resolution` · User' "mode contracts awaiting-user owner restriction"
+ need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
+-need_contains "$mode_contracts" "Sol owns the blocking adequacy verdict" "mode contracts Sol adequacy ownership"
++need_contains "$mode_contracts" "Astra owns the blocking adequacy verdict" "mode contracts Sol adequacy ownership"
+ need_contains "$mode_contracts" 'Luna may downgrade `yes`' "mode contracts Luna downgrade"
+ need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
+ need_contains "$mode_contracts" 'After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost.' "mode remediation checkpoint"
+@@ -2043,11 +2043,11 @@
+ need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
+ need_contains "$mode_contracts" "verification" "mode contracts Claude verification check"
+ need_contains "$mode_contracts" "declarations" "mode contracts Claude declarations check"
+-need_contains "$mode_contracts" "Sol-coding decision and reason" "mode contracts Claude escalation check"
++need_contains "$mode_contracts" "Astra-coding decision and reason" "mode contracts Claude escalation check"
+ need_contains "$mode_contracts" "approved scope" "mode contracts Claude scope check"
+ need_contains "$mode_contracts" "Check author/reviewer model and session declarations for contradictions." "mode contracts Claude declaration contradiction check"
+ need_contains "$mode_contracts" 'Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.' "mode contracts Claude provenance declarations"
+-need_contains "$mode_contracts" "user must open a new Sol coding session" "mode contracts new-session escalation"
++need_contains "$mode_contracts" "user must open a new Astra coding session" "mode contracts new-session escalation"
+ need_contains "$mode_contracts" "audit-only procedural declaration" "mode contracts Sol-coding audit limitation"
+ need_contains "$mode_contracts" "cannot provide file-based authorization" "mode contracts no file authorization"
+ need_contains "$mode_contracts" "The user is the final authority" "mode contracts user authority"
+@@ -2118,9 +2118,9 @@
+   need_contains "$output" "Model source: $expected_source" "$label launch model source"
+ }
+ 
+-capture_task3_codex_launch "planning route" planning gpt-5.6-sol default xhigh
++capture_task3_codex_launch "planning route" planning gpt-6-astra default ultra
+ capture_task3_codex_launch "coding route" coding gpt-5.6-luna default xhigh
+-capture_task3_codex_launch "reviewing route" reviewing gpt-5.6-sol default xhigh
++capture_task3_codex_launch "reviewing route" reviewing gpt-6-astra default ultra
+ reviewing_seed="$(cat "$TASK3_CAPTURE")"
+ severity_rule="Severity must name its trigger condition and frequency, or mark itself as an estimate."
+ need_contains "$reviewing_seed" "$severity_rule" "reviewing seed severity trigger obligation"
+@@ -2136,7 +2136,7 @@
+ capture_task3_codex_launch "coding route override" coding custom-coder CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=custom-coder
+ capture_task3_codex_launch "global override precedence" coding global-model CODEX_MODEL_OVERRIDE xhigh CODEX_MODEL_OVERRIDE=global-model CODEX_CODING_MODEL_OVERRIDE=custom-coder CODEX_USE_FALLBACK=1
+ capture_task3_codex_launch "reasoning override" coding gpt-5.6-luna default high CODEX_REASONING_EFFORT=high
+-capture_task3_codex_launch "Sol coding audit" coding gpt-5.6-sol CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=gpt-5.6-sol
++capture_task3_codex_launch "Astra coding audit" coding gpt-6-astra CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
+ need_contains "$(cat "$TASK3_CAPTURE")" "policy_exception=sol_coding authorization=user_session" "Sol coding seed audit record"
+ need_contains "$(cat "$TASK3_OUTPUT")" "policy_exception=sol_coding authorization=user_session" "Sol coding printed audit record"
+ 
+diff -ruN -x .git -x '*.orig' wt-pristine/scripts/test-onboarding-fixtures.sh wt2/scripts/test-onboarding-fixtures.sh
+--- a/scripts/test-onboarding-fixtures.sh	2026-09-04 06:30:46.000000000 +0000
++++ b/scripts/test-onboarding-fixtures.sh	2026-09-06 14:04:28.917659839 +0000
+@@ -121,7 +121,7 @@
+   local mode_contracts; mode_contracts="$(cat "$dir/docs/agent-configs/agent-mode-contracts.md")"
+   need_contains "$mode_contracts" "## Claude–Codex Collaboration Protocol" "mode contracts canonical collaboration protocol"
+   need_contains "$mode_contracts" '`analysis` · Claude' "mode contracts Claude analysis owner"
+-  need_contains "$mode_contracts" '`technical_review` · Codex Sol' "mode contracts Sol technical review owner"
++  need_contains "$mode_contracts" '`technical_review` · Codex Astra' "mode contracts Astra technical review owner"
+   need_contains "$mode_contracts" '`implementation` · Codex Luna' "mode contracts Luna implementation owner"
+   need_contains "$mode_contracts" "After two unsuccessful remediation returns" "mode remediation checkpoint"
+   need_not_contains "$mode_contracts" "at most two remediation rounds" "mode remediation hard cap removed"
+@@ -171,7 +171,7 @@
+ 
+   local claude_coding; claude_coding="$(cat "$dir/.claude/commands/coding.md")"
+   need_contains "$claude_coding" "explicit user decision" "Claude coding wrapper user authorization"
+-  need_contains "$claude_coding" "blocking Sol adequacy verdict" "Claude coding wrapper Sol gate"
++  need_contains "$claude_coding" "blocking Astra adequacy verdict" "Claude coding wrapper Astra gate"
+ 
+   need_contains "$(cat "$dir/.claude/commands/council.md" 2>/dev/null)" "llm-council-agent-workflow.md" "council command points to the doc"
+   need_contains "$(cat "$dir/.claude/commands/karpathy.md" 2>/dev/null)" "karpathy-llm-coding-agent-config.md" "karpathy command points to the doc"

@@ -1,0 +1,82 @@
+--- a/agent-bootstrap/bootstrap-multi-agent-project.sh	2026-08-29 14:11:16.000000000 +0000
++++ b/agent-bootstrap/bootstrap-multi-agent-project.sh	2026-09-06 19:13:35.666087270 +0000
+@@ -1067,6 +1067,8 @@
+   fi
+ 
+   if workflow_enabled; then
++    write_agent_seats
++    seed_agent_seats
+     write_agent_docs
+   else
+     write_infra_agent_docs
+--- a/agent-bootstrap/lib/writers-runtime.sh	2026-09-06 09:01:27.000000000 +0000
++++ b/agent-bootstrap/lib/writers-runtime.sh	2026-09-06 19:13:20.765240222 +0000
+@@ -211,9 +211,6 @@
+ 
+ write_schema_model_and_provenance_catalog() {
+   copy_bundle_file \
+-    "model-profiles/codex-model-profiles.json" \
+-    "$TARGET_DIR/docs/agent-configs/model-profiles.json"
+-  copy_bundle_file \
+     "policies/agent-context-policy.json" \
+     "$TARGET_DIR/docs/agent-configs/context-policy.json"
+   copy_bundle_file \
+@@ -326,6 +323,32 @@
+   make_executable "$LAST_WRITTEN_FILE"
+ }
+ 
++write_agent_seats() {
++  copy_bundle_file "agent-seats.sh" "$TARGET_DIR/scripts/agent-seats.sh"
++  make_executable "$LAST_WRITTEN_FILE"
++}
++
++# Runs the bundle's canonical seats program against the target's data files.
++# seats.json is user data: created once (defaults or legacy migration), never a
++# generated candidate, never overwritten. Skipped on --dry-run.
++seats_program() {
++  AGENT_SEATS_FILE="$TARGET_DIR/docs/agent-configs/seats.json" \
++  AGENT_SEATS_LEGACY_PROFILES="$TARGET_DIR/docs/agent-configs/model-profiles.json" \
++  AGENT_SEATS_AGENTS_MD="$TARGET_DIR/AGENTS.md" \
++    bash "$BUNDLE_DIR/agent-seats.sh" "$@"
++}
++
++seed_agent_seats() {
++  if [[ "$DRY_RUN" == "true" ]]; then
++    log "DRY-RUN agent-seats init docs/agent-configs/seats.json"
++    return 0
++  fi
++  ensure_dir "$TARGET_DIR/docs/agent-configs"
++  if ! seats_program init >/dev/null; then
++    log "warn: docs/agent-configs/seats.json was not created; run scripts/agent-seats.sh wizard (or reset) after generation"
++  fi
++}
++
+ write_agent_onboarding_runtime() {
+   copy_bundle_file "agent-onboarding.sh" "$TARGET_DIR/scripts/agent-onboarding.sh"
+   make_executable "$LAST_WRITTEN_FILE"
+--- a/agent-bootstrap/lib/writers-docs.sh	2026-09-06 08:47:50.000000000 +0000
++++ b/agent-bootstrap/lib/writers-docs.sh	2026-09-06 19:13:35.665777960 +0000
+@@ -744,6 +744,10 @@
+   stack_overlay_content="$(render_stack_overlays)"
+   mobile_skill_read_on_demand_bullet="$(mobile_optimization_agents_pointer)"
+   context_generated_at="$(project_agent_context_generated_at)"
++  local seat_roster_block
++  if ! seat_roster_block="$(seats_program roster-block 2>/dev/null)"; then
++    seat_roster_block=$'<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->\n- roster unavailable: docs/agent-configs/seats.json is missing or invalid; run scripts/agent-seats.sh wizard (or reset), then scripts/agent-seats.sh render\n<!-- END MANAGED: multi-agent-bootstrap:seat-roster -->'
++  fi
+ 
+   write_overlay_file "$TARGET_DIR/AGENTS.md" <<EOF
+ # Agent Conventions - $PROJECT_NAME
+@@ -844,6 +848,12 @@
+ - \`reviewing\`: one findings-first pass; project-local verification allowed.
+   Remediate only the exact requested scope.
+ 
++## Seat Roster
++
++$seat_roster_block
++
++Occupants change with \`scripts/agent-seats.sh\`; data lives in \`docs/agent-configs/seats.json\`.
++
+ ## Detected Project Stack
+ 
+ <!-- BEGIN MANAGED: multi-agent-bootstrap:detected-stack -->

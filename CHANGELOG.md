@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.09.07.1 — Task relations and unacked-edit denial
+
+- **Guard denies unacked edits.** Claude Code Edit/Write/MultiEdit hooks
+  return exit 2 for protected paths until an exact-path CLI acknowledgement
+  is available within its TTL.
+- **Optional relations.** `source_task` records a task's cause and `blocks`
+  lists blocked tasks, with backward-compatible defaults and manually reviewed
+  split, cycle, and closed-edge conventions. No runtime validator is added.
+- **Closure outcomes.** Tasks record Summary, Evidence, and Effect on source
+  in `task.md`, with optional manual journal mirroring and no automatic writes.
+- **User checkpoint.** Two unsuccessful remediation returns trigger a user
+  decision; an authorized bounded pass may continue in the same task.
+- **Contract coverage.** Generated-document assertions normalize whitespace;
+  compacted guidance preserves the existing context limits and obligations.
+- **Development records.** Approved specs are tracked; plans and reviews stay
+  local-only.
+
 ## 2026.08.29.1 — Local-only enforcement
 
 - **No generated remote workflow.** Removed the bundled GitHub Actions template and all installer, renderer, manifest, and generator wiring that emitted it into target projects.

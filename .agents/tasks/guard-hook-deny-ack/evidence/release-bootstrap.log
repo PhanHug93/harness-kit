@@ -1,0 +1,67 @@
+bootstrap-test: --- template/runtime mirror drift checks
+agent-hook: codex preflight ok (mode=reviewing flow=full_flow)
+bootstrap-test: FAIL: Codex doctor reports full gate and amber threshold missing '(gate 6200, amber above 5900)' in: Codex helper doctor...
+  ok    model profile stable: route=coding model=gpt-5.6-luna source=default effort=xhigh
+  ok    file exists: AGENTS.md
+  ok    file exists: CLAUDE.md
+  ok    file exists: docs/agent-configs/agent-bootstrap.lock.json
+  ok    file exists: docs/agent-configs/agent-mode-contracts.md
+  ok    file exists: docs/agent-configs/agent-handoff-schema.md
+  ok    file exists: docs/agent-configs/project-agent-context.md
+  ok    file exists: docs/agent-configs/context-policy.json
+  ok    file exists: docs/agent-configs/karpathy-llm-coding-agent-config.md
+  ok    file exists: docs/agent-configs/llm-council-agent-workflow.md
+  ok    file exists: docs/agent-configs/task-journal.md
+  ok    file exists: .claude/commands/council.md
+  ok    file exists: .claude/commands/karpathy.md
+  ok    file exists: .codex/config.toml
+  ok    file exists: .codex/codex-mode.sh
+  ok    file exists: .codex/README.md
+  ok    file exists: .claude/settings.json
+  ok    file exists: .claude/README.md
+  ok    file exists: .claude/commands/planning.md
+  ok    file exists: .claude/commands/planning-full-flow.md
+  ok    file exists: .claude/commands/coding.md
+  ok    file exists: .claude/commands/coding-full-flow.md
+  ok    file exists: .claude/commands/reviewing.md
+  ok    file exists: .claude/commands/reviewing-full-flow.md
+  ok    file exists: .claude/commands/codex/setup.md
+  ok    file exists: .claude/commands/codex/rescue.md
+  ok    file exists: .claude/commands/codex/status.md
+  ok    file exists: .claude/commands/doctor.md
+  ok    file exists: .claude/commands/project-onboarding.md
+  ok    file exists: .agents/skills/doubt-driven/SKILL.md
+  ok    file exists: docs/agent-configs/project-onboarding.md
+  ok    file exists: docs/agent-configs/project-brief.md
+  ok    file exists: docs/superpowers/specs/README.md
+  ok    file exists: docs/superpowers/specs/project-tech-stack.md
+  ok    file exists: docs/superpowers/plans/README.md
+  warn  project brief is unfilled; run project onboarding before substantive work
+  ok    core startup context estimate: 2528 tokens (gate 4000, amber above 3800)
+  warn  on-demand full workflow context estimate: 6231 tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite
+  ok    executable: scripts/install-rtk.sh
+  ok    executable: scripts/rtk
+  ok    executable: scripts/agent-hook.sh
+  ok    executable: scripts/agent-guard.sh
+  ok    executable: scripts/agent-tech-stack-lib.sh
+  ok    executable: scripts/detect-agent-tech-stack.sh
+  ok    executable: scripts/verify-ai-deps.sh
+  ok    bash syntax: scripts/install-rtk.sh
+  ok    bash syntax: scripts/rtk
+  ok    bash syntax: .codex/codex-mode.sh
+  ok    bash syntax: scripts/agent-hook.sh
+  ok    bash syntax: scripts/agent-guard.sh
+  ok    bash syntax: scripts/agent-tech-stack-lib.sh
+  ok    bash syntax: scripts/detect-agent-tech-stack.sh
+  ok    bash syntax: scripts/verify-ai-deps.sh
+  ok    Claude settings JSON is valid
+  ok    Claude PreToolUse uses shared agent hook
+  ok    Claude PreToolUse guards edit/write tools
+  ok    rtk wrapper resolves pinned version 0.37.2
+  ok    runtime detector runs
+  ok    local-only agent state is not tracked
+  ok    agent guard check passes
+  ok    no-scan guard lists local/vendor/sensitive paths
+  ok    shared agent hook codex preflight passes
+Doctor passed with 2 warning(s).
+command-rc=1
