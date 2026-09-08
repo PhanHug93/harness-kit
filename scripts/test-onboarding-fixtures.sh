@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Assertions intentionally match literal Markdown backticks, not shell substitutions.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -120,9 +122,9 @@ evaluate_common_onboarding() {
   need_contains "$task_journal" '`verification`' "task journal doc optional verification field"
   local mode_contracts; mode_contracts="$(cat "$dir/docs/agent-configs/agent-mode-contracts.md")"
   need_contains "$mode_contracts" "## Claude–Codex Collaboration Protocol" "mode contracts canonical collaboration protocol"
-  need_contains "$mode_contracts" '`analysis` · Claude' "mode contracts Claude analysis owner"
-  need_contains "$mode_contracts" '`technical_review` · Codex Sol' "mode contracts Sol technical review owner"
-  need_contains "$mode_contracts" '`implementation` · Codex Luna' "mode contracts Luna implementation owner"
+  need_contains "$mode_contracts" '`analysis` · `@spec`' "mode contracts Claude analysis owner"
+  need_contains "$mode_contracts" '`technical_review` · `@gate`' "mode contracts Sol technical review owner"
+  need_contains "$mode_contracts" '`implementation` · `@build`' "mode contracts Luna implementation owner"
   need_contains "$mode_contracts" "After two unsuccessful remediation returns" "mode remediation checkpoint"
   need_not_contains "$mode_contracts" "at most two remediation rounds" "mode remediation hard cap removed"
   need_contains "$mode_contracts" "another bounded pass is worth its cost" "mode remediation bounded cost"
@@ -150,6 +152,13 @@ evaluate_common_onboarding() {
     .codex/README.md \
     .codex/codex-mode.sh; do
     local host_text; host_text="$(cat "$dir/$host_surface")"
+    if [[ "$host_surface" == "AGENTS.md" ]]; then
+      need_contains "$host_text" '<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->' "AGENTS includes managed seat roster"
+      need_contains "$host_text" 'technical_review' "AGENTS roster identifies gate phase"
+      # The roster legitimately lists phases; policy duplication checks apply
+      # to the surrounding always-on instructions.
+      host_text="$(sed '/<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->/,/<!-- END MANAGED: multi-agent-bootstrap:seat-roster -->/d' "$dir/$host_surface")"
+    fi
     need_contains "$host_text" "agent-mode-contracts.md" "$host_surface points to canonical mode contracts"
     need_contains "$host_text" "agent-handoff-schema.md" "$host_surface points to canonical handoff contract"
     need_contains "$host_text" ".agents/tasks/" "$host_surface points to local task packets"
@@ -160,7 +169,7 @@ evaluate_common_onboarding() {
     need_not_contains "$host_text" "Codex remains the primary" "$host_surface copies legacy ownership policy"
     need_not_contains "$host_text" "Technical Spec Adequacy Gate" "$host_surface copies canonical adequacy gate"
     need_not_contains "$host_text" "three-round" "$host_surface copies obsolete review protocol"
-    need_not_contains "$host_text" '`analysis` · Claude' "$host_surface copies canonical transition roles"
+    need_not_contains "$host_text" '`analysis` · `@spec`' "$host_surface copies canonical transition roles"
     need_not_contains "$host_text" "technical_review" "$host_surface copies canonical transition vocabulary"
     need_not_contains "$host_text" "sufficient_for_coding_model" "$host_surface copies canonical adequacy fields"
     need_not_contains "$host_text" "revision_rounds" "$host_surface copies canonical remediation state"
@@ -171,7 +180,7 @@ evaluate_common_onboarding() {
 
   local claude_coding; claude_coding="$(cat "$dir/.claude/commands/coding.md")"
   need_contains "$claude_coding" "explicit user decision" "Claude coding wrapper user authorization"
-  need_contains "$claude_coding" "blocking Sol adequacy verdict" "Claude coding wrapper Sol gate"
+  need_contains "$claude_coding" 'blocking `@gate` adequacy verdict' "Claude coding wrapper Sol gate"
 
   need_contains "$(cat "$dir/.claude/commands/council.md" 2>/dev/null)" "llm-council-agent-workflow.md" "council command points to the doc"
   need_contains "$(cat "$dir/.claude/commands/karpathy.md" 2>/dev/null)" "karpathy-llm-coding-agent-config.md" "karpathy command points to the doc"

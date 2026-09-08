@@ -15,6 +15,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Show bash version
         run: bash --version | head -1
       - name: Install shellcheck on Ubuntu
@@ -24,6 +26,10 @@ jobs:
           sudo apt-get install -y shellcheck
       - name: Run bootstrap drift test
         run: bash scripts/test-bootstrap-multi-agent-project.sh
+      - name: Run onboarding fixtures
+        run: bash scripts/test-onboarding-fixtures.sh
+      - name: Run one-shot and historical configuration migrations
+        run: bash scripts/test-one-shot-upgrade.sh
       - name: Run generated target verifier
         run: |
           tmp="$(mktemp -d)"
@@ -39,13 +45,16 @@ jobs:
               scripts/install-agent-bootstrap-home.sh \
               scripts/test-bootstrap-multi-agent-project.sh \
               scripts/test-onboarding-fixtures.sh \
+              scripts/test-one-shot-upgrade.sh \
               agent-bootstrap/bootstrap-multi-agent-project.sh \
+              agent-bootstrap/harness-kit-one-shot-upgrade.sh \
               agent-bootstrap/agent-bootstrap-update.sh \
               agent-bootstrap/install-agent-bootstrap-home.sh \
               agent-bootstrap/install-rtk.sh \
               agent-bootstrap/rtk \
               agent-bootstrap/agent-hook.sh \
               agent-bootstrap/agent-guard.sh \
+              agent-bootstrap/agent-seats.sh \
               agent-bootstrap/verify-ai-deps.sh \
               agent-bootstrap/lib/core.sh \
               agent-bootstrap/lib/overlays.sh \

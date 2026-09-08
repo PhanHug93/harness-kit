@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Assertions intentionally match literal Markdown backticks, not shell substitutions.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -1097,6 +1099,7 @@ fi
 for root_runtime_snapshot in \
   agent-hook.sh \
   agent-guard.sh \
+  agent-seats.sh \
   agent-onboarding.sh \
   agent-tech-stack-lib.sh \
   detect-agent-tech-stack.sh \
@@ -1121,7 +1124,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.09.07.1" ]] || fail "VERSION not bumped to 2026.09.07.1"
+[[ "$bundle_version" == "2026.09.08.1" ]] || fail "VERSION not bumped to 2026.09.08.1"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -1150,6 +1153,7 @@ for canonical_file in \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
   agent-guard.sh \
+  agent-seats.sh \
   agent-onboarding.sh \
   agent-local-only-check.sh \
   detect-agent-tech-stack.sh \
@@ -1163,6 +1167,7 @@ for canonical_file in \
   provenance/rtk-v0.37.2.sha256 \
   schemas/agent-context-policy-v1.schema.json \
   schemas/agent-model-profiles-v1.schema.json \
+  schemas/agent-seats-v1.schema.json \
   schemas/agent-project-tech-stack-v1.schema.json \
   schemas/agent-bootstrap-lock-v1.schema.json \
   schemas/agent-bootstrap-status-v1.schema.json \
@@ -1399,7 +1404,8 @@ bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >"$TMP_DIR"/out/bo
 [[ -f "$ROOT_DIRECT_DIR/docs/superpowers/specs/README.md" ]] || fail "root bootstrap wrapper did not generate specs guidance"
 [[ -f "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.md" ]] || fail "root bootstrap wrapper did not generate project tech-stack spec"
 [[ -f "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.json" ]] || fail "root bootstrap wrapper did not generate project tech-stack machine contract"
-[[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json" ]] || fail "root bootstrap wrapper did not generate model profiles"
+[[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/seats.json" ]] || fail "root bootstrap wrapper did not generate seats"
+[[ ! -e "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json" ]] || fail "fresh target unexpectedly generated legacy profiles"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/context-policy.json" ]] || fail "root bootstrap wrapper did not generate context policy"
 [[ -x "$ROOT_DIRECT_DIR/scripts/agent-guard.sh" ]] || fail "root bootstrap wrapper did not generate executable agent guard"
 [[ -x "$ROOT_DIRECT_DIR/scripts/agent-onboarding.sh" ]] || fail "root bootstrap wrapper did not generate executable onboarding helper"
@@ -1417,18 +1423,17 @@ need_contains "$(cat "$ROOT_DIRECT_DIR/docs/superpowers/specs/README.md")" "proj
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.md")" "<!-- UNFILLED -->" "project tech-stack spec marker"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.json")" '"schema": "agent-project-tech-stack/v1"' "project tech-stack contract schema"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.json")" '"status": "unfilled"' "project tech-stack contract status"
-need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json")" '"schema": "agent-model-profiles/v1"' "model profiles schema"
-root_model_profiles="$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json")"
-need_contains "$root_model_profiles" '"default_profile": "stable"' "model profiles default profile"
-need_contains "$root_model_profiles" '"reasoning_effort": "xhigh"' "model profiles reasoning effort"
-need_contains "$root_model_profiles" '"planning_model": "gpt-5.6-sol"' "model profiles planning model"
-need_contains "$root_model_profiles" '"coding_model": "gpt-5.6-luna"' "model profiles coding model"
-need_contains "$root_model_profiles" '"reviewing_model": "gpt-5.6-sol"' "model profiles reviewing model"
-need_contains "$root_model_profiles" '"planning_fallback_model": "gpt-5.6-terra"' "model profiles planning fallback"
-need_contains "$root_model_profiles" '"coding_fallback_model": "gpt-5.6-terra"' "model profiles coding fallback"
-need_contains "$root_model_profiles" '"reviewing_fallback_model": "gpt-5.6-terra"' "model profiles reviewing fallback"
-need_not_contains "$root_model_profiles" '"cross_review"' "model profiles cross-review route"
-need_not_contains "$root_model_profiles" '"escalated_coding_model"' "model profiles escalated coding route"
+python3 - "$ROOT_DIRECT_DIR/docs/agent-configs/seats.json" <<'PY_SEAT_DEFAULTS'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+assert doc["schema"] == "agent-seats/v1"
+assert set(doc["seats"]) == {"spec", "gate", "build", "verify", "audit", "owner"}
+for seat, model, effort in (("gate", "gpt-6-astra", "ultra"), ("build", "gpt-5.6-luna", "xhigh"), ("verify", "gpt-6-astra", "ultra")):
+    assert doc["seats"][seat]["occupant"] == {"host": "codex", "model": model, "effort": effort, "fallback_model": "gpt-5.6-terra", "fallback_effort": "xhigh"}
+assert doc["seats"]["spec"]["occupant"] == {"host": "claude"}
+assert doc["seats"]["audit"]["occupant"] == {"host": "claude"}
+assert doc["seats"]["owner"]["occupant"] == {"host": "human"}
+PY_SEAT_DEFAULTS
 root_codex_config="$(cat "$ROOT_DIRECT_DIR/.codex/config.toml")"
 need_not_contains "$root_codex_config" 'model = ' "Codex config has no hard-coded model"
 need_not_contains "$root_codex_config" 'model_reasoning_effort' "Codex config has no hard-coded effort"
@@ -1436,8 +1441,8 @@ need_contains "$root_codex_config" '"CODEX_HARNESS_SESSION"' "Codex shell policy
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/context-policy.json")" '"schema": "agent-context-policy/v1"' "context policy schema"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256")" "rtk-aarch64-apple-darwin.tar.gz" "rtk provenance darwin arm64 asset"
 if command -v python3 >/dev/null 2>&1; then
-  python3 -m json.tool "$ROOT_DIRECT_DIR/docs/agent-configs/model-profiles.json" >/dev/null ||
-    fail "generated model profiles JSON is invalid"
+  python3 -m json.tool "$ROOT_DIRECT_DIR/docs/agent-configs/seats.json" >/dev/null ||
+    fail "generated seats JSON is invalid"
   python3 -m json.tool "$ROOT_DIRECT_DIR/docs/agent-configs/context-policy.json" >/dev/null ||
     fail "generated context policy JSON is invalid"
   python3 -m json.tool "$ROOT_DIRECT_DIR/docs/superpowers/specs/project-tech-stack.json" >/dev/null ||
@@ -1736,7 +1741,7 @@ for operator_readme in "$ROOT_DIR/README.md" "$ROOT_DIR/agent-bootstrap/README.m
   need_contains "$(cat "$operator_readme")" "Return to Claude for independent cross-review" "operator README Claude cross-review step"
   need_contains "$(cat "$operator_readme")" "packet ownership and append-only history are conventions" "operator README convention limitation"
   need_contains "$(cat "$operator_readme")" "host, model, and session independence are declarations rather than proof" "operator README independence limitation"
-  need_contains "$(cat "$operator_readme")" "Sol authorization entries are audit declarations" "operator README Sol authorization limitation"
+  need_contains "$(cat "$operator_readme")" "@gate authorization entries are audit declarations" "operator README Sol authorization limitation"
   need_contains "$(cat "$operator_readme")" "not security controls" "operator README security-control limitation"
   need_contains "$(cat "$operator_readme")" "Do not assume Claude Code hooks run in Cowork." "operator README Cowork hook limitation"
 done
@@ -1879,8 +1884,9 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/project-brief.md")" "<!-- UNFI
 [[ -f "$TMP_DIR/docs/superpowers/specs/project-tech-stack.md" ]] || fail "full bootstrap did not generate project tech-stack spec"
 [[ -f "$TMP_DIR/docs/superpowers/specs/project-tech-stack.json" ]] || fail "full bootstrap did not generate project tech-stack machine contract"
 [[ -f "$TMP_DIR/docs/superpowers/plans/README.md" ]] || fail "full bootstrap did not generate plans skeleton"
-[[ -f "$TMP_DIR/docs/agent-configs/model-profiles.json" ]] || fail "full bootstrap did not generate model profiles"
-need_contains "$(cat "$TMP_DIR/docs/agent-configs/model-profiles.json")" '"schema": "agent-model-profiles/v1"' "full bootstrap model profiles schema"
+[[ -f "$TMP_DIR/docs/agent-configs/seats.json" ]] || fail "full bootstrap did not generate seats"
+[[ ! -e "$TMP_DIR/docs/agent-configs/model-profiles.json" ]] || fail "full bootstrap generated legacy profiles"
+need_contains "$(cat "$TMP_DIR/docs/agent-configs/seats.json")" '"schema": "agent-seats/v1"' "full bootstrap seats schema"
 [[ -f "$TMP_DIR/docs/agent-configs/context-policy.json" ]] || fail "full bootstrap did not generate context policy"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/context-policy.json")" '"schema": "agent-context-policy/v1"' "full bootstrap context policy schema"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "save_decision" "task journal memory save triage field"
@@ -1895,7 +1901,7 @@ need_contains "$handoff_contract" 'Missing `source_task` is equivalent to `null`
 need_contains "$handoff_contract" 'Missing `blocks` is equivalent to `[]`' "handoff missing blocks default"
 need_contains "$handoff_contract" 'The task-id portion must name an existing packet when it is available.' "handoff source task packet reference"
 need_contains "$handoff_contract" 'Existing `claude-codex-collaboration/v1` packets remain valid' "handoff existing protocol compatibility"
-need_contains "$handoff_contract" "A closed packet's \`blocks\` edges are inactive and no edit to the blocked packet is required." "handoff closed blocks edges"
+need_contains "$handoff_contract" "A closed packet's \`blocks\` edges are inactive; no edit to the blocked packet is required." "handoff closed blocks edges"
 need_contains "$handoff_contract" 'Missing referenced packets do not invalidate the current packet; agents record uncertainty and continue.' "handoff missing referenced packets"
 need_contains "$handoff_contract" 'Continue the current task when the root cause and implementation scope are unchanged.' "handoff continue current task"
 need_contains "$handoff_contract" 'Open a child task only for a distinct finding with independently closable scope.' "handoff child task scope"
@@ -1905,15 +1911,15 @@ need_contains "$handoff_contract" 'A task cannot source from or block itself.' "
 need_contains "$handoff_contract" 'Active blocking edges must be acyclic.' "handoff acyclic blocking rule"
 need_contains "$handoff_contract" 'Relations are authoring conventions.' "handoff relations authoring convention"
 need_contains "$handoff_contract" 'No guard, hook, or runtime reads `source_task` or `blocks` in this phase.' "handoff relations runtime boundary"
-need_contains "$handoff_contract" 'canonical packet artifacts, not a hard maximum' "handoff canonical artifact set"
+need_contains "$handoff_contract" 'Other evidence is allowed when linked from `task.md`' "handoff allows supporting artifacts"
 task_journal="$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")"
 need_contains "$handoff_contract" '## Outcome' "handoff closure outcome heading"
-need_contains "$handoff_contract" '- Summary: <what changed or what was learned>' "handoff closure outcome summary field"
-need_contains "$handoff_contract" '- Evidence: <test, report, or review path>' "handoff closure outcome evidence field"
-need_contains "$handoff_contract" '- Effect on source: <what the source task can decide or do next>' "handoff closure outcome effect field"
+need_contains "$handoff_contract" '- Summary: <change or finding>' "handoff closure outcome summary field"
+need_contains "$handoff_contract" '- Evidence: <test/report/review path>' "handoff closure outcome evidence field"
+need_contains "$handoff_contract" '- Effect on source: <source task decision/action>' "handoff closure outcome effect field"
 need_contains "$handoff_contract" 'The fields are prose, not enums, and do not drive an automatic transition.' "handoff closure outcome prose rule"
 need_contains "$handoff_contract" 'manually mirror its Summary, Evidence, and Effect on source into the optional task journal' "handoff closure outcome journal mirror guidance"
-need_contains "$task_journal" 'manually copy the Summary, Evidence, and Effect on source from `task.md`' "task journal closure outcome copy guidance"
+need_contains "$task_journal" 'Manually mirror `task.md` Summary, Evidence, and Effect on source' "task journal closure outcome copy guidance"
 need_contains "$task_journal" 'Mirroring is optional, not a closure gate.' "task journal optional outcome mirror"
 
 python3 - "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" <<'PY_HANDOFF_ARTIFACTS'
@@ -1983,17 +1989,17 @@ need_contains "$handoff_contract" '"protocol_version": "claude-codex-collaborati
 need_contains "$handoff_contract" '"task_id": "checkout-timeout-fix"' "handoff concrete task example"
 need_contains "$handoff_contract" '`status`: `open | awaiting_user | closed`' "handoff status enum"
 need_contains "$handoff_contract" '`phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`' "handoff phase enum"
-need_contains "$handoff_contract" '`owner`: `claude | codex | user`' "handoff owner enum"
+need_contains "$handoff_contract" '`owner`: `claude | codex | user | agent`' "handoff owner enum"
 need_contains "$handoff_contract" '`spec_sufficiency.verdict`: `not_reviewed | sufficient | partially_sufficient | insufficient`' "handoff sufficiency verdict enum"
 need_contains "$handoff_contract" '`spec_sufficiency.sufficient_for_coding_model`: `not_reviewed | yes | no`' "handoff coding gate enum"
-need_contains "$handoff_contract" '`verification.runner`: `none | claude | codex`' "handoff verification runner enum"
+need_contains "$handoff_contract" '`verification.runner`: `none | claude | codex | agent`' "handoff verification runner enum"
 need_contains "$handoff_contract" '`verification.status`: `not_run | pass | fail | blocked`' "handoff verification status enum"
 need_contains "$handoff_contract" "## Request (verbatim)" "task artifact verbatim request heading"
 need_contains "$handoff_contract" "## Pre-coding technical review" "Codex pre-coding review heading"
 need_contains "$handoff_contract" "## Final technical review" "Codex final review heading"
 need_contains "$handoff_contract" "sufficient_for_coding_model" "handoff blocking coding field"
 need_contains "$handoff_contract" "fresh_session_attestation" "handoff fresh-session declaration"
-need_contains "$handoff_contract" "policy_exception=sol_coding" "handoff Sol-coding policy exception"
+need_contains "$handoff_contract" "policy_exception=gate_coding" "handoff gate-coding policy exception"
 
 need_contains "$handoff_contract" 'Only `state.json` and `task.md` are created initially' "handoff lazy artifact creation"
 need_contains "$handoff_contract" 'ACTIVE` is a cache' "handoff ACTIVE cache rule"
@@ -2004,33 +2010,33 @@ need_contains "$handoff_contract" "Multiple open tasks require the user to choos
 need_contains "$handoff_contract" "Never select the newest task automatically" "handoff no-newest selection rule"
 need_contains "$handoff_contract" "ignored, ephemeral" "handoff packet durability limitation"
 need_contains "$handoff_contract" "ownership and append-only behavior are conventions" "handoff convention limitation"
-need_contains "$handoff_contract" "captured on the first entry into implementation" "handoff base commit timing"
+need_contains "$handoff_contract" 'Capture `base_commit` on first entry into implementation' "handoff base commit timing"
 need_contains "$handoff_contract" "Prior attempts remain" "handoff prior attempt preservation"
 need_contains "$handoff_contract" "next numbered attempt" "handoff numbered remediation attempts"
 need_contains "$handoff_contract" "Review history is append-only and immutable within each top-level section." "handoff sectioned review history"
 need_contains "$handoff_contract" 'The first final review adds the `## Final technical review` heading.' "handoff first final-review heading"
 need_contains "$handoff_contract" 'On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.' "handoff resumed specification-review placement"
-need_contains "$handoff_contract" 'When Sol returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
+need_contains "$handoff_contract" 'When `@gate` returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
 need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
 need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
 need_contains "$handoff_contract" "not proof of session, model, account, or host independence" "handoff fresh-session non-proof"
-need_contains "$handoff_contract" "checklist and required procedural declarations live in" "handoff cross-review points to canonical checklist"
-need_contains "$handoff_contract" "its policy meaning is defined in" "handoff Sol-coding points to canonical policy"
+need_contains "$handoff_contract" "checklist and procedural declarations live in" "handoff cross-review points to canonical checklist"
+need_contains "$handoff_contract" "policy meaning is in" "handoff gate-coding points to canonical policy"
 need_not_contains "$handoff_contract" "audit-only procedural declaration" "handoff carries no duplicate Sol-coding policy"
 need_not_contains "$handoff_contract" "declarations to be present" "handoff carries no duplicate cross-review checklist"
-need_contains "$handoff_contract" "Role, transition, and gate policy lives only in" "handoff defers collaboration policy"
+need_contains "$handoff_contract" "Seat, transition, and gate policy lives only in" "handoff defers collaboration policy"
 
-need_contains "$mode_contracts" '- `analysis` · Claude -> `technical_review`' "analysis transition"
-need_contains "$mode_contracts" '- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`' "technical review transitions"
-need_contains "$mode_contracts" '- `implementation` · Codex Luna -> `verification` | `resolution`' "implementation transitions"
-need_contains "$mode_contracts" '- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`' "verification transitions"
-need_contains "$mode_contracts" '- `cross_review` · Claude -> `implementation` | `resolution`' "cross-review transitions"
-need_contains "$mode_contracts" '- `resolution` · User -> `closed` | user-selected prior phase' "resolution transitions"
+need_contains "$mode_contracts" '- `analysis` · `@spec` -> `technical_review`' "analysis transition"
+need_contains "$mode_contracts" '- `technical_review` · `@gate` -> `analysis` | `implementation` | `resolution`' "technical review transitions"
+need_contains "$mode_contracts" '- `implementation` · `@build` -> `verification` | `resolution`' "implementation transitions"
+need_contains "$mode_contracts" '- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`' "verification transitions"
+need_contains "$mode_contracts" '- `cross_review` · `@audit` -> `implementation` | `resolution`' "cross-review transitions"
+need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` | user-selected prior phase' "resolution transitions"
 need_contains "$mode_contracts" "awaiting_user" "mode contracts awaiting-user invariant"
-need_contains "$mode_contracts" 'only with `resolution` · User' "mode contracts awaiting-user owner restriction"
+need_contains "$mode_contracts" 'only with `resolution` · `@owner`' "mode contracts awaiting-user owner restriction"
 need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
-need_contains "$mode_contracts" "Sol owns the blocking adequacy verdict" "mode contracts Sol adequacy ownership"
-need_contains "$mode_contracts" 'Luna may downgrade `yes`' "mode contracts Luna downgrade"
+need_contains "$mode_contracts" '`@gate` owns the blocking adequacy verdict' "mode contracts Sol adequacy ownership"
+need_contains "$mode_contracts" '`@build` may downgrade `yes`' "mode contracts Luna downgrade"
 need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
 need_contains "$mode_contracts" 'After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost.' "mode remediation checkpoint"
 need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
@@ -2043,11 +2049,11 @@ need_contains "$mode_contracts" "state/review consistency" "mode contracts Claud
 need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
 need_contains "$mode_contracts" "verification" "mode contracts Claude verification check"
 need_contains "$mode_contracts" "declarations" "mode contracts Claude declarations check"
-need_contains "$mode_contracts" "Sol-coding decision and reason" "mode contracts Claude escalation check"
+need_contains "$mode_contracts" "gate-coding decision and reason" "mode contracts Claude escalation check"
 need_contains "$mode_contracts" "approved scope" "mode contracts Claude scope check"
 need_contains "$mode_contracts" "Check author/reviewer model and session declarations for contradictions." "mode contracts Claude declaration contradiction check"
 need_contains "$mode_contracts" 'Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.' "mode contracts Claude provenance declarations"
-need_contains "$mode_contracts" "user must open a new Sol coding session" "mode contracts new-session escalation"
+need_contains "$mode_contracts" 'user must open a new session for the `@gate` occupant to code' "mode contracts new-session escalation"
 need_contains "$mode_contracts" "audit-only procedural declaration" "mode contracts Sol-coding audit limitation"
 need_contains "$mode_contracts" "cannot provide file-based authorization" "mode contracts no file authorization"
 need_contains "$mode_contracts" "The user is the final authority" "mode contracts user authority"
@@ -2061,12 +2067,12 @@ need_not_contains "$handoff_contract$mode_contracts" "cross_review_model" "obsol
 [[ -f "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-model-profiles-v1.schema.json" ]] || fail "full bootstrap did not generate model profile schema"
 [[ -f "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json" ]] || fail "full bootstrap did not generate project tech-stack schema"
 need_contains "$(cat "$TMP_DIR/docs/superpowers/specs/project-tech-stack.json")" '"schema": "agent-project-tech-stack/v1"' "full bootstrap project tech-stack contract schema"
-need_contains "$("$TMP_DIR/.codex/codex-mode.sh" status)" "Model profile: stable" "Codex status model profile"
+need_contains "$("$TMP_DIR/.codex/codex-mode.sh" status)" "@gate" "Codex status seat roster"
 
-# Task 3: strict three-route model loading and command dispatch.
+# Task 3: strict seat resolution, compatible routes and command dispatch.
 TASK3_CODEX_MODE="$TMP_DIR/.codex/codex-mode.sh"
-TASK3_PROFILE_FILE="$TMP_DIR/docs/agent-configs/model-profiles.json"
-TASK3_VALID_PROFILE="$TMP_DIR/out/task3-valid-model-profile.json"
+TASK3_PROFILE_FILE="$TMP_DIR/docs/agent-configs/seats.json"
+TASK3_VALID_PROFILE="$TMP_DIR/out/task3-valid-seats.json"
 TASK3_FAKEBIN="$FIXTURE_DIR/task3-fake-codex-bin"
 TASK3_CAPTURE="$TMP_DIR/out/task3-codex-capture.txt"
 TASK3_OUTPUT="$TMP_DIR/out/task3-codex-output.txt"
@@ -2095,13 +2101,7 @@ capture_task3_codex_launch() {
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
     unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
-    export PATH="$TASK3_FAKEBIN:$PATH"
-    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
-    while [[ $# -gt 0 ]]; do
-      export "$1"
-      shift
-    done
-    "$TASK3_CODEX_MODE" "$mode"
+    env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$@" "$TASK3_CODEX_MODE" "$mode"
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$label failed to launch fake Codex: $(cat "$TASK3_OUTPUT")"
   fi
@@ -2114,13 +2114,13 @@ capture_task3_codex_launch() {
   need_contains "$capture" "arg=$expected_model" "$label selected model"
   need_contains "$capture" "arg=-c" "$label reasoning flag"
   need_contains "$capture" "arg=model_reasoning_effort=\"$expected_effort\"" "$label reasoning effort"
-  need_contains "$capture" "actual_model=$expected_model model_source=$expected_source" "$label seed model provenance"
+  need_contains "$capture" "launch_model=$expected_model model_source=$expected_source" "$label seed model provenance"
   need_contains "$output" "Model source: $expected_source" "$label launch model source"
 }
 
-capture_task3_codex_launch "planning route" planning gpt-5.6-sol default xhigh
+capture_task3_codex_launch "planning route" planning gpt-6-astra default ultra
 capture_task3_codex_launch "coding route" coding gpt-5.6-luna default xhigh
-capture_task3_codex_launch "reviewing route" reviewing gpt-5.6-sol default xhigh
+capture_task3_codex_launch "reviewing route" reviewing gpt-6-astra default ultra
 reviewing_seed="$(cat "$TASK3_CAPTURE")"
 severity_rule="Severity must name its trigger condition and frequency, or mark itself as an estimate."
 need_contains "$reviewing_seed" "$severity_rule" "reviewing seed severity trigger obligation"
@@ -2133,42 +2133,36 @@ for withdrawn_rule in \
   need_not_contains "$reviewing_seed$mode_contracts" "$withdrawn_rule" "withdrawn reviewing rule"
 done
 capture_task3_codex_launch "coding fallback" coding gpt-5.6-terra CODEX_USE_FALLBACK xhigh CODEX_USE_FALLBACK=1
+python3 - "$TASK3_PROFILE_FILE" <<'PY_TASK3_CATALOG'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+for name in ("custom-coder", "global-model"):
+    d["catalog"]["models"][name] = {"host": "codex", "efforts": ["high", "xhigh"], "default_effort": "xhigh"}
+with open(p, "w") as f: json.dump(d, f)
+PY_TASK3_CATALOG
 capture_task3_codex_launch "coding route override" coding custom-coder CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=custom-coder
 capture_task3_codex_launch "global override precedence" coding global-model CODEX_MODEL_OVERRIDE xhigh CODEX_MODEL_OVERRIDE=global-model CODEX_CODING_MODEL_OVERRIDE=custom-coder CODEX_USE_FALLBACK=1
 capture_task3_codex_launch "reasoning override" coding gpt-5.6-luna default high CODEX_REASONING_EFFORT=high
-capture_task3_codex_launch "Sol coding audit" coding gpt-5.6-sol CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=gpt-5.6-sol
-need_contains "$(cat "$TASK3_CAPTURE")" "policy_exception=sol_coding authorization=user_session" "Sol coding seed audit record"
-need_contains "$(cat "$TASK3_OUTPUT")" "policy_exception=sol_coding authorization=user_session" "Sol coding printed audit record"
+capture_task3_codex_launch "gate coding audit" coding gpt-6-astra CODEX_CODING_MODEL_OVERRIDE ultra CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
+need_contains "$(cat "$TASK3_CAPTURE")" "policy_exception=gate_coding authorization=user_session" "Sol coding seed audit record"
+need_contains "$(cat "$TASK3_OUTPUT")" "policy_exception=gate_coding authorization=user_session" "Sol coding printed audit record"
 
 write_task3_invalid_profile() {
-  case "$1" in
-    malformed)
-      cat > "$TASK3_PROFILE_FILE" <<'EOF_TASK3_PROFILE'
-{"schema": "agent-model-profiles/v1",
-EOF_TASK3_PROFILE
-      ;;
-    missing_profile)
-      cat > "$TASK3_PROFILE_FILE" <<'EOF_TASK3_PROFILE'
-{"schema":"agent-model-profiles/v1","default_profile":"stable","profiles":{"other":{}}}
-EOF_TASK3_PROFILE
-      ;;
-    missing_fallback)
-      cat > "$TASK3_PROFILE_FILE" <<'EOF_TASK3_PROFILE'
-{"schema":"agent-model-profiles/v1","default_profile":"stable","profiles":{"stable":{"reasoning_effort":"xhigh","planning_model":"gpt-5.6-sol","coding_model":"gpt-5.6-luna","reviewing_model":"gpt-5.6-sol","planning_fallback_model":"gpt-5.6-terra","reviewing_fallback_model":"gpt-5.6-terra"}}}
-EOF_TASK3_PROFILE
-      ;;
-    bad_effort)
-      cat > "$TASK3_PROFILE_FILE" <<'EOF_TASK3_PROFILE'
-{"schema":"agent-model-profiles/v1","default_profile":"stable","profiles":{"stable":{"reasoning_effort":"turbo","planning_model":"gpt-5.6-sol","coding_model":"gpt-5.6-luna","reviewing_model":"gpt-5.6-sol","planning_fallback_model":"gpt-5.6-terra","coding_fallback_model":"gpt-5.6-terra","reviewing_fallback_model":"gpt-5.6-terra"}}}
-EOF_TASK3_PROFILE
-      ;;
-    empty_fallback)
-      cat > "$TASK3_PROFILE_FILE" <<'EOF_TASK3_PROFILE'
-{"schema":"agent-model-profiles/v1","default_profile":"stable","profiles":{"stable":{"reasoning_effort":"xhigh","planning_model":"gpt-5.6-sol","coding_model":"gpt-5.6-luna","reviewing_model":"gpt-5.6-sol","planning_fallback_model":"gpt-5.6-terra","coding_fallback_model":"","reviewing_fallback_model":"gpt-5.6-terra"}}}
-EOF_TASK3_PROFILE
-      ;;
-    *) fail "unknown Task 3 invalid-profile fixture: $1" ;;
-  esac
+  python3 - "$TASK3_VALID_PROFILE" "$TASK3_PROFILE_FILE" "$1" <<'PY_INVALID_SEATS'
+import json, sys
+src, dest, case = sys.argv[1:]
+doc = json.load(open(src))
+if case == "malformed":
+    with open(dest, "w") as f: f.write('{"schema": "agent-seats/v1",')
+    sys.exit(0)
+if case == "missing_seat": del doc["seats"]["gate"]
+elif case == "unknown_model": doc["seats"]["build"]["occupant"]["model"] = "unknown-model"
+elif case == "bad_effort": doc["seats"]["gate"]["occupant"]["effort"] = "turbo"
+elif case == "orphan_fallback": del doc["seats"]["build"]["occupant"]["fallback_model"]
+else: raise AssertionError(case)
+with open(dest, "w") as f: json.dump(doc, f)
+PY_INVALID_SEATS
 }
 
 assert_task3_profile_failure() {
@@ -2181,33 +2175,28 @@ assert_task3_profile_failure() {
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
     unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
-    export PATH="$TASK3_FAKEBIN:$PATH"
-    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
-    if [[ "$fallback_requested" == "1" ]]; then
-      export CODEX_USE_FALLBACK=1
-    fi
-    "$TASK3_CODEX_MODE" "$cmd"
+    CODEX_USE_FALLBACK="$fallback_requested" PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" "$cmd"
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$label unexpectedly succeeded"
   fi
   local output
   output="$(cat "$TASK3_OUTPUT")"
-  need_contains "$output" "model profile error:" "$label actionable profile diagnostic"
+  need_contains "$output" "agent-seats: ERROR:" "$label actionable profile diagnostic"
   need_contains "$output" "$expected_detail" "$label profile detail"
   [[ ! -s "$TASK3_CAPTURE" ]] || fail "$label launched Codex with an invalid profile"
 }
 
-for invalid_profile in malformed missing_profile missing_fallback bad_effort empty_fallback; do
+for invalid_profile in malformed missing_seat unknown_model bad_effort orphan_fallback; do
   write_task3_invalid_profile "$invalid_profile"
   case "$invalid_profile" in
     malformed) expected_profile_detail="malformed JSON" ;;
-    missing_profile) expected_profile_detail="selected profile 'stable' is missing" ;;
-    missing_fallback) expected_profile_detail="missing required field 'coding_fallback_model'" ;;
-    bad_effort) expected_profile_detail="unsupported reasoning_effort 'turbo'" ;;
-    empty_fallback) expected_profile_detail="invalid model id for 'coding_fallback_model'" ;;
+    missing_seat) expected_profile_detail="seat gate: missing" ;;
+    unknown_model) expected_profile_detail="model unknown-model is not in catalog.models" ;;
+    bad_effort) expected_profile_detail="effort 'turbo' is not supported" ;;
+    orphan_fallback) expected_profile_detail="fallback_effort without fallback_model" ;;
   esac
   fallback_case=0
-  [[ "$invalid_profile" == "empty_fallback" ]] && fallback_case=1
+  [[ "$invalid_profile" == "orphan_fallback" ]] && fallback_case=1
   for strict_cmd in planning coding reviewing run; do
     assert_task3_profile_failure "$invalid_profile $strict_cmd" "$expected_profile_detail" "$strict_cmd" "$fallback_case"
   done
@@ -2218,17 +2207,12 @@ for invalid_profile in malformed missing_profile missing_fallback bad_effort emp
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
     unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
-    export PATH="$TASK3_FAKEBIN:$PATH"
-    export CODEX_CAPTURE_FILE="$TASK3_CAPTURE"
-    if [[ "$fallback_case" == "1" ]]; then
-      export CODEX_USE_FALLBACK=1
-    fi
-    "$TASK3_CODEX_MODE" doctor
+    CODEX_USE_FALLBACK="$fallback_case" PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" doctor
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$invalid_profile doctor unexpectedly succeeded"
   fi
   task3_doctor_output="$(cat "$TASK3_OUTPUT")"
-  need_contains "$task3_doctor_output" "model profile error:" "$invalid_profile doctor profile diagnostic"
+  need_contains "$task3_doctor_output" "agent-seats: ERROR:" "$invalid_profile doctor profile diagnostic"
   need_contains "$task3_doctor_output" "$expected_profile_detail" "$invalid_profile doctor profile detail"
   need_contains "$task3_doctor_output" "core startup context estimate" "$invalid_profile doctor continued independent checks"
   [[ ! -s "$TASK3_CAPTURE" ]] || fail "$invalid_profile doctor launched Codex"
@@ -2238,7 +2222,7 @@ for invalid_profile in malformed missing_profile missing_fallback bad_effort emp
     fail "$invalid_profile help failed before profile loading"
   fi
   need_contains "$(cat "$TASK3_OUTPUT")" "Usage:" "$invalid_profile help usage"
-  need_not_contains "$(cat "$TASK3_OUTPUT")" "model profile error:" "$invalid_profile help profile loading"
+  need_not_contains "$(cat "$TASK3_OUTPUT")" "agent-seats: ERROR:" "$invalid_profile help profile loading"
   [[ ! -s "$TASK3_CAPTURE" ]] || fail "$invalid_profile help launched Codex"
 done
 
@@ -2248,7 +2232,7 @@ if PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX
   fail "cross_review unexpectedly resolved as a Codex route"
 fi
 need_contains "$(cat "$TASK3_OUTPUT")" "unknown command: cross_review" "cross_review unknown command diagnostic"
-need_not_contains "$(cat "$TASK3_OUTPUT")" "model profile error:" "cross_review avoids profile loading"
+need_not_contains "$(cat "$TASK3_OUTPUT")" "agent-seats: ERROR:" "cross_review avoids profile loading"
 [[ ! -s "$TASK3_CAPTURE" ]] || fail "cross_review launched Codex"
 cp "$TASK3_VALID_PROFILE" "$TASK3_PROFILE_FILE"
 
@@ -2363,7 +2347,9 @@ need_contains "$ios_summary" "swift test" "Swift package test candidate"
 if (cd "$TMP_DIR" && scripts/agent-onboarding.sh check >"$TMP_DIR"/out/bootstrap-onboarding-check.out 2>"$TMP_DIR"/out/bootstrap-onboarding-check.err); then
   fail "fresh generated onboarding check unexpectedly passed"
 fi
+cp "$TMP_DIR/.agents/state/context-pack.json" "$TMP_DIR/out/doctor-context-pack-before.json"
 (cd "$TMP_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-codex-doctor.out)
+cmp -s "$TMP_DIR/.agents/state/context-pack.json" "$TMP_DIR/out/doctor-context-pack-before.json" || fail "Codex doctor rewrote the real guard context pack"
 cat > "$TMP_DIR/scripts/test-bootstrap-multi-agent-project.sh" <<'EOF_GENERATED_SMOKE_PROBE'
 #!/usr/bin/env bash
 printf '%s\n' "smoke probe should not run without an interactive tty" >&2
@@ -2392,7 +2378,7 @@ need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "(gate 4000, amber ab
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "(gate 6200, amber above 5900)" "generated verifier reports full gate and amber threshold"
 need_not_contains "$(cat "$TMP_DIR/out/bootstrap-codex-doctor.out")" "budget 6500" "Codex doctor no longer reports a 6500 budget"
 need_not_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "budget 6500" "generated verifier no longer reports a 6500 budget"
-need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "model profile schema is agent-model-profiles/v1" "generated verifier model profile schema check"
+need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "seats.json is valid" "generated verifier seats schema check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "agent context policy schema is agent-context-policy/v1" "generated verifier context policy schema check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "agent guard check passes" "generated verifier agent guard check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "rtk provenance manifest exists" "generated verifier rtk provenance check"
@@ -3162,6 +3148,10 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$AS_DIR" --refr
 chmod u+w "$AS_DIR/.codex"
 need_contains "$(cat "$AS_LOCK")" '"apply_state": "blocked-readonly"' "read-only candidate -> blocked-readonly lock apply_state"
 rm -f "$AS_DIR/.codex/config.toml.generated.20990101-000000"
+printf 'x\n' > "$AS_DIR/scripts/install-git-hooks.sh.generated.20990101-000000"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$AS_DIR" --refresh-lock >/dev/null
+need_contains "$(cat "$AS_LOCK")" '"apply_state": "pending"' "installer candidate remains pending in lock"
+rm -f "$AS_DIR/scripts/install-git-hooks.sh.generated.20990101-000000"
 
 # write_overlay_file must surface merge diagnostics instead of silently
 # degrading to the new template.
@@ -3469,6 +3459,9 @@ EOF_INFRA_MANIFEST
 [[ ! -e "$INFRA_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" ]] || fail "infra-only bootstrap installed Karpathy workflow"
 [[ ! -e "$INFRA_DIR/docs/agent-configs/llm-council-agent-workflow.md" ]] || fail "infra-only bootstrap installed council workflow"
 [[ ! -e "$INFRA_DIR/.codex/codex-mode.sh" ]] || fail "infra-only bootstrap installed Codex three-mode helper"
+[[ ! -e "$INFRA_DIR/scripts/agent-seats.sh" ]] || fail "infra-only bootstrap installed workflow seats runtime"
+[[ ! -e "$INFRA_DIR/docs/agent-configs/seats.json" ]] || fail "infra-only bootstrap initialized workflow seats"
+need_not_contains "$(cat "$TMP_DIR/out/bootstrap-infra-verify.out")" "seats.json is missing" "infra verifier does not require workflow seats"
 [[ -f "$INFRA_DIR/.agents/skills/agentmemory-mcp/SKILL.md" ]] || fail "infra bootstrap did not generate agentmemory skill"
 [[ -f "$INFRA_DIR/.agents/skills/agentmemory-mcp/agents/openai.yaml" ]] || fail "infra bootstrap did not generate agentmemory openai metadata"
 [[ -f "$INFRA_DIR/docs/agent-configs/context-policy.json" ]] || fail "infra bootstrap did not generate context policy"
@@ -3478,12 +3471,12 @@ need_contains "$(cat "$INFRA_DIR/docs/agent-configs/agent-bootstrap.lock.json")"
 [[ ! -e "$INFRA_DIR/.agents/skills/doubt-driven/SKILL.md" ]] || fail "infra-only bootstrap installed doubt-driven skill"
 [[ ! -e "$INFRA_DIR/docs/agent-configs/project-brief.md" ]] || fail "infra-only bootstrap installed project brief"
 
-note "model-profile candidate migration"
-# An existing target profile must survive a rerun; the new bundle profile must
-# arrive as a reviewable candidate and only be promoted by --apply-candidates.
+note "legacy profile to seats migration"
+# Existing legacy config remains input; seats migrate once and are never candidates.
 MP_DIR="$FIXTURE_DIR/model-profile-migration"
 mkdir -p "$MP_DIR"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MP_DIR" --workflow full >/dev/null
+rm "$MP_DIR/docs/agent-configs/seats.json"
 cat > "$MP_DIR/docs/agent-configs/model-profiles.json" <<'EOF_LEGACY_PROFILE'
 {
   "schema": "agent-model-profiles/v1",
@@ -3506,17 +3499,19 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MP_DIR" --work
 mp_after="$(cksum < "$MP_DIR/docs/agent-configs/model-profiles.json")"
 [[ "$mp_before" == "$mp_after" ]] || fail "existing model profile was overwritten instead of preserved"
 mp_candidates=("$MP_DIR"/docs/agent-configs/model-profiles.json.generated.*)
-[[ "${#mp_candidates[@]}" -eq 1 && -f "${mp_candidates[0]}" ]] ||
-  fail "expected exactly one model-profiles candidate, got ${#mp_candidates[@]}"
-mp_bundle_model="$(sed -n 's/.*"coding_model": "\([^"]*\)".*/\1/p' "$CANONICAL_DIR/model-profiles/codex-model-profiles.json" | head -1)"
-[[ -n "$mp_bundle_model" ]] || fail "could not read coding_model from the bundle model profile"
-need_contains "$(cat "${mp_candidates[0]}")" "$mp_bundle_model" "model-profiles candidate carries the bundle coding model"
-mp_status="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MP_DIR" --status --json)"
-need_contains "$mp_status" '"pending_generated_candidates":1' "status reports one pending model-profile candidate"
+[[ ! -e "${mp_candidates[0]}" ]] || fail "legacy config must not become a generated candidate"
+mp_seats_before="$(cksum < "$MP_DIR/docs/agent-configs/seats.json")"
+need_contains "$(cat "$MP_DIR/docs/agent-configs/seats.json")" "gpt-5.4-legacy" "migrated seats keep configured primary"
+need_contains "$(cat "$MP_DIR/docs/agent-configs/seats.json")" "gpt-5.3-legacy" "migrated seats keep configured fallback"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MP_DIR" --apply-candidates >/dev/null
-need_contains "$(cat "$MP_DIR/docs/agent-configs/model-profiles.json")" "$mp_bundle_model" "apply-candidates promotes the bundle model profile"
-need_not_contains "$(cat "$MP_DIR/docs/agent-configs/model-profiles.json")" "gpt-5.4-legacy" "promoted profile no longer holds legacy values"
+[[ "$(cksum < "$MP_DIR/docs/agent-configs/model-profiles.json")" == "$mp_before" ]] || fail "apply-candidates rewrote legacy input"
+[[ "$(cksum < "$MP_DIR/docs/agent-configs/seats.json")" == "$mp_seats_before" ]] || fail "apply-candidates rewrote migrated seats"
 mp_status_after="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$MP_DIR" --status --json)"
 need_contains "$mp_status_after" '"pending_generated_candidates":0' "status reports no pending candidates after apply"
+
+note "agent seats runtime and launcher regressions"
+SEATS_QA_BUNDLE_PROFILE="$BOOTSTRAP_BUNDLE/model-profiles/codex-model-profiles.json" \
+  python3 "$ROOT_DIR/scripts/test-agent-seats.py" "$MP_DIR" "$BOOTSTRAP_BUNDLE/agent-seats.sh" "$TMP_DIR/out/seats-qa.json"
+python3 "$ROOT_DIR/scripts/test-agent-seats-launcher.py"
 
 printf 'bootstrap-test: ok (%s)\n' "$TMP_DIR"

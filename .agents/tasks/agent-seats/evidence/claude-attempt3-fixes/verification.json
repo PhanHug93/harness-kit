@@ -1,0 +1,55 @@
+{
+  "produced_by": "@spec (Claude) after @gate attempt 3",
+  "date": "2026-09-08",
+  "reference_sha256": "7add6bb86720eca2d8e4aedf9d6aa418c2ece862a80a2b1c117ef8cd66b1cf0d",
+  "harness_sha256": "9a7a73acddfda3e55c7fcc3f2dedb949c87ea0a6ff094fadb32e527d0f746e54",
+  "environment": {
+    "os": "Linux container",
+    "bash": "5.2.21",
+    "python": "3.11.15",
+    "note": "macOS /bin/bash 3.2 not runnable here; F3 removes the shell-level limit that failed there"
+  },
+  "clean_runs": [
+    {
+      "user": "non-root",
+      "passed": 109,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "user": "non-root",
+      "passed": 109,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "user": "non-root",
+      "passed": 109,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "user": "root",
+      "passed": 109,
+      "failed": 0,
+      "skipped": 1
+    }
+  ],
+  "mutations": {
+    "m1-stdin": 14,
+    "m2-markers": 2,
+    "m3-conflict": 1,
+    "m4-grammar": 3,
+    "m5-legacy-keys": 1,
+    "m6-atomic (in-place write)": 26,
+    "m7-set-missing": 1,
+    "m8-init-recheck (F1)": 2,
+    "m9-model-shape (F2)": 3
+  },
+  "mutation_note": "m6 in-place write is caught by the rewritten R7 and R8; m8 by K4 invalid/malformed; m9 by the three M3 cases",
+  "static": {
+    "bash -n": "ok",
+    "shellcheck": "clean with CI exclusions",
+    "ast feature_version": "3.8"
+  }
+}

@@ -1,0 +1,130 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-edge-1h1aya7m",
+  "uid": 501,
+  "edge-init-defaults": {
+    "rc": 0,
+    "args": [
+      "init"
+    ],
+    "stdout_lines": 7
+  },
+  "invalid-host-number": {
+    "rc": 1,
+    "prompts": 1,
+    "config_unchanged": true
+  },
+  "invalid-model-number": {
+    "rc": 1,
+    "prompts": 3,
+    "config_unchanged": true
+  },
+  "invalid-fallback-number": {
+    "rc": 1,
+    "prompts": 5,
+    "config_unchanged": true
+  },
+  "newline-model-validate": {
+    "rc": 1,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 0
+  },
+  "newline-model-resolve": {
+    "rc": 1,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 0
+  },
+  "newline-effort-validate": {
+    "rc": 1,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 0
+  },
+  "newline-effort-resolve": {
+    "rc": 1,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 0
+  },
+  "noncodex-newline-validate": {
+    "rc": 1,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 0
+  },
+  "noncodex-newline-resolve": {
+    "rc": 1,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 0
+  },
+  "orphan-fallback-effort-validate": {
+    "rc": 1,
+    "args": [
+      "validate"
+    ],
+    "stdout_lines": 0
+  },
+  "orphan-fallback-effort-resolve": {
+    "rc": 1,
+    "args": [
+      "resolve",
+      "gate"
+    ],
+    "stdout_lines": 0
+  },
+  "render-before-permission-probe": {
+    "rc": 0,
+    "args": [
+      "render"
+    ],
+    "stdout_lines": 1
+  },
+  "readonly-roster-set": {
+    "rc": 2,
+    "args": [
+      "set",
+      "build",
+      "--effort",
+      "high"
+    ],
+    "stdout_lines": 7,
+    "config_changed": true,
+    "agents_unchanged": true
+  },
+  "incomplete-legacy-init": {
+    "rc": 1,
+    "args": [
+      "init"
+    ],
+    "stdout_lines": 0,
+    "config_created": false
+  },
+  "roster-before-init": {
+    "rc": 1
+  },
+  "end-of-fresh-generation-init": {
+    "rc": 0,
+    "generated_target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v2-generation-u29s409j",
+    "gate": {
+      "host": "codex",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "fallback_model": "gpt-5.6-terra",
+      "fallback_effort": "xhigh"
+    },
+    "legacy_created_by_generator": true,
+    "note": "Regression probe copied from Attempt 2, now running unchanged v3 reference with current baseline generator; use generator-summary.json for the separate patched-generator test."
+  },
+  "reference_version": "v3"
+}

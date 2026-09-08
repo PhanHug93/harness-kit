@@ -1,0 +1,555 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-baseline-2_i8v_vz",
+  "bash": "/bin/bash",
+  "script_sha256": "7add6bb86720eca2d8e4aedf9d6aa418c2ece862a80a2b1c117ef8cd66b1cf0d",
+  "checks": [
+    {
+      "check": "L1 init: no seats, no legacy -> defaults (Astra/ultra)",
+      "ok": true,
+      "detail": "seats.json created from defaults:"
+    },
+    {
+      "check": "L2 init: valid seats present -> no write, no lock",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L3 init: legacy equal to old generator default -> seat defaults, labeled defaults",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L4 LEGACY_BUNDLE_DEFAULT equals the bundle model-profiles file",
+      "ok": true,
+      "detail": "{\"reasoning_effort\": \"xhigh\", \"planning_model\": \"gpt-5.6-sol\", \"coding_model\": \"gpt-5.6-luna\", \"reviewing_model\": \"gpt-5.6-sol\", \"planning_fallback_model\": \"gpt-5.6-terra\", \"coding_fallback_model\": \"gpt-5.6-terra\", \"reviewing_fallback_model\": \"gpt-5.6-terra\"}"
+    },
+    {
+      "check": "L5 suggest: customized legacy (unknown model, low) -> migrated proposal + notes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L6 init: customized legacy migrates and validates",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L7 init: default models + planning_reasoning_effort=max -> migrated (max kept)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L8 legacy missing planning_model: init/suggest/wizard --yes -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: legacy model-profiles.json: profile 'stable' is missing required field 'planning_model'; fix it, or delete the file and run scripts/agent-seats.sh reset"
+    },
+    {
+      "check": "L8 legacy unsupported effort turbo: init/suggest/wizard --yes -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: legacy model-profiles.json: unsupported reasoning_effort 'turbo' (old launcher set: none, low, medium, high, xhigh, max)"
+    },
+    {
+      "check": "L8 legacy empty fallback: init/suggest/wizard --yes -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: legacy model-profiles.json: profile 'stable' is missing required field 'coding_fallback_model'; fix it, or delete the file and run scripts/agent-seats.sh reset"
+    },
+    {
+      "check": "L8 legacy route effort with LF: init/suggest/wizard --yes -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: legacy effort is not usable for custom-planner: 'high\\n'"
+    },
+    {
+      "check": "L9 reset with invalid legacy present -> defaults, rc 0, valid",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L10 malformed legacy does not block wizard --yes on valid seats",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L11 malformed legacy does not block set on valid seats",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L12 init: missing seats + malformed legacy -> rc 1, nothing written",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L13 set on a missing seats.json fails closed (run init)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L14 malformed seats -> show rc 1 with reset guidance, no traceback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L15 malformed seats -> init refuses to overwrite",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L16 reset repairs malformed seats",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L17 UTF-8 BOM in a hand-edited seats.json is accepted",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L18 defaults are warning-clean (fallback overlap is not a conflict)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "L19 init under a PTY never prompts",
+      "ok": true,
+      "detail": "rc=0 prompts=0"
+    },
+    {
+      "check": "G1 resolve: 8 lines, empty fields preserved when fallback absent",
+      "ok": true,
+      "detail": "['gate', '@gate', 'technical_review', 'codex', 'gpt-6-astra', 'ultra', 'gpt-5.6-terra', 'xhigh']"
+    },
+    {
+      "check": "G2 resolve: no fallback -> 8 lines with empty fallback fields",
+      "ok": true,
+      "detail": "['gate', '@gate', 'technical_review', 'codex', 'gpt-6-astra', 'ultra', '', '']"
+    },
+    {
+      "check": "G3 bash line reader keeps empty columns",
+      "ok": true,
+      "detail": "count=8 model=[gpt-6-astra] fallback=[] fbeff=[]"
+    },
+    {
+      "check": "G4 resolve non-codex host: 8 lines, empty model fields",
+      "ok": true,
+      "detail": "['gate', '@gate', 'technical_review', 'claude', '', '', '', '']"
+    },
+    {
+      "check": "G5 validate rejects: model LF in catalog+occupant",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.model is required for host codex and must match the model grammar"
+    },
+    {
+      "check": "G5 validate rejects: effort LF",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.effort 'high\\n' violates the grammar"
+    },
+    {
+      "check": "G5 validate rejects: effort CRLF",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.effort 'high\\r\\n' violates the grammar"
+    },
+    {
+      "check": "G5 validate rejects: model TAB",
+      "ok": true,
+      "detail": "agent-seats: ERROR: catalog model id 'bad\\tmodel' violates the model grammar [A-Za-z0-9][A-Za-z0-9._:/-]*"
+    },
+    {
+      "check": "G5 validate rejects: informational model LF on claude seat",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.model 'info\\nmodel' violates the grammar"
+    },
+    {
+      "check": "G5 validate rejects: orphan fallback_effort",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: fallback_effort without fallback_model"
+    },
+    {
+      "check": "G5 validate rejects: non-codex effort/fallback garbage",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat spec: occupant.fallback_effort 'Q\\n' violates the grammar"
+    },
+    {
+      "check": "G5 validate rejects: empty model",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.model is required for host codex and must match the model grammar"
+    },
+    {
+      "check": "G5 validate rejects: model with space",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.model is required for host codex and must match the model grammar"
+    },
+    {
+      "check": "G5 validate rejects: host LF",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: occupant.host must be one of claude, codex, gemini, cursor, windsurf, human"
+    },
+    {
+      "check": "G5 validate rejects: tag TAB",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat gate: tag/phase are protocol constants (@gate, technical_review)"
+    },
+    {
+      "check": "G5 validate rejects: owner not human",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat owner: occupant.host must be human"
+    },
+    {
+      "check": "G5 validate rejects: default_effort not in efforts",
+      "ok": true,
+      "detail": "agent-seats: ERROR: catalog model gpt-6-astra: default_effort must be one of its efforts"
+    },
+    {
+      "check": "G5 validate rejects: non-string efforts",
+      "ok": true,
+      "detail": "agent-seats: ERROR: seat verify: effort 'ultra' is not supported by gpt-6-astra (supported: )"
+    },
+    {
+      "check": "G6 informational model on a host-controlled seat -> valid with a warning",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "G6b duplicate efforts -> valid with a warning (existing files stay usable)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "G7 model-info: host/default_effort/efforts",
+      "ok": true,
+      "detail": "codex / xhigh / none low medium high xhigh max"
+    },
+    {
+      "check": "G8 model-info unknown model -> rc 1 with guidance",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C1 conflict: build with luna -> 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C2 conflict: build effective astra (gate primary) -> 1",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C3 conflict: build effective terra (only a fallback) -> 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C4 conflict: non-build seat -> 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C5 conflict: reviewers on claude -> 0 even for astra",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C6 conflict: unknown seat -> rc 1",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "C7 shared primary model -> warning names gate_coding",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "S1 set rejects unknown option: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: unknown option --efort (see --help)"
+    },
+    {
+      "check": "S1 set rejects --host=claude form: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: unknown option --host=claude (see --help)"
+    },
+    {
+      "check": "S1 set rejects model on host-controlled: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: host claude is host-controlled; --model do not apply; nothing written"
+    },
+    {
+      "check": "S1 set rejects --no-fallback with --fallback-model: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: --no-fallback cannot be combined with --fallback-model/--fallback-effort"
+    },
+    {
+      "check": "S1 set rejects --fallback-effort without fallback: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: --fallback-effort requires a fallback model; nothing written"
+    },
+    {
+      "check": "S1 set rejects empty host: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: --host requires a non-empty value"
+    },
+    {
+      "check": "S1 set rejects unsupported effort: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: assignment is invalid; nothing written"
+    },
+    {
+      "check": "S1 set rejects unknown model: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: assignment is invalid; nothing written"
+    },
+    {
+      "check": "S1 set rejects owner to codex: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: assignment is invalid; nothing written"
+    },
+    {
+      "check": "S1 set rejects uppercase seat: rc 1, file unchanged, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: unknown seat or route: GATE"
+    },
+    {
+      "check": "S2 set host claude drops model fields",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "S3 set via route alias, model without effort -> catalog default",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "S4 set repairs an invalid (structurally sound) file",
+      "ok": true,
+      "detail": "agent-seats: warn: current seats.json: seat gate: effort 'turbo' is not supported by gpt-5.6-luna (supported: none, low, medium, high, xhigh, max)\nagent-seats: warn: seat gate: no fallback model; CODEX_USE_FALLBACK launches will be refused"
+    },
+    {
+      "check": "M1 catalog is a list: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M1 seat entry is a string: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M1 occupant is a list: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M1 occupant is null: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M1 missing seat: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M1 models is a list: every command rc 1 without traceback",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1"
+    },
+    {
+      "check": "M2 top-level list: rc 1 without traceback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "M3 catalog entry for a seat's model is a string: rc 1, diagnostic not traceback, file kept",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+    },
+    {
+      "check": "M3 catalog entry for a seat's model is a list: rc 1, diagnostic not traceback, file kept",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+    },
+    {
+      "check": "M3 catalog entry for a seat's model is a boolean: rc 1, diagnostic not traceback, file kept",
+      "ok": true,
+      "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+    },
+    {
+      "check": "R1 render appends block, preserves prefix bytes, idempotent",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R2 set re-renders only the block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R3 CRLF file keeps CRLF everywhere",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R4 orphan BEGIN -> exit 3 twice, file untouched, overlay intact",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R5 duplicate blocks -> exit 3, untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R6 set with broken markers -> seats written, exit 2, explicit message",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R7 failed AGENTS write (RLIMIT_FSIZE in the interpreter) -> rc 2, old AGENTS bytes intact, seats written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: cannot write /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-baseline-2_i8v_vz/AGENTS.md: [Errno 27] File too large"
+    },
+    {
+      "check": "R8 failed seats write (RLIMIT_FSIZE in the interpreter) -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "agent-seats: ERROR: cannot write /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-baseline-2_i8v_vz/docs/agent-configs/seats.json: [Errno 27] File too large; nothing written"
+    },
+    {
+      "check": "R9 symlinked AGENTS.md is written through (link kept, target updated)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "R10 read-only AGENTS.md -> rc 2 with message, config changed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "K1 20 concurrent set pairs -> no lost updates",
+      "ok": true,
+      "detail": "lost=0"
+    },
+    {
+      "check": "K2a lock released within the wait window: reads unblocked, set waits then succeeds",
+      "ok": true,
+      "detail": "read=0.1s set=2.7s rc2=0"
+    },
+    {
+      "check": "K2b lock held beyond the wait window: set refuses after ~10s, nothing written",
+      "ok": true,
+      "detail": "set=10.1s rc2=1"
+    },
+    {
+      "check": "K3 init on a present file needs no lock (fast path)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "K4 valid seats.json appears while init waits: rc 0, bytes kept, no traceback",
+      "ok": true,
+      "detail": "rc=0 kept=True msg=['agent-seats: seats.json appeared while waiting for the lock; nothing written']"
+    },
+    {
+      "check": "K4 invalid schema seats.json appears while init waits: rc 1, bytes kept, no traceback",
+      "ok": true,
+      "detail": "rc=1 kept=True msg=['agent-seats: ERROR: existing seats.json is invalid (it appeared while waiting for the lock); init does not overwrite. Fix it by hand, repair the seat with set, or run reset']"
+    },
+    {
+      "check": "K4 malformed JSON seats.json appears while init waits: rc 1, bytes kept, no traceback",
+      "ok": true,
+      "detail": "rc=1 kept=True msg=['agent-seats: ERROR: malformed JSON in /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-baseline-2_i8v_vz/docs/agent-configs/seats.json: line 1 column 3 (it appeared while waiting for the lock); init does not overwrite. Run reset']"
+    },
+    {
+      "check": "W1 wizard on PTY: exact prompt count and rc 0",
+      "ok": true,
+      "detail": "rc=0 prompts=16"
+    },
+    {
+      "check": "W2 non-default choices land in JSON (@spec codex luna xhigh fallback terra)",
+      "ok": true,
+      "detail": "{\"host\": \"codex\", \"model\": \"gpt-5.6-luna\", \"effort\": \"xhigh\", \"fallback_model\": \"gpt-5.6-terra\", \"fallback_effort\": \"xhigh\"}"
+    },
+    {
+      "check": "W3 Enter keeps suggestion (@gate astra ultra)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "W4 model change adopts default effort; 'none' drops fallback (@build astra ultra)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "W5 host change to claude drops model (@verify)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "W6 re-choosing the same host keeps the suggested model",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "W7 invalid choice (host 99) -> rc 1 at prompt 1, nothing written",
+      "ok": true,
+      "detail": "rc=1 prompts=1"
+    },
+    {
+      "check": "W7 invalid choice (model 99) -> rc 1 at prompt 3, nothing written",
+      "ok": true,
+      "detail": "rc=1 prompts=3"
+    },
+    {
+      "check": "W7 invalid choice (fallback 99) -> rc 1 at prompt 5, nothing written",
+      "ok": true,
+      "detail": "rc=1 prompts=5"
+    },
+    {
+      "check": "W7 invalid choice (fallback by name) -> rc 1 at prompt 5, nothing written",
+      "ok": true,
+      "detail": "rc=1 prompts=5"
+    },
+    {
+      "check": "W7 invalid choice (host letter) -> rc 1 at prompt 1, nothing written",
+      "ok": true,
+      "detail": "rc=1 prompts=1"
+    },
+    {
+      "check": "W8 invalid interactive effort -> rc 1, nothing written",
+      "ok": true,
+      "detail": "rc=1"
+    },
+    {
+      "check": "W9 Ctrl-D aborts the wizard: rc 1, nothing written",
+      "ok": true,
+      "detail": "rc=1"
+    },
+    {
+      "check": "W10 Ctrl-C at a prompt -> rc 130, nothing written, no traceback",
+      "ok": true,
+      "detail": "rc=130"
+    },
+    {
+      "check": "W11 seats.json without duty keys (spec example shape) runs the wizard (17 prompts, all Enter)",
+      "ok": true,
+      "detail": "rc=0 prompts=17"
+    },
+    {
+      "check": "W12 catalog without a codex model + host codex -> rc 1, nothing written, no traceback",
+      "ok": true,
+      "detail": "rc=1"
+    },
+    {
+      "check": "W13 non-TTY wizard without --yes accepts suggestions",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "W14 wizard --yes on a PTY never prompts",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "passed": 109,
+  "failed": 0,
+  "skipped": 0
+}

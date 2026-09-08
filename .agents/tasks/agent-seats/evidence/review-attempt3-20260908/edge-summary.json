@@ -1,0 +1,46 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v3-edge-eqwnffej",
+  "uid": 501,
+  "v3-init": {
+    "rc": 0,
+    "traceback": false
+  },
+  "model-shape-str": {
+    "rc": 1,
+    "traceback": true
+  },
+  "model-shape-list": {
+    "rc": 1,
+    "traceback": true
+  },
+  "model-shape-bool": {
+    "rc": 1,
+    "traceback": true
+  },
+  "init-after-lock-malformed": {
+    "rc": 0,
+    "traceback": false,
+    "waiting_before_publish": true,
+    "published_bytes_preserved": false
+  },
+  "init-after-lock-invalid": {
+    "rc": 0,
+    "traceback": false,
+    "waiting_before_publish": true,
+    "published_bytes_preserved": true
+  },
+  "atomic-python-limit-4096": {
+    "rc": 2,
+    "traceback": false,
+    "config_changed": true,
+    "agents_preserved": true,
+    "contract_pass": true
+  },
+  "atomic-python-limit-1024": {
+    "rc": 1,
+    "traceback": false,
+    "config_changed": false,
+    "agents_preserved": true,
+    "contract_pass": true
+  }
+}

@@ -212,6 +212,16 @@ def migrate_legacy(doc):
     return "legacy", notes
 
 
+def model_spec(models, mid):
+    """Catalog entry for mid, or None when absent or not an object. Callers must
+    never dereference a raw catalog value: a hand-edited seats.json can hold a
+    string, list or boolean there (gate attempt 3, F2)."""
+    if not isinstance(models, dict):
+        return None
+    spec = models.get(mid)
+    return spec if isinstance(spec, dict) else None
+
+
 def validate(doc):
     errors, warnings = [], []
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
@@ -271,9 +281,12 @@ def validate(doc):
                 if not is_model(mid):
                     errors.append(f"seat {seat}: occupant.{key} is required for host {host} and must match the model grammar")
                     continue
-                spec = models.get(mid)
-                if spec is None:
+                if mid not in models:
                     errors.append(f"seat {seat}: model {mid} is not in catalog.models")
+                    continue
+                spec = model_spec(models, mid)
+                if spec is None:
+                    errors.append(f"seat {seat}: catalog entry for {mid} must be an object, not {type(models.get(mid)).__name__}")
                     continue
                 if spec.get("host") != host:
                     errors.append(f"seat {seat}: model {mid} belongs to host {spec.get('host')}, not {host}")
@@ -393,8 +406,13 @@ def structural_errors(doc):
         if not isinstance(entry, dict) or not isinstance(entry.get("occupant"), dict):
             errs.append(f"seat {seat}: missing or occupant is not an object")
     catalog = doc.get("catalog")
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), dict):
+    models = catalog.get("models") if isinstance(catalog, dict) else None
+    if not isinstance(models, dict):
         errs.append("catalog.models must be an object")
+    else:
+        for mid, spec in models.items():
+            if not isinstance(spec, dict):
+                errs.append(f"catalog.models[{mid!r}] must be an object, not {type(spec).__name__}")
     return errs
 
 
@@ -535,7 +553,7 @@ def pick_number(answer, options, what):
 
 def interactive_wizard(doc):
     models = doc["catalog"]["models"]
-    codex_models = [m for m, s in models.items() if s.get("host") == "codex"]
+    codex_models = [m for m in models if (model_spec(models, m) or {}).get("host") == "codex"]
     host_map = {"1": "claude", "2": "codex", "3": "gemini", "4": "cursor", "5": "windsurf"}
     for seat in SEAT_ORDER:
         entry = doc["seats"][seat]
@@ -559,7 +577,7 @@ def interactive_wizard(doc):
                 if default.get("host") == "codex" and default["model"] in models and default.get("fallback_model", default["model"]) in models:
                     occ = clone(default)
                 else:
-                    occ = {"host": "codex", "model": codex_models[0], "effort": models[codex_models[0]]["default_effort"]}
+                    occ = {"host": "codex", "model": codex_models[0], "effort": (model_spec(models, codex_models[0]) or {}).get("default_effort")}
             else:
                 occ = {"host": new_host}
             entry["occupant"] = occ
@@ -567,14 +585,14 @@ def interactive_wizard(doc):
             continue
         occ = entry["occupant"]
         for i, m in enumerate(codex_models, 1):
-            spec = models[m]
+            spec = model_spec(models, m) or {}
             out(f"    {i}) {m}  efforts: {', '.join(spec['efforts'])}  default: {spec['default_effort']}")
         pick = pick_number(ask(f"  model [{occ.get('model')}]> "), codex_models, "model")
         if pick is not None:
             m = codex_models[pick]
             if m != occ.get("model"):
                 occ["model"] = m
-                occ["effort"] = models[m]["default_effort"]
+                occ["effort"] = (model_spec(models, m) or {}).get("default_effort")
         eff = ask(f"  effort [{occ.get('effort')}]> ")
         if eff:
             occ["effort"] = eff
@@ -586,7 +604,7 @@ def interactive_wizard(doc):
             m = codex_models[int(fb) - 1]
             if m != occ.get("fallback_model"):
                 occ["fallback_model"] = m
-                occ["fallback_effort"] = models[m]["default_effort"]
+                occ["fallback_effort"] = (model_spec(models, m) or {}).get("default_effort")
         if occ.get("fallback_model"):
             fbe = ask(f"  fallback effort [{occ.get('fallback_effort')}]> ")
             if fbe:
@@ -643,21 +661,31 @@ def main():
         write_and_render(doc, "seats.json reset to bundle defaults:")
         return 0
     if cmd == "init":
+        def init_precheck(appeared):
+            """True when a file is already there and valid. Raises on anything
+            present but unusable. Only a 'missing' result may create the file,
+            and the fast path and the post-lock recheck apply the same rules
+            (gate attempt 3, F1: a file that appeared during the wait was
+            overwritten with defaults and init still reported success)."""
+            doc, error = read_json(SEATS_FILE)
+            where = " (it appeared while waiting for the lock)" if appeared else ""
+            if error is None:
+                errors, _ = validate(doc)
+                if errors:
+                    report(errors, [])
+                    raise SeatsError(f"existing seats.json is invalid{where}; init does not overwrite. Fix it by hand, repair the seat with set, or run reset")
+                return True
+            if error != "missing":
+                raise SeatsError(f"{error}{where}; init does not overwrite. Run reset")
+            return False
+
         # Read-only fast path: a present file never takes the lock and never
         # prompts, so generators and launchers can call init unconditionally.
-        doc, error = read_json(SEATS_FILE)
-        if error is None:
-            errors, _ = validate(doc)
-            if errors:
-                report(errors, [])
-                raise SeatsError("existing seats.json is invalid; init does not overwrite. Fix it by hand, repair the seat with set, or run reset")
+        if init_precheck(False):
             out("agent-seats: seats.json present and valid; nothing written")
             return 0
-        if error != "missing":
-            raise SeatsError(f"{error}; init does not overwrite. Run reset")
         lock_for_write()
-        doc, error = read_json(SEATS_FILE)  # re-check under the lock
-        if error is None:
+        if init_precheck(True):  # same rules under the lock
             out("agent-seats: seats.json appeared while waiting for the lock; nothing written")
             return 0
         doc = default_document()
@@ -733,8 +761,8 @@ def main():
         if structural_errors(doc):
             report(structural_errors(doc), [])
             raise SeatsError("seats.json is structurally invalid; run validate")
-        spec = doc["catalog"]["models"].get(args[0])
-        if not isinstance(spec, dict):
+        spec = model_spec(doc.get("catalog", {}).get("models"), args[0])
+        if spec is None:
             raise SeatsError(f"model {args[0]} is not in catalog.models; add it with scripts/agent-seats.sh (edit seats.json catalog) before launching")
         errors, _ = validate(doc)
         if errors:
@@ -794,7 +822,7 @@ def main():
             elif prev.get("model") == occ["model"] and prev.get("effort"):
                 occ["effort"] = prev["effort"]
             else:
-                occ["effort"] = (models.get(occ["model"]) or {}).get("default_effort")
+                occ["effort"] = (model_spec(models, occ["model"]) or {}).get("default_effort")
             if not opts.get("no_fallback"):
                 fb = opts.get("fallback_model", prev.get("fallback_model"))
                 if fb:
@@ -804,7 +832,7 @@ def main():
                     elif prev.get("fallback_model") == fb and prev.get("fallback_effort"):
                         occ["fallback_effort"] = prev["fallback_effort"]
                     else:
-                        occ["fallback_effort"] = (models.get(fb) or {}).get("default_effort")
+                        occ["fallback_effort"] = (model_spec(models, fb) or {}).get("default_effort")
         doc["seats"][seat]["occupant"] = occ
         errors, warnings = validate(doc)
         report(errors, warnings)

@@ -322,3 +322,22 @@ heuristic. Patch tham khảo áp dụng cho packet này là
 reinsertion); `evidence/reference-astra-ultra-stderr-combined.patch` chỉ còn giá
 trị tham khảo cho `agent-seats` (quy tắc effort, danh sách assertion cần đổi).
 AC1–AC11 gốc giữ nguyên; AC12–AC16 của revision 1–2 bị huỷ tại đây.
+
+## Combined release resolution — 2026-09-08
+
+The user's combined release authorization supersedes the separate legacy TSV
+patch sequence. The final seats launcher implements the stdout/stderr isolation
+contract at the seats CLI boundary with eight lossless lines; old profile-parser
+field-count wording is superseded by the approved seats interface. No temporary
+legacy parser is installed or separately released.
+
+## Outcome
+
+- Summary: valid data with Python diagnostics launches correctly; failures keep
+  diagnostics and refuse launch. Temporary files are cleaned and caller traps
+  survive. Model/effort changes follow the separately approved seats design.
+- Evidence: [combined verification](../agent-seats/verification.md),
+  `scripts/test-agent-seats-launcher.py` and its eight groups/three mutations;
+  re-merging stderr is caught. macOS Bash 3.2 and all three release suites pass.
+- Effect on source: the stderr defect is resolved by the combined seats release
+  candidate; historical prototype patches remain reference only.

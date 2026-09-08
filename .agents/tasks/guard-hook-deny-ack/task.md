@@ -365,3 +365,11 @@ the packet proceeds to user resolution for final acceptance.
 
 - Claude cross-review: [claude-review.md](claude-review.md)
 - Fresh verification summary and reviewed snapshot: [evidence/claude-cross-review/summary.md](evidence/claude-cross-review/summary.md), `evidence/claude-cross-review/worktree-snapshot.tgz`
+
+## Release acceptance — 2026-09-08
+
+The guard implementation above was published in `v2026.09.07.1` (`cf8f326`).
+The user's subsequent combined release authorization accepts that result and
+closes the former user checkpoint. The 2026.09.08.1 source leaves guard/hook
+behavior unchanged and reruns the bootstrap guard regressions. Existing real
+Claude host evidence above is historical; no new live-host run is claimed.

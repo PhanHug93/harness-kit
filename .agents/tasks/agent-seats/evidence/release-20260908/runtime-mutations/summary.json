@@ -1,0 +1,118 @@
+{
+  "baseline": {
+    "rc": 0,
+    "passed": 133,
+    "failed": 0,
+    "skipped": 0,
+    "failures": []
+  },
+  "source_sha256": "0182febcfefffd32d969fa97302d8bd51fa8f45882c99ee6ed97acfa3cebfaac",
+  "schema_sha256": "1fa8c6c556227f9f7042b423edada57e55cb0c0261284292a181036344c01317",
+  "m1-stdin": {
+    "rc": 1,
+    "passed": 119,
+    "failed": 14,
+    "skipped": 0,
+    "failures": [
+      "W1 wizard on PTY: exact prompt count and rc 0",
+      "W2 non-default choices land in JSON (@spec codex luna xhigh fallback terra)",
+      "W4 model change adopts default effort; 'none' drops fallback (@build astra ultra)",
+      "W5 host change to claude drops model (@verify)",
+      "W7 invalid choice (host 99) -> rc 1 at prompt 1, nothing written",
+      "W7 invalid choice (model 99) -> rc 1 at prompt 3, nothing written",
+      "W7 invalid choice (fallback 99) -> rc 1 at prompt 5, nothing written",
+      "W7 invalid choice (fallback by name) -> rc 1 at prompt 5, nothing written",
+      "W7 invalid choice (host letter) -> rc 1 at prompt 1, nothing written",
+      "W8 invalid interactive effort -> rc 1, nothing written",
+      "W9 Ctrl-D aborts the wizard: rc 1, nothing written",
+      "W10 Ctrl-C at a prompt -> rc 130, nothing written, no traceback",
+      "W11 seats.json without duty keys (spec example shape) runs the wizard (17 prompts, all Enter)",
+      "W12 catalog without a codex model + host codex -> rc 1, nothing written, no traceback"
+    ]
+  },
+  "m2-markers": {
+    "rc": 1,
+    "passed": 130,
+    "failed": 3,
+    "skipped": 0,
+    "failures": [
+      "R4 orphan BEGIN -> exit 3 twice, file untouched, overlay intact",
+      "R5 duplicate blocks -> exit 3, untouched",
+      "R6 set with broken markers -> seats written, exit 2, explicit message"
+    ]
+  },
+  "m3-conflict": {
+    "rc": 1,
+    "passed": 132,
+    "failed": 1,
+    "skipped": 0,
+    "failures": [
+      "C2 conflict: build effective astra (gate primary) -> 1"
+    ]
+  },
+  "m4-grammar": {
+    "rc": 1,
+    "passed": 127,
+    "failed": 6,
+    "skipped": 0,
+    "failures": [
+      "L8 legacy route effort with LF: init/suggest/wizard --yes -> rc 1, nothing written, no traceback",
+      "G5 validate rejects: model LF in catalog+occupant",
+      "G5 validate rejects: effort LF",
+      "G5 validate rejects: effort CRLF",
+      "G5 validate rejects: model TAB",
+      "G5 validate rejects: informational model LF on claude seat"
+    ]
+  },
+  "m5-legacy-keys": {
+    "rc": 1,
+    "passed": 132,
+    "failed": 1,
+    "skipped": 0,
+    "failures": [
+      "L8 legacy missing planning_model: init/suggest/wizard --yes -> rc 1, nothing written, no traceback"
+    ]
+  },
+  "m7-set-creates": {
+    "rc": 1,
+    "passed": 132,
+    "failed": 1,
+    "skipped": 0,
+    "failures": [
+      "L13 set on a missing seats.json fails closed (run init)"
+    ]
+  },
+  "m6-inplace": {
+    "rc": 1,
+    "passed": 129,
+    "failed": 4,
+    "skipped": 0,
+    "failures": [
+      "R7 failed AGENTS write (RLIMIT_FSIZE in the interpreter) -> rc 2, old AGENTS bytes intact, seats written, no traceback",
+      "R8 failed seats write (RLIMIT_FSIZE in the interpreter) -> rc 1, nothing written, no traceback",
+      "R9 symlinked AGENTS.md is written through (link kept, target updated)",
+      "R10 read-only AGENTS.md -> rc 2 with message, config changed"
+    ]
+  },
+  "m8-init-recheck": {
+    "rc": 1,
+    "passed": 131,
+    "failed": 2,
+    "skipped": 0,
+    "failures": [
+      "K4 invalid schema seats.json appears while init waits: rc 1, bytes kept, no traceback",
+      "K4 malformed JSON seats.json appears while init waits: rc 1, bytes kept, no traceback"
+    ]
+  },
+  "m9-model-shape": {
+    "rc": 1,
+    "passed": 130,
+    "failed": 3,
+    "skipped": 0,
+    "failures": [
+      "M3 catalog entry for a seat's model is a string: rc 1, diagnostic not traceback, file kept",
+      "M3 catalog entry for a seat's model is a list: rc 1, diagnostic not traceback, file kept",
+      "M3 catalog entry for a seat's model is a boolean: rc 1, diagnostic not traceback, file kept"
+    ]
+  }
+}

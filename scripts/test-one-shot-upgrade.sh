@@ -212,4 +212,6 @@ need_contains "$clone_out" "safe default: candidates were not auto-applied" "one
 [[ "$(sed -n '1p' "$clone_home_dir/VERSION")" == "$version" ]] ||
   fail "one-shot clone path did not install expected harness version"
 
+python3 "$ROOT_DIR/scripts/test-agent-seats-migration.py"
+
 echo "one-shot-upgrade-test: ok ($TMP_ROOT)"

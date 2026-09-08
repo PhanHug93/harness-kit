@@ -295,3 +295,77 @@ macOS bash 3.2** — yêu cầu `@gate` chạy `SEATS_QA_BASH=/bin/bash`.
 AC trong spec: bổ sung 14–16; AC12 mở rộng 7 mutation. Chỉ dẫn adopt-as-is đã
 thay bằng "adopt v3 + generator hunks + integration sites" trong
 `build-handoff.md` (correction 2).
+
+## Pre-coding review attempt 3 evidence
+
+- [codex-review.md](codex-review.md), Attempt 3: review of reference v3 and generator hunks at HEAD cf8f326; three gaps F1-F3; partially_sufficient/no.
+- [Independent findings](evidence/review-attempt3-20260908/independent-findings.md): recorded before council reconciliation.
+- [Bash 3.2 harness results](evidence/review-attempt3-20260908/qa-summary.json): 101 pass, 2 fail, 0 skip; the two failures occur before the intended atomic-write boundary.
+- [Additional probes](evidence/review-attempt3-20260908/edge-summary.json): init recheck race, nested catalog shapes, and atomic-write failures injected after code loading.
+- [Generator patch results](evidence/review-attempt3-20260908/generator-summary.json): disposable-kit fresh/upgrade/apply-candidates/dry-run; launcher/verifier integration still absent.
+
+## Revision 4 — 2026-09-08, after `@gate` attempt 3 (F1–F3)
+
+Owner: `@spec` (Claude). Reference and harness updated; specification revision 3.
+No production change, no commit.
+
+| Finding | Resolution | Evidence |
+|---|---|---|
+| F1 (P1) `init` overwrote a file that appeared while it waited for the lock, and reported success | One `init_precheck()` now serves both the lock-free fast path and the recheck under the lock: only a `missing` result may create the file. A file that appeared is validated by the same rules — valid → rc 0 "appeared while waiting", no write; invalid schema or malformed JSON → rc 1 with the message naming the wait, bytes kept. | Harness `K4` ×3 (valid, invalid schema, malformed JSON): rc and byte-for-byte preservation asserted; mutation `m8-init-recheck` (recheck without validation) turns two of them red |
+| F2 (P2) a catalog entry of the wrong type was dereferenced in the occupant loop | New `model_spec()` accessor returns a dict or `None`; the occupant loop separates "not in catalog" from "catalog entry must be an object, not str/list/bool", and `set`, `model-info` and the wizard use the accessor instead of raw lookups. `structural_errors()` also rejects a mis-shaped entry, so `set --repair` cannot start from one. | Harness `M3` ×3 (string, list, boolean) over `show validate model-info conflict resolve render set`: rc 1, `ERROR:` diagnostic, no traceback, file unchanged; mutation `m9-model-shape` turns all three red |
+| F3 (P2) `ulimit -f` hit the shell before the program was loaded (Bash 3.2 spools a large heredoc through a temp file) | `fsize_limited_run()` puts a `python3` shim earlier on `PATH` that ignores `SIGXFSZ` and applies `RLIMIT_FSIZE` to the interpreter running the seats program, then execs the real interpreter. The failure now lands in `write_atomic`, and the assertions (rc, preserved bytes, message, no traceback) are unchanged. | `R7` (limit 4096 → rc 2, AGENTS bytes intact, seats written) and `R8` (limit 1024 → rc 1, nothing written) now fail with `[Errno 27] File too large`; mutation `m6-atomic` (in-place write) turns both red |
+
+Also in specification revision 3: the Data-model sentence that still said the
+sharing warning covers "primary or fallback" now says primary only (chair
+decision 1, confirmed by `@gate`); the lifecycle table gains the
+appeared-under-lock row; the test section documents the interpreter-level size
+limit; AC 12 and AC 15 name the nine mutations and the new `init` case.
+
+Verification (Linux, bash 5.2.21, python 3.11.15): 109/109 ×3 as a non-root
+user, 109/109 with 1 skip as root; nine mutations each red; `bash -n`,
+shellcheck with CI exclusions, AST parse at feature_version 3.8 all clean.
+`evidence/claude-attempt3-fixes/verification.json` carries the counts and the
+source hashes. **Not run here:** macOS `/bin/bash` 3.2 — F3 removes the
+shell-level limit that failed there, but the run itself is `@gate`'s to make;
+production integration is still absent by design (that is `@build`'s work after
+a sufficient verdict).
+
+## Pre-coding review attempt 4 evidence — 2026-09-08
+
+`@gate`: **sufficient / yes**, F1–F3 closed; no new blocker in this bounded
+pre-coding review. See `codex-review.md`, Attempt 4, for the verdict and scope.
+
+- [macOS Bash 3.2 harness](evidence/review-attempt4-20260908/qa-summary.json):
+  **109/109, 0 skipped**, non-root uid 501.
+- [Independent probes](evidence/review-attempt4-20260908/independent-summary.json):
+  **9/9**, including unreadable files published while init waits for the lock.
+- [Mutations](evidence/review-attempt4-20260908/mutation-summary.json): supplied
+  m8/m9 caught by K4/M3; independent in-place mutant caught by R7 and R8.
+- [Static checks](evidence/review-attempt4-20260908/static-summary.json): Bash
+  syntax, shellcheck with CI exclusions, Python 3.8 AST grammar checks pass.
+- [Build handoff](build-handoff.md): current checkout, reviewed input hashes,
+  correct interfaces and remaining integration gates consolidated.
+
+Production integration has not started; `base_commit` stays null and feature
+verification stays `not_run`. Guard is landed at HEAD `cf8f326`; resolve the
+open stderr prerequisite before dispatching `@build`. No commit/amend.
+
+## Combined release implementation — 2026-09-08
+
+The latest user decision supersedes the preceding pre-coding/no-commit status.
+Production seats and stderr isolation are implemented with configuration-safe
+upgrades. Local implementation acceptance is complete; the release coordinator
+continues to exact-commit CI and publication without another user checkpoint.
+
+## Outcome
+
+- Summary: configurable agent seats, lossless launcher diagnostics and safe
+  migration from prior published versions are implemented. Technical findings
+  from independent runtime and Claude source reviews are resolved.
+- Evidence: [implementation](implementation.md), [verification](verification.md),
+  and [release evidence index](evidence/release-20260908/README.md). Three release
+  suites, 133 runtime checks, nine runtime mutations, eight launcher groups,
+  three launcher mutations and 46 historical upgrade assertions passed locally.
+- Effect on source: the seats and stderr objectives are accepted for the
+  authorized release candidate. Remote CI and tag publication are the remaining
+  outer release steps; this packet does not assert future publication success.

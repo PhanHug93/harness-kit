@@ -1,0 +1,11 @@
+{
+  "bash": "/bin/bash",
+  "apply_state_with_retired_only": "complete",
+  "pending_count_with_retired_only": 0,
+  "apply_state_with_retired_and_eligible": "pending",
+  "pending_count_with_retired_and_eligible": 1,
+  "retired_sha256_before": "6feb493b3819f141125434b88964fd14a982e363bd5145ee177a96d3148abf96",
+  "retired_sha256_after": "6feb493b3819f141125434b88964fd14a982e363bd5145ee177a96d3148abf96",
+  "passed": 8,
+  "failed": 0
+}

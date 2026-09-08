@@ -1,0 +1,17 @@
+{
+  "scope": "Infra-only full-generator/verifier regression after final-suite failure",
+  "red": {
+    "generate_rc": 0,
+    "verifier_rc": 1,
+    "reason": "Verifier unconditionally required full-workflow seats runtime"
+  },
+  "green": {
+    "generate_rc": 0,
+    "verifier_rc": 0,
+    "seats_runtime_absent": true,
+    "seats_json_absent": true,
+    "missing_seats_warning_absent": true
+  },
+  "binding": "scripts/test-bootstrap-multi-agent-project.sh infra-only block",
+  "mirror_note": "Infra verifier differs from full snapshot only in the intentional WORKFLOW_PRESET interpolation; final static full-target snapshot comparison passes."
+}

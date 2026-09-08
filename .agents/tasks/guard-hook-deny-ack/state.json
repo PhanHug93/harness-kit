@@ -1,10 +1,10 @@
 {
   "protocol_version": "claude-codex-collaboration/v1",
   "task_id": "guard-hook-deny-ack",
-  "status": "awaiting_user",
-  "phase": "resolution",
-  "owner": "user",
-  "requested_action": "Review the completed guard + ACK implementation and final verification report for acceptance",
+  "status": "closed",
+  "phase": "closed",
+  "owner": "codex",
+  "requested_action": "Accepted under the combined release authorization; published at v2026.09.07.1 and unchanged in 2026.09.08.1.",
   "base_commit": "45585fad41724334cd9e93d8c489f8946d9ec8c6",
   "source_task": null,
   "blocks": [],
@@ -20,5 +20,5 @@
     "reason": "Luna implementation complete; Sol specification and code-quality review pass; release, generated, mutation, real Claude host, and baseline lint evidence complete",
     "report": ".agents/tasks/guard-hook-deny-ack/coordinator-verification.md"
   },
-  "updated_at": "2026-09-06T09:28:19Z"
+  "updated_at": "2026-09-08T06:21:42.661297+00:00"
 }

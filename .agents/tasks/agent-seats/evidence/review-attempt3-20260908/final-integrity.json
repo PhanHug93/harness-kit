@@ -1,0 +1,16 @@
+{
+  "branch": "feature/simplify-task-relations",
+  "head": "cf8f326b61788ed3ed8577eb12511613303dc44a",
+  "production_spec_reference_harness_unchanged": true,
+  "changed_existing_files_allowed": [
+    ".agents/tasks/agent-seats/codex-review.md",
+    ".agents/tasks/agent-seats/state.json",
+    ".agents/tasks/agent-seats/task.md"
+  ],
+  "report_line": 388,
+  "packet_consistent": true,
+  "index_lock_exists": false,
+  "canonical_seats_exists": false,
+  "seats_schema_exists": false,
+  "git_status": "## feature/simplify-task-relations\n M .agents/tasks/agent-seats/codex-review.md\n M .agents/tasks/agent-seats/state.json\n M .agents/tasks/agent-seats/task.md\n?? .agents/tasks/agent-seats/evidence/review-attempt3-20260908/\n?? \"Claude outputs/\""
+}

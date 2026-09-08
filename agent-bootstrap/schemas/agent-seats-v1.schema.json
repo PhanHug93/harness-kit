@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-seats-v1.schema.json",
+  "title": "Agent Seats",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "catalog", "seats"],
+  "properties": {
+    "schema": {
+      "const": "agent-seats/v1"
+    },
+    "catalog": {
+      "$ref": "#/$defs/catalog"
+    },
+    "seats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spec", "gate", "build", "verify", "audit", "owner"],
+      "properties": {
+        "spec": { "$ref": "#/$defs/specSeat" },
+        "gate": { "$ref": "#/$defs/gateSeat" },
+        "build": { "$ref": "#/$defs/buildSeat" },
+        "verify": { "$ref": "#/$defs/verifySeat" },
+        "audit": { "$ref": "#/$defs/auditSeat" },
+        "owner": { "$ref": "#/$defs/ownerSeat" }
+      }
+    }
+  },
+  "$defs": {
+    "host": {
+      "enum": ["claude", "codex", "gemini", "cursor", "windsurf", "human"]
+    },
+    "nonCodexHost": {
+      "enum": ["claude", "gemini", "cursor", "windsurf", "human"]
+    },
+    "modelId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "effort": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]*$"
+    },
+    "catalogModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "efforts", "default_effort"],
+      "properties": {
+        "host": { "$ref": "#/$defs/host" },
+        "efforts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/effort" }
+        },
+        "default_effort": { "$ref": "#/$defs/effort" }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["models"],
+      "properties": {
+        "models": {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^[A-Za-z0-9][A-Za-z0-9._:/-]*$": { "$ref": "#/$defs/catalogModel" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "codexOccupant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "model", "effort"],
+      "properties": {
+        "host": { "const": "codex" },
+        "model": { "$ref": "#/$defs/modelId" },
+        "effort": { "$ref": "#/$defs/effort" },
+        "fallback_model": { "$ref": "#/$defs/modelId" },
+        "fallback_effort": { "$ref": "#/$defs/effort" }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["fallback_model"] },
+          "then": { "required": ["fallback_effort"] }
+        },
+        {
+          "if": { "required": ["fallback_effort"] },
+          "then": { "required": ["fallback_model"] }
+        }
+      ]
+    },
+    "hostControlledOccupant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host"],
+      "properties": {
+        "host": { "$ref": "#/$defs/nonCodexHost" },
+        "model": { "$ref": "#/$defs/modelId" },
+        "effort": { "$ref": "#/$defs/effort" },
+        "fallback_model": { "$ref": "#/$defs/modelId" },
+        "fallback_effort": { "$ref": "#/$defs/effort" }
+      }
+    },
+    "seatBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "phase", "occupant"],
+      "properties": {
+        "tag": { "type": "string" },
+        "phase": { "type": "string" },
+        "duty": { "type": "string" },
+        "occupant": {
+          "oneOf": [
+            { "$ref": "#/$defs/codexOccupant" },
+            { "$ref": "#/$defs/hostControlledOccupant" }
+          ]
+        }
+      }
+    },
+    "specSeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        { "properties": { "tag": { "const": "@spec" }, "phase": { "const": "analysis" } } }
+      ]
+    },
+    "gateSeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        { "properties": { "tag": { "const": "@gate" }, "phase": { "const": "technical_review" } } }
+      ]
+    },
+    "buildSeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        { "properties": { "tag": { "const": "@build" }, "phase": { "const": "implementation" } } }
+      ]
+    },
+    "verifySeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        { "properties": { "tag": { "const": "@verify" }, "phase": { "const": "verification" } } }
+      ]
+    },
+    "auditSeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        { "properties": { "tag": { "const": "@audit" }, "phase": { "const": "cross_review" } } }
+      ]
+    },
+    "ownerSeat": {
+      "allOf": [
+        { "$ref": "#/$defs/seatBase" },
+        {
+          "properties": {
+            "tag": { "const": "@owner" },
+            "phase": { "const": "resolution" },
+            "occupant": {
+              "type": "object",
+              "required": ["host"],
+              "properties": { "host": { "const": "human" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

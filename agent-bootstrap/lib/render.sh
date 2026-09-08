@@ -78,14 +78,20 @@ EOF_OVERLAY
 }
 
 compute_apply_state() {
-  local ro=false c d candidates
+  local ro=false eligible=false c d candidates
   candidates="$(find "$TARGET_DIR" \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" \) -prune -o -type f -name '*.generated.*' -print 2>/dev/null)"
   [[ -n "$candidates" ]] || { printf 'complete\n'; return 0; }
   while IFS= read -r c; do
     [[ -n "$c" ]] || continue
+    # Retired migration input, also excluded by candidate count/application.
+    # Keep existing handling for every other candidate; an approximate second
+    # allowlist can miss valid installers or future generated surfaces.
+    [[ "${c%.generated.*}" == "$TARGET_DIR/docs/agent-configs/model-profiles.json" ]] && continue
+    eligible=true
     d="$(dirname "${c%.generated.*}")"
     [[ -w "$d" ]] || ro=true
   done <<< "$candidates"
+  [[ "$eligible" == "true" ]] || { printf 'complete\n'; return 0; }
   if [[ "$ro" == "true" ]]; then
     printf 'blocked-readonly\n'
   else
@@ -232,6 +238,7 @@ scripts/agent-tech-stack-lib.sh
 scripts/detect-agent-tech-stack.sh
 scripts/agent-hook.sh
 scripts/agent-guard.sh
+scripts/agent-seats.sh
 scripts/agent-onboarding.sh
 scripts/agent-local-only-check.sh
 scripts/verify-ai-deps.sh

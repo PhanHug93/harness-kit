@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026.09.08.1 — Agent seats and configuration-preserving upgrades
+
+- **Configurable seats.** Fixed `@spec`, `@gate`, `@build`, `@verify`, `@audit`
+  and `@owner` tags separate workflow responsibilities from host/model choices.
+  The seats CLI validates assignments, supports a terminal wizard, and updates
+  the AGENTS roster. Fresh gate/verify defaults use `gpt-6-astra` at `ultra`.
+- **Safe migration.** Missing seats migrate a customized legacy default profile
+  with its model, effort and fallback settings. Existing seats and legacy input
+  files are preserved. Old exact bundle defaults adopt the new seats with a
+  note; invalid input is reported without silently resetting configuration.
+  Historical-release upgrade tests retain USER overlays and filled briefs.
+- **Deterministic launch configuration.** The launcher reads lossless seat
+  fields, validates effort against the effective model, supports the existing
+  route aliases, and refuses launches with invalid or non-Codex assignments. Python warnings
+  stay on stderr; they cannot become parsed configuration or trigger a wrong
+  launch. Seeds record the requested `launch_model`.
+- **Seat diagnostics.** Status and doctor report the locked occupant, including
+  host-controlled seats. Doctor retains the read-only guard check and onboarding
+  warning. Retired legacy candidates do not leave the upgrade lock pending.
+- **Review audit compatibility.** `gate_coding` records a build launch using
+  the primary review model; `sol_coding` remains a documented legacy alias.
+  Model profile selection is deprecated in favor of seats for this release.
+- **Atomic writes and release coverage.** Seats writes preserve prior bytes on
+  failure, serialize writers, and recheck init after waiting. Generator,
+  installer, schema, verifier and Bash 3.2 tests ship with the same contracts.
+
 ## 2026.09.07.1 — Task relations and unacked-edit denial
 
 - **Guard denies unacked edits.** Claude Code Edit/Write/MultiEdit hooks

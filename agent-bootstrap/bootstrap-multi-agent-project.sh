@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.09.07.1"
+AGENT_BOOTSTRAP_VERSION="2026.09.08.1"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -1067,6 +1067,8 @@ main() {
   fi
 
   if workflow_enabled; then
+    write_agent_seats
+    seed_agent_seats
     write_agent_docs
   else
     write_infra_agent_docs

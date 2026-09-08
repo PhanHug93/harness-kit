@@ -1,0 +1,606 @@
+{
+  "status": "pass",
+  "checks": [
+    {
+      "name": "bash-version",
+      "argv": [
+        "/bin/bash",
+        "--version"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-bootstrap-update.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-bootstrap-update.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-guard.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-guard.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-hook.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-hook.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-local-only-check.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-local-only-check.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-onboarding.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-onboarding.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-seats.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-seats.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-agent-tech-stack-lib.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/agent-tech-stack-lib.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-bootstrap-multi-agent-project.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-detect-agent-tech-stack.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/detect-agent-tech-stack.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-harness-kit-one-shot-upgrade.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/harness-kit-one-shot-upgrade.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-install-agent-bootstrap-home.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/install-agent-bootstrap-home.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-install-git-hooks.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/install-git-hooks.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-install-rtk.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/install-rtk.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-core.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/core.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-detect.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/detect.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-onboarding.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/onboarding.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-overlays.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/overlays.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-render.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/render.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-writers-docs.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/writers-docs.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-lib-writers-runtime.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/lib/writers-runtime.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-agent-bootstrap-verify-ai-deps.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/verify-ai-deps.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-scripts-bootstrap-multi-agent-project.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/bootstrap-multi-agent-project.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-scripts-install-agent-bootstrap-home.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/install-agent-bootstrap-home.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-scripts-sync-template-catalog.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/sync-template-catalog.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-scripts-test-bootstrap-multi-agent-project.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/test-bootstrap-multi-agent-project.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.01
+    },
+    {
+      "name": "syntax-scripts-test-onboarding-fixtures.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/test-onboarding-fixtures.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "syntax-scripts-test-one-shot-upgrade.sh",
+      "argv": [
+        "/bin/bash",
+        "-n",
+        "/Users/admin/projects/agent-bootstrap/scripts/test-one-shot-upgrade.sh"
+      ],
+      "rc": 0,
+      "seconds": 0.0
+    },
+    {
+      "name": "shellcheck-source",
+      "argv": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "scripts/bootstrap-multi-agent-project.sh",
+        "scripts/install-agent-bootstrap-home.sh",
+        "scripts/test-bootstrap-multi-agent-project.sh",
+        "scripts/test-onboarding-fixtures.sh",
+        "scripts/test-one-shot-upgrade.sh",
+        "agent-bootstrap/bootstrap-multi-agent-project.sh",
+        "agent-bootstrap/harness-kit-one-shot-upgrade.sh",
+        "agent-bootstrap/agent-bootstrap-update.sh",
+        "agent-bootstrap/install-agent-bootstrap-home.sh",
+        "agent-bootstrap/install-rtk.sh",
+        "agent-bootstrap/rtk",
+        "agent-bootstrap/agent-hook.sh",
+        "agent-bootstrap/agent-guard.sh",
+        "agent-bootstrap/agent-seats.sh",
+        "agent-bootstrap/verify-ai-deps.sh",
+        "agent-bootstrap/lib/core.sh",
+        "agent-bootstrap/lib/overlays.sh",
+        "agent-bootstrap/lib/detect.sh",
+        "agent-bootstrap/lib/render.sh",
+        "agent-bootstrap/lib/writers-runtime.sh",
+        "agent-bootstrap/lib/writers-docs.sh",
+        "agent-bootstrap/lib/onboarding.sh"
+      ],
+      "rc": 0,
+      "seconds": 3.7
+    },
+    {
+      "name": "catalog",
+      "argv": [
+        "/bin/bash",
+        "scripts/sync-template-catalog.sh",
+        "--check"
+      ],
+      "rc": 0,
+      "seconds": 0.01
+    },
+    {
+      "name": "normal-generate",
+      "argv": [
+        "/bin/bash",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal",
+        "--workflow",
+        "full"
+      ],
+      "rc": 0,
+      "seconds": 1.88
+    },
+    {
+      "name": "normal-verify",
+      "argv": [
+        "/bin/bash",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/verify-ai-deps.sh",
+        "--json"
+      ],
+      "rc": 0,
+      "seconds": 8.46
+    },
+    {
+      "name": "normal-shellcheck",
+      "argv": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-guard.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-hook.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-local-only-check.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-onboarding.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-seats.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/agent-tech-stack-lib.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/detect-agent-tech-stack.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/install-git-hooks.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/install-rtk.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/scripts/verify-ai-deps.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/normal/.codex/codex-mode.sh"
+      ],
+      "rc": 0,
+      "seconds": 1.09
+    },
+    {
+      "name": "very-long-project-name-for-budget-check-generate",
+      "argv": [
+        "/bin/bash",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check",
+        "--workflow",
+        "full"
+      ],
+      "rc": 0,
+      "seconds": 1.96
+    },
+    {
+      "name": "very-long-project-name-for-budget-check-verify",
+      "argv": [
+        "/bin/bash",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/verify-ai-deps.sh",
+        "--json"
+      ],
+      "rc": 0,
+      "seconds": 8.65
+    },
+    {
+      "name": "very-long-project-name-for-budget-check-shellcheck",
+      "argv": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-guard.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-hook.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-local-only-check.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-onboarding.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-seats.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/agent-tech-stack-lib.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/detect-agent-tech-stack.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/install-git-hooks.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/install-rtk.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/scripts/verify-ai-deps.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/very-long-project-name-for-budget-check/.codex/codex-mode.sh"
+      ],
+      "rc": 0,
+      "seconds": 1.08
+    },
+    {
+      "name": "android-suite-fixture",
+      "argv": [
+        "/bin/bash",
+        "-c",
+        "set -euo pipefail\nTMP_DIR=\"$1\"\nmkdir -p \"$TMP_DIR/app/src/main/AndroidManifest\" \"$TMP_DIR/wear/src/main/AndroidManifest\" \"$TMP_DIR/wear-api/src/main/kotlin\" \"$TMP_DIR/feature/app/src/main/AndroidManifest\"\ncat > \"$TMP_DIR/settings.gradle.kts\" <<'EOF_SETTINGS'\npluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name = \"bootstrap-smoke\"\ninclude(\":app\", \":wear\", \":wear-api\", \":feature:app\")\nEOF_SETTINGS\ncat > \"$TMP_DIR/build.gradle.kts\" <<'EOF_BUILD'\nplugins {\n    id(\"com.android.application\") version \"8.5.0\" apply false\n    id(\"org.jetbrains.kotlin.android\") version \"1.9.24\" apply false\n    id(\"org.jetbrains.kotlin.jvm\") version \"1.9.24\" apply false\n}\nEOF_BUILD\ncat > \"$TMP_DIR/app/build.gradle.kts\" <<'EOF_APP_BUILD'\nplugins {\n    id(\"com.android.application\")\n    id(\"org.jetbrains.kotlin.android\")\n}\n\nandroid {\n    namespace = \"example.bootstrap\"\n    compileSdk = 35\n    flavorDimensions += \"env\"\n    productFlavors {\n        create(\"prod\") {\n            dimension = \"env\"\n        }\n    }\n}\nEOF_APP_BUILD\ncat > \"$TMP_DIR/wear-api/build.gradle.kts\" <<'EOF_WEAR_API_BUILD'\nplugins {\n    id(\"org.jetbrains.kotlin.jvm\")\n}\nEOF_WEAR_API_BUILD\ncat > \"$TMP_DIR/feature/app/build.gradle.kts\" <<'EOF_FEATURE_APP_BUILD'\nplugins {\n    id(\"com.android.application\")\n    id(\"org.jetbrains.kotlin.android\")\n}\n\nandroid {\n    namespace = \"example.bootstrap.feature\"\n    compileSdk = 35\n}\nEOF_FEATURE_APP_BUILD\ncat > \"$TMP_DIR/app/src/main/AndroidManifest/AndroidManifest.xml\" <<'EOF_MANIFEST'\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" />\nEOF_MANIFEST\ncat > \"$TMP_DIR/feature/app/src/main/AndroidManifest/AndroidManifest.xml\" <<'EOF_FEATURE_MANIFEST'\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" />\nEOF_FEATURE_MANIFEST\n",
+        "fixture",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite"
+      ],
+      "rc": 0,
+      "seconds": 0.02
+    },
+    {
+      "name": "android-suite-generate",
+      "argv": [
+        "/bin/bash",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite",
+        "--workflow",
+        "full"
+      ],
+      "rc": 0,
+      "seconds": 1.98
+    },
+    {
+      "name": "android-suite-verify",
+      "argv": [
+        "/bin/bash",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/verify-ai-deps.sh",
+        "--json"
+      ],
+      "rc": 0,
+      "seconds": 8.77
+    },
+    {
+      "name": "android-suite-shellcheck",
+      "argv": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-guard.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-hook.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-local-only-check.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-onboarding.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-seats.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/agent-tech-stack-lib.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/detect-agent-tech-stack.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/install-git-hooks.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/install-rtk.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/scripts/verify-ai-deps.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-suite/.codex/codex-mode.sh"
+      ],
+      "rc": 0,
+      "seconds": 1.11
+    },
+    {
+      "name": "android-long-fixture",
+      "argv": [
+        "/bin/bash",
+        "-c",
+        "set -euo pipefail\nTMP_DIR=\"$1\"\nmkdir -p \"$TMP_DIR/app/src/main/AndroidManifest\" \"$TMP_DIR/wear/src/main/AndroidManifest\" \"$TMP_DIR/wear-api/src/main/kotlin\" \"$TMP_DIR/feature/app/src/main/AndroidManifest\"\ncat > \"$TMP_DIR/settings.gradle.kts\" <<'EOF_SETTINGS'\npluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }\ndependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }\nrootProject.name = \"bootstrap-smoke\"\ninclude(\":app\", \":wear\", \":wear-api\", \":feature:app\")\nEOF_SETTINGS\ncat > \"$TMP_DIR/build.gradle.kts\" <<'EOF_BUILD'\nplugins {\n    id(\"com.android.application\") version \"8.5.0\" apply false\n    id(\"org.jetbrains.kotlin.android\") version \"1.9.24\" apply false\n    id(\"org.jetbrains.kotlin.jvm\") version \"1.9.24\" apply false\n}\nEOF_BUILD\ncat > \"$TMP_DIR/app/build.gradle.kts\" <<'EOF_APP_BUILD'\nplugins {\n    id(\"com.android.application\")\n    id(\"org.jetbrains.kotlin.android\")\n}\n\nandroid {\n    namespace = \"example.bootstrap\"\n    compileSdk = 35\n    flavorDimensions += \"env\"\n    productFlavors {\n        create(\"prod\") {\n            dimension = \"env\"\n        }\n    }\n}\nEOF_APP_BUILD\ncat > \"$TMP_DIR/wear-api/build.gradle.kts\" <<'EOF_WEAR_API_BUILD'\nplugins {\n    id(\"org.jetbrains.kotlin.jvm\")\n}\nEOF_WEAR_API_BUILD\ncat > \"$TMP_DIR/feature/app/build.gradle.kts\" <<'EOF_FEATURE_APP_BUILD'\nplugins {\n    id(\"com.android.application\")\n    id(\"org.jetbrains.kotlin.android\")\n}\n\nandroid {\n    namespace = \"example.bootstrap.feature\"\n    compileSdk = 35\n}\nEOF_FEATURE_APP_BUILD\ncat > \"$TMP_DIR/app/src/main/AndroidManifest/AndroidManifest.xml\" <<'EOF_MANIFEST'\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" />\nEOF_MANIFEST\ncat > \"$TMP_DIR/feature/app/src/main/AndroidManifest/AndroidManifest.xml\" <<'EOF_FEATURE_MANIFEST'\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" />\nEOF_FEATURE_MANIFEST\n",
+        "fixture",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check"
+      ],
+      "rc": 0,
+      "seconds": 0.02
+    },
+    {
+      "name": "android-long-generate",
+      "argv": [
+        "/bin/bash",
+        "/Users/admin/projects/agent-bootstrap/agent-bootstrap/bootstrap-multi-agent-project.sh",
+        "--target",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check",
+        "--workflow",
+        "full"
+      ],
+      "rc": 0,
+      "seconds": 2.08
+    },
+    {
+      "name": "android-long-verify",
+      "argv": [
+        "/bin/bash",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/verify-ai-deps.sh",
+        "--json"
+      ],
+      "rc": 0,
+      "seconds": 8.62
+    },
+    {
+      "name": "android-long-shellcheck",
+      "argv": [
+        "shellcheck",
+        "--external-sources",
+        "--exclude=SC1090,SC1091,SC2034,SC2154",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-guard.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-hook.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-local-only-check.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-onboarding.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-seats.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/agent-tech-stack-lib.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/detect-agent-tech-stack.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/install-git-hooks.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/install-rtk.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/scripts/verify-ai-deps.sh",
+        "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/agent-seats-static-eqipp08x/android-long/very-long-project-name-for-budget-check/.codex/codex-mode.sh"
+      ],
+      "rc": 0,
+      "seconds": 1.08
+    }
+  ],
+  "budgets": {
+    "normal": {
+      "core": 2382,
+      "on_demand": 6088
+    },
+    "very-long-project-name-for-budget-check": {
+      "core": 2398,
+      "on_demand": 6104
+    },
+    "android-suite": {
+      "core": 2474,
+      "on_demand": 6180
+    },
+    "android-long": {
+      "core": 2488,
+      "on_demand": 6194
+    }
+  },
+  "python_3_8_ast": "pass",
+  "source_sha256": {
+    "agent-bootstrap/bootstrap-multi-agent-project.sh": "b5be45e097f944e57867434fe6306fb8a34bc0d28b378ea690b5f913324315d2",
+    "agent-bootstrap/agent-guard.sh": "11d3f7480b2ed7a9a5a23ccb727c2d69e25b07f19847ac49f10ecb5a77c6d835",
+    "agent-bootstrap/agent-bootstrap-update.sh": "0918137cafc607ae1765b76b1db2b1d9fd5716a745b23a2e3c8df1d69a1d7396",
+    "agent-bootstrap/verify-ai-deps.sh": "5a7e37bf6e0055879fd626087c7676339223881bfe85e5237ace6daeb180ec89",
+    "agent-bootstrap/install-rtk.sh": "ec98b8c667d720a30d8c24a13cc845f1f30825bb7b7fa38fa9205b07bbdcd38e",
+    "agent-bootstrap/agent-hook.sh": "0644e13098d19161250fc2f2620ad3311bc1eea456c8c8c1e0af8ef065e66be0",
+    "agent-bootstrap/install-git-hooks.sh": "cc86b4cca38c0a98146544e5817284e8ae2c6164e25692d9a0ed6b520a12f8fb",
+    "agent-bootstrap/README.md": "d145b2136dab83ac4aa3de492f92d5c9f6d6f377e3deaf650d36291841ae98f6",
+    "agent-bootstrap/MANIFEST.md": "71bffe4519dd48f02f3ef33dc968cbe325067200f48c3f06d9db30ef8981c216",
+    "agent-bootstrap/VERSION": "a269f131b70318132f0dddf5c4b819533f99215c085e3c4bf5babf402b0126b2",
+    "agent-bootstrap/detect-agent-tech-stack.sh": "521f900f402b0a4201f9d2a7d5f60a08e2d53c5ddb078b4682676b0a3e98ce7a",
+    "agent-bootstrap/rtk": "d4442098b00f79f9e28cbc962479aac514fb4955ef8b74e741a2f36723425794",
+    "agent-bootstrap/agent-tech-stack-lib.sh": "dc4a4447146023071f9f8d18f59c1a1b491d766d73d387c3a58ac9e0ec95ed23",
+    "agent-bootstrap/install-agent-bootstrap-home.sh": "8411e817f163256830ef9f160a3d67872f0dadcb801e08723d85a5ec4c622283",
+    "agent-bootstrap/agent-seats.sh": "0182febcfefffd32d969fa97302d8bd51fa8f45882c99ee6ed97acfa3cebfaac",
+    "agent-bootstrap/agent-local-only-check.sh": "c0acbf82a9f9ebe121c8a3d4ad03a7ae42973d6a548e893e14b7d766643e8c85",
+    "agent-bootstrap/harness-kit-one-shot-upgrade.sh": "603b39d498e4f89200f77a22cef68bba8c624701ed1a8348cd2bc442bafc6009",
+    "agent-bootstrap/agent-onboarding.sh": "419d40205bcb1d6d8d745634eda102bdc57f2cb0f2fb98e19b9d52bf05036d77",
+    "agent-bootstrap/policies/agent-context-policy.json": "14aeee97ccf8909349f36cdc5ffa668b29b28fd8da46420288fab379fe2c319f",
+    "agent-bootstrap/schemas/agent-guard-event-v2.schema.json": "58de141ec77ded16067d1fc170baeeb9d65db5c3479a4c2908100c67755ca0ec",
+    "agent-bootstrap/schemas/agent-project-tech-stack-v1.schema.json": "0756ba9410c362d313f8de95d2484821cc18b8f6c4350a5d0211bd8679f5000b",
+    "agent-bootstrap/schemas/agent-bootstrap-status-v1.schema.json": "1ceeadb3b8e1c21711e417345a351faadc0a9898d2f17dfe8ee499ac9da257b7",
+    "agent-bootstrap/schemas/agent-bootstrap-lock-v1.schema.json": "8edbadfdddae8244e581443dd68fae6cdb0ff276cc4e653da2488fb74ad25272",
+    "agent-bootstrap/schemas/agent-seats-v1.schema.json": "1fa8c6c556227f9f7042b423edada57e55cb0c0261284292a181036344c01317",
+    "agent-bootstrap/schemas/agent-context-policy-v1.schema.json": "1fd8f83e5a521fac9e58cf65754500588cea605a2171ec7ef112ea5a3c34fdee",
+    "agent-bootstrap/schemas/agent-bootstrap-verify-report-v1.schema.json": "4c408a64124ba60f17475d17452e63b451a824d79c3540dd3a4666bfccfeb7c2",
+    "agent-bootstrap/schemas/agent-model-profiles-v1.schema.json": "be54426cfdca6e30726d1cedb968794edb93c56054fc08177e8d045c4ab7b75b",
+    "agent-bootstrap/provenance/rtk-v0.37.2.sha256": "3208557b7b1274a4b2e2d93e8ad776e5777fc85c34503a7d6747a6ca5740b01a",
+    "agent-bootstrap/lib/writers-runtime.sh": "b8181e0420bc22b61f55384893f83f1a11dd7b23c604b7e861bfc5d7e5707622",
+    "agent-bootstrap/lib/overlays.sh": "92e9e2cc042c67f983d3aa0b153258d476c18ea02425042e2492d99db0a74673",
+    "agent-bootstrap/lib/writers-docs.sh": "93493eaea8c872721635bf11470eca7b2244308f548889f4d1f58540447703e5",
+    "agent-bootstrap/lib/detect.sh": "41973903f005e0382f75f865acdd49b777deb602cd8f2408ac5a7e9ab8de714a",
+    "agent-bootstrap/lib/render.sh": "c925771641fb9d84d006c8829b5e6e518b5eec2212106924596e396db5c400ab",
+    "agent-bootstrap/lib/onboarding.sh": "bb9b8f4122677fc7bdad85c87a0202546e85335491ff4d01216382c31b44e3fd",
+    "agent-bootstrap/lib/core.sh": "2e3d61d260980212abf6344643404fd2ffa2eeda0155a6433331fe179df1078d",
+    "agent-bootstrap/githooks/pre-push": "c51b21b33a2743bf5405fd3b870795ecdb70ce48efa37e8c13dd467c3af390b1",
+    "agent-bootstrap/model-profiles/codex-model-profiles.json": "1442b94c92d3ecbb713947a63530ee4cf078a889ef989db3db7f4937445cdec1",
+    "agent-bootstrap/templates/overlays/node_js.md": "5924cb0d9077d6da159f5e43a559307c75a176e9e03e2b33ecc3bd669405a13a",
+    "agent-bootstrap/templates/overlays/python.md": "e51ea6f258295bf8fd8a973361040a8b95a5fec28c998a850ac40726dca8cfdc",
+    "agent-bootstrap/templates/overlays/android_kotlin.md": "1ef77122a6326284b371384cc19ab36ebc0265978ace624bb1baab00a4ec7ddb",
+    "agent-bootstrap/templates/overlays/ios_swift.md": "d5e8589d4621265870bb4ed45ff0a3cc8d431cac5985d452c9105d25d20255e6",
+    "agent-bootstrap/templates/overlays/generic.md": "e0d08640915b36f171145685553aee7bc42427c218571feb67d30ae5a8c58ed5",
+    "agent-bootstrap/templates/tool-contract/shared.md": "23d94b7011a96e116913924069bfcdbe8873869a3995b3d05002301f8b3753c4",
+    "agent-bootstrap/templates/base/README.md": "2c8b7ecb9f9e7b5f192901172561ff35a49479f12027dee850594b35347a6533",
+    "agent-bootstrap/templates/skills/mobile-optimization/WRITER-INTEGRATION.md": "bf57a33061798a891f9c3a9fa09f5f57e38406f4bdcc26184a296992fcb551d0",
+    "agent-bootstrap/templates/skills/mobile-optimization/SKILL.md": "8fb39c3c39ff86d1349c76e2ea49df0ee3ef0468d7ea89614235487f2d1d2ee9",
+    "agent-bootstrap/templates/skills/mobile-optimization/catalog.md": "d9cffe0b9120dcb8e51d7c2eb2a65e84349fdeb61fbdb09c836a78351a1672a1",
+    "agent-bootstrap/templates/skills/mobile-optimization/skill.manifest.json": "b099e44ab6b1f5a4253833c559391c739c41b842337cd1aee1c36e9472e75196",
+    "agent-bootstrap/templates/skills/mobile-optimization/overlays/swift.md": "58e3396bb184073ec13fd2bb377e2d09701f88ba4ec1cf7cb6bf56422363f173",
+    "agent-bootstrap/templates/skills/mobile-optimization/overlays/kotlin.md": "29c3e02ac87b2e7e243c847382e88a5d0d9cd0bfc4a58673ad582ee4712c0f9c",
+    "agent-bootstrap/templates/skills/mobile-optimization/fewshots/swift.md": "7c12a611e828f8b9ef5d0d1171179f0a1b89609b495c2ec2f26491ac4d6a5cef",
+    "agent-bootstrap/templates/skills/mobile-optimization/fewshots/kotlin.md": "688ee672fc36c7a83f8b718a319f4fd9631e374359a16246ddd8069bce76ec43",
+    "agent-bootstrap/templates/skills/mobile-optimization/pointers/pointer-body.md": "4b9b1699f6eca430f1516456a390bb60a60c44f7bd9c522e74c5aefa10d54e6c",
+    "agent-bootstrap/templates/skills/mobile-optimization/pointers/cursor.rules.mdc": "177ca9793fb05199b784c9b22d3c770e6e248e1580f845a7475f3d79049907ad",
+    "agent-bootstrap/templates/skills/mobile-optimization/pointers/windsurf.rules.md": "83ad712ea038fe9e895e698b2d562b0ffe127da1229f6d17fdb24662df3e6974",
+    "agent-bootstrap/templates/skills/mobile-optimization/pointers/claude.command.md": "4e67d3633d29e9e4307ec212a4842e451bb704231b8416c1d98d4e394bdf538a",
+    "agent-bootstrap/templates/workflows/council/README.md": "1ef87b87b53dd52586e5ffb681dc6fa58756afbf42f2de640b159ed52930fba4",
+    "agent-bootstrap/templates/workflows/karpathy/README.md": "232c1169bebc1c34066b98764f4ef836cb2a3090da9552b389db525d486069f8",
+    "agent-bootstrap/templates/workflows/three-mode/README.md": "15485ee7df0895c4c6b076d3d403ebb1f95687309b1599b75179f263ccf99126"
+  }
+}

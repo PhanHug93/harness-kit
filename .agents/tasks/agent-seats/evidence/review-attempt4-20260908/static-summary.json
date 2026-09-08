@@ -1,0 +1,29 @@
+{
+  "bash-n": {
+    "command": [
+      "/bin/bash",
+      "-n",
+      "/Users/admin/projects/agent-bootstrap/.agents/tasks/agent-seats/evidence/reference-agent-seats.sh"
+    ],
+    "rc": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "shellcheck": {
+    "command": [
+      "shellcheck",
+      "--external-sources",
+      "--exclude=SC1090,SC1091,SC2034,SC2154",
+      "/Users/admin/projects/agent-bootstrap/.agents/tasks/agent-seats/evidence/reference-agent-seats.sh"
+    ],
+    "rc": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "embedded-python": {
+    "python_3_8_ast": true
+  },
+  "harness": {
+    "python_3_8_ast": true
+  }
+}

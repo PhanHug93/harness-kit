@@ -337,7 +337,6 @@ def safe_relative_path(value):
 
 
 lock = load_json("docs/agent-configs/agent-bootstrap.lock.json") or {}
-profiles_doc = load_json("docs/agent-configs/model-profiles.json") or {}
 context_policy = load_json("docs/agent-configs/context-policy.json") or {}
 
 if isinstance(lock, dict):
@@ -359,32 +358,6 @@ if isinstance(lock, dict):
         require(isinstance(overlays, list) and all(non_empty_string(item) for item in overlays), "lock.templates.overlays must be a non-empty string array")
 else:
     require(False, "lock must be a JSON object")
-
-if isinstance(profiles_doc, dict):
-    require(profiles_doc.get("schema") == "agent-model-profiles/v1", "model profiles schema must be agent-model-profiles/v1")
-    default_profile = profiles_doc.get("default_profile")
-    profiles = profiles_doc.get("profiles")
-    require(non_empty_string(default_profile), "model profiles default_profile must be a non-empty string")
-    require(isinstance(profiles, dict) and bool(profiles), "model profiles profiles must be a non-empty object")
-    if isinstance(profiles, dict):
-        require(default_profile in profiles, "model profiles default_profile must reference an existing profile")
-        required_profile_keys = (
-            "reasoning_effort",
-            "planning_model",
-            "coding_model",
-            "reviewing_model",
-            "planning_fallback_model",
-            "coding_fallback_model",
-            "reviewing_fallback_model",
-        )
-        for name, profile in profiles.items():
-            require(non_empty_string(name), "model profile names must be non-empty strings")
-            require(isinstance(profile, dict), f"model profile {name} must be an object")
-            if isinstance(profile, dict):
-                for key in required_profile_keys:
-                    require(non_empty_string(profile.get(key)), f"model profile {name}.{key} must be a non-empty string")
-else:
-    require(False, "model profiles must be a JSON object")
 
 if isinstance(context_policy, dict):
     require_exact_keys(
@@ -440,6 +413,7 @@ schema_dir = "docs/agent-configs/bootstrap-multi-agent-project/schemas"
 expected_schema_ids = {
     "agent-context-policy-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-context-policy-v1.schema.json",
     "agent-model-profiles-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-model-profiles-v1.schema.json",
+    "agent-seats-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-seats-v1.schema.json",
     "agent-project-tech-stack-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-project-tech-stack-v1.schema.json",
     "agent-bootstrap-lock-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-lock-v1.schema.json",
     "agent-bootstrap-status-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
@@ -637,12 +611,12 @@ for path in \
   docs/agent-configs/bootstrap-multi-agent-project/templates/overlays/generic.md \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-context-policy-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-model-profiles-v1.schema.json \
+  docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-seats-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256 \
-  docs/agent-configs/model-profiles.json \
   .claude/settings.json \
   .claude/README.md \
   .agents/skills/agentmemory-mcp/SKILL.md \
@@ -663,10 +637,25 @@ case "$lock_workflow" in
   *) bad "bootstrap lock workflow preset is invalid: ${lock_workflow:-missing}" ;;
 esac
 
-if grep -Fq '"schema": "agent-model-profiles/v1"' "$ROOT_DIR/docs/agent-configs/model-profiles.json"; then
-  ok "model profile schema is agent-model-profiles/v1"
-else
-  bad "model profile schema is not agent-model-profiles/v1"
+if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
+  if [[ -e "$ROOT_DIR/docs/agent-configs/seats.json" ]]; then
+    if [[ -x "$ROOT_DIR/scripts/agent-seats.sh" ]] && "$ROOT_DIR/scripts/agent-seats.sh" validate >/dev/null 2>&1; then
+      ok "seats.json is valid"
+    else
+      bad "seats.json is invalid"
+    fi
+  else
+    warn "seats.json is missing; run scripts/agent-seats.sh init"
+  fi
+
+  if [[ -e "$ROOT_DIR/docs/agent-configs/model-profiles.json" ]]; then
+    warn "inactive legacy model-profiles.json is present; seats.json is authoritative"
+    if python3 -m json.tool "$ROOT_DIR/docs/agent-configs/model-profiles.json" >/dev/null 2>&1; then
+      ok "inactive legacy model profile JSON parses"
+    else
+      warn "inactive legacy model profile JSON is malformed; seats.json is authoritative"
+    fi
+  fi
 fi
 
 if grep -Eq '"schema"[[:space:]]*:[[:space:]]*"agent-context-policy/v1"' "$ROOT_DIR/docs/agent-configs/context-policy.json"; then
@@ -682,18 +671,18 @@ else
 fi
 
 if command -v python3 >/dev/null 2>&1; then
-  if python3 -m json.tool "$ROOT_DIR/docs/agent-configs/model-profiles.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/context-policy.json" >/dev/null 2>&1 &&
+  if python3 -m json.tool "$ROOT_DIR/docs/agent-configs/context-policy.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-context-policy-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-model-profiles-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-seats-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-project-tech-stack-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1; then
-    ok "schema/model profile JSON parses"
+    ok "schema JSON parses"
   else
-    bad "schema/model profile JSON is invalid"
+    bad "schema JSON is invalid"
   fi
   if validate_json_contracts >/dev/null; then
     ok "bootstrap JSON contracts validate"
@@ -798,6 +787,8 @@ need_bash_syntax scripts/agent-local-only-check.sh
 need_bash_syntax scripts/detect-agent-tech-stack.sh
 need_bash_syntax scripts/verify-ai-deps.sh
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
+  need_executable scripts/agent-seats.sh
+  need_bash_syntax scripts/agent-seats.sh
   need_executable scripts/agent-onboarding.sh
   need_bash_syntax scripts/agent-onboarding.sh
   need_bash_syntax .codex/codex-mode.sh

@@ -23,15 +23,16 @@ Inventory and drift rules: see `MANIFEST.md`.
   `$AGENT_BOOTSTRAP_HOME` directory such as `$HOME/dev/agent-bootstrap`.
 - `agent-tech-stack-lib.sh` — shared stack detector library used by the
   bootstrap script.
-- `agent-hook.sh`, `agent-guard.sh`, `agent-onboarding.sh`,
+- `agent-hook.sh`, `agent-guard.sh`, `agent-seats.sh`, `agent-onboarding.sh`,
   `detect-agent-tech-stack.sh`, `verify-ai-deps.sh`,
   `install-rtk.sh`, and `rtk` — full-workflow runtime snapshots generated into
   bootstrapped projects.
-- `model-profiles/` — model defaults copied into generated target projects.
+- `model-profiles/` — retained legacy defaults used to recognize older
+  configurations during migration; fresh targets do not receive this file.
 - `policies/` — Agent Guard Lite context policy copied into generated target
   projects as `docs/agent-configs/context-policy.json`.
 - `schemas/` — JSON Schema artifacts for generated lock/status/verifier report
-  contracts, model profiles, project tech-stack, and context policy.
+  contracts, agent seats, legacy model profiles, project tech-stack, and context policy.
 - `templates/` — base, stack overlay, and workflow templates copied into
   generated target projects.
 - `provenance/` — pinned third-party runtime checksums, currently rtk release
@@ -74,13 +75,39 @@ After a full bootstrap:
 
 Do not assume Claude Code hooks run in Cowork. These collaboration records are coordination and audit conventions, not security controls: packet ownership and append-only history are conventions;
 host, model, and session independence are declarations rather than proof; and
-Sol authorization entries are audit declarations.
+@gate authorization entries are audit declarations.
 
 Runtime requirements are Bash, `python3`, Git, and a SHA-256 tool
 (`sha256sum` or `shasum`). The generated `scripts/install-rtk.sh` handles the
 pinned `rtk` download and checksum verification. The rtk version is hard-pinned
 on purpose so the kit stays reproducible across machines and future upstream
 releases.
+
+### Agent seats and configuration migration
+
+The protocol uses `@spec` → `@gate` → `@build` → `@verify` → `@audit` →
+`@owner`. Defaults are Claude for spec/audit, Codex `gpt-6-astra` at `ultra`
+for gate/verify, Codex `gpt-5.6-luna` at `xhigh` for build, and human for owner.
+Codex defaults have `gpt-5.6-terra` at `xhigh` as fallback.
+
+In a generated project, use `scripts/agent-seats.sh show`, `wizard`,
+`set build --effort high`, and `validate`. Assignments and the capability
+catalog live in `docs/agent-configs/seats.json`. The launcher accepts seat tags
+and legacy route aliases; only Codex occupants launch through it. Override
+efforts are validated against the selected model's catalog entry.
+
+Upgrade creates seats only when missing. Customized legacy default-profile
+models, efforts and fallbacks migrate; the original `model-profiles.json` stays
+untouched. An exact old bundle default adopts the new occupants with a note.
+Existing seats always win, even if an inactive legacy file is malformed, and
+remain byte-identical across regeneration and candidate application. Invalid
+active input is reported without resetting it; fix the input and retry.
+`reset` is an explicit operator action, never an upgrade repair. USER overlays
+and filled project briefs stay on the existing preservation path.
+
+After upgrade, inspect `scripts/agent-seats.sh show`, run `validate`, and check
+`.codex/codex-mode.sh status` before launching. `CODEX_MODEL_PROFILE` is a
+warning no-op for this compatibility release; change seats instead.
 
 ### Closed-loop pre-final
 
@@ -121,7 +148,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.07.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.08.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
@@ -181,15 +208,16 @@ Generated target verifiers also support machine-readable output:
 scripts/verify-ai-deps.sh --json
 ```
 
-Model defaults are copied from `model-profiles/codex-model-profiles.json` into
-generated target projects as `docs/agent-configs/model-profiles.json`. Update
-that catalog instead of editing generated shell helpers when model availability
-changes.
+Seat assignments and the capability catalog live in
+`docs/agent-configs/seats.json`, initialized once by `scripts/agent-seats.sh`.
+Update its `catalog.models` when adding model capabilities, and use `set` or
+`wizard` to change assignments. An existing `model-profiles.json` is retained
+as migration input only when seats are missing.
 
 Schema and provenance artifacts are copied into generated targets under
 `docs/agent-configs/bootstrap-multi-agent-project/{schemas,provenance}/`.
 The generated verifier uses manual contract validation for the bootstrap lock,
-model profile catalog, context policy, project tech-stack contract, schema
+active seats configuration, context policy, project tech-stack contract, schema
 catalog metadata, and rtk checksum manifest. The schema files are published
 reference schemas for external tooling rather than a generic runtime JSON Schema
 engine. The generated rtk installer resolves expected release checksums from the

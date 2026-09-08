@@ -1,0 +1,63 @@
+{
+  "repo_copy": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v3-gen-review-ji8zu2hd/kit",
+  "targets": {
+    "fresh": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v3-gen-review-ji8zu2hd/fresh",
+    "upgrade": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v3-gen-review-ji8zu2hd/upgrade",
+    "dry-run": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-v3-gen-review-ji8zu2hd/dry-run"
+  },
+  "apply-generator-hunks": {
+    "rc": 0
+  },
+  "git-init-fresh": {
+    "rc": 0
+  },
+  "generate-fresh": {
+    "rc": 0
+  },
+  "fresh-gate": {
+    "host": "codex",
+    "model": "gpt-6-astra",
+    "effort": "ultra",
+    "fallback_model": "gpt-5.6-terra",
+    "fallback_effort": "xhigh"
+  },
+  "fresh-legacy-exists": false,
+  "fresh-validate": {
+    "rc": 0
+  },
+  "fresh-verifier": {
+    "rc": 1
+  },
+  "fresh-launcher-status": {
+    "rc": 1
+  },
+  "git-init-upgrade": {
+    "rc": 0
+  },
+  "generate-upgrade": {
+    "rc": 0
+  },
+  "upgrade-gate": {
+    "host": "codex",
+    "model": "gpt-6-astra",
+    "effort": "ultra",
+    "fallback_model": "gpt-5.6-terra",
+    "fallback_effort": "xhigh"
+  },
+  "upgrade-legacy-exists": true,
+  "apply-candidates": {
+    "rc": 0
+  },
+  "upgrade-user-preserved": true,
+  "upgrade-validate": {
+    "rc": 0
+  },
+  "git-init-dry-run": {
+    "rc": 0
+  },
+  "generate-dry-run": {
+    "rc": 0
+  },
+  "dry-run-files": [],
+  "source_scope": "Only reference generator hunks applied in disposable kit copy; launcher/verifier integration is intentionally still absent."
+}

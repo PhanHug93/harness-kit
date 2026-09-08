@@ -1,9 +1,9 @@
 # Agent Seats Design
 
-Date: 2026-09-06 (revision 1: 2026-09-07 after `@gate` attempt 1; revision 2: 2026-09-07 after `@gate` attempt 2 and a three-seat council, see packet `council-record.md`)
-Status: draft, pending `@gate` pre-coding review attempt 3 (packet `agent-seats`)
+Date: 2026-09-06 (revision 1: 2026-09-07 after `@gate` attempt 1; revision 2: 2026-09-07 after `@gate` attempt 2 and a three-seat council, see packet `council-record.md`; revision 3: 2026-09-08 after `@gate` attempt 3, findings F1-F3)
+Status: implemented and locally verified on 2026-09-08 for release 2026.09.08.1 after `@gate` attempt 4 (`sufficient/yes`). See packet `agent-seats/verification.md`; remote CI and publication follow the release commit.
 Branch: `feature/simplify-task-relations`
-Base: `main` at `b088f6d` (branch tip `45585fa` + two open packets that land first).
+Base: `main` at `cf8f326` (release 2026.09.07.1; the guard packet has landed; stderr isolation is included in the combined seats implementation).
 
 ## Decision
 
@@ -94,10 +94,14 @@ Rules:
   is optional. Missing fallback is warned, and a `CODEX_USE_FALLBACK=1` launch
   for that seat is refused with an error (no launch).
 - `@owner` must be `human`.
-- Validation errors: grammar violation, unknown model, host mismatch between
-  seat and catalog, effort not in the model's list, missing tag/phase
-  constants, non-human owner. Warnings: `@gate` or `@verify` shares any
-  model (primary or fallback) with `@build`.
+- Validation errors: grammar violation, unknown model, a catalog entry that is
+  not an object, host mismatch between seat and catalog, effort not in the
+  model's list, missing tag/phase constants, non-human owner. Warnings: `@gate`
+  or `@verify` shares its **primary** model with `@build` (fallbacks are
+  capacity substitutes, not the review authority: council decision 1, confirmed
+  by `@gate` attempt 3). A hand-edited catalog may hold a string, list or
+  boolean where a model object belongs; every command reports that as an error
+  and keeps the file, never a traceback.
 - `seats.json` is local-only under the current policy and may be edited by
   hand; the script is the supported path and re-renders the roster.
 
@@ -117,6 +121,7 @@ missing**. A valid `seats.json` is always the effective configuration.
 | structurally sound but invalid seats | rc 1 | rc 1 | rc 1, no overwrite | may repair the seat; validates result | writes defaults |
 | malformed seats JSON | rc 1: fix or `reset` | rc 1 | rc 1, no overwrite | rc 1 | writes defaults (explicit repair) |
 | regenerate / `--apply-candidates` / `--force` / `--skip-existing` | — | — | `init` only: existing seats untouched | — | — |
+| seats.json appears while `init` waits for the lock | — | — | recheck under the lock: valid → rc 0 no write; invalid or malformed → rc 1, bytes kept | — | — |
 
 Acceptance of a legacy profile mirrors the old launcher: object with
 `schema: agent-model-profiles/v1`, a `default_profile` naming an object, all
@@ -158,7 +163,7 @@ process keeps the caller's stdin (B1: a real terminal stays interactive).
 | `suggest` | Read-only proposal per the lifecycle table. |
 | `wizard [--yes]` | Interactive on a TTY: per seat, show the suggestion, pick host and model by number, effort, fallback (`none` drops it); Enter keeps the suggestion; re-choosing the current host keeps the suggested model; an invalid choice exits 1 without writing. `--yes` or no TTY accepts every suggestion. Writes, then renders. |
 | `set <seat\|route> --host … [--model … --effort …] [--fallback-model … --fallback-effort …] [--no-fallback]` | Non-interactive change; unknown, empty, contradictory or inapplicable options are refused (rc 1, nothing written); never creates the file; may repair a structurally sound invalid file; validates, writes, renders. |
-| `init` | Create `seats.json` once (lifecycle table); never overwrites, never prompts, takes the lock only to create. |
+| `init` | Create `seats.json` once (lifecycle table); never overwrites, never prompts, takes the lock only to create. The lock-free fast path and the recheck under the lock apply the **same** rules: only a `missing` result may create the file; a file that appeared during the wait is validated like any other, so valid means rc 0 and no write, invalid or malformed means rc 1 with its bytes kept (`@gate` attempt 3, F1). |
 | `reset` | Bundle defaults; validates; writes; renders. |
 | `show` / `validate` | Read-only roster plus warnings; `validate` exits 1 on errors. |
 | `render` | Replace exactly one balanced roster block in `AGENTS.md` or append one (B6 contract below). |
@@ -297,9 +302,16 @@ atomic writes, locking, wizard on a real PTY, `init` never prompts) is the
 basis of the focused test block; it reaps the child after EOF, detects prompts
 on the unprocessed buffer, asserts exact prompt counts, saves transcripts on
 failure, skips permission cases under root, and takes `SEATS_QA_BASH=/bin/bash`
-for macOS runs. Seven mutations (program on stdin, marker balance, conflict
-boundary, `match` instead of `fullmatch`, legacy required keys, non-atomic
-write, `set` creating the file) each make it fail.
+for macOS runs. The two write-failure cases apply `RLIMIT_FSIZE` to the
+interpreter that runs the seats program (a shim earlier on `PATH`, `SIGXFSZ`
+ignored so the write returns `EFBIG`), never `ulimit -f` around the shell:
+Bash 3.2 spools a large heredoc through a temporary file, so a shell-level
+limit fails before the program is loaded (`@gate` attempt 3, F3). Nine
+mutations (program on stdin, marker balance, conflict boundary, `match`
+instead of `fullmatch`, legacy required keys, non-atomic write, `set` creating
+the file, `init` recheck without validation, catalog entry dereferenced
+without a type guard) each make it fail; the non-atomic-write mutation is
+caught by those two cases.
 
 ## Migration
 
@@ -369,17 +381,20 @@ declarations remain declarations, not proof.
 11. Renderer: missing block, valid block, CRLF, orphan and duplicate markers,
     USER overlays, idempotency, prefix bytes.
 12. Mutations: program on stdin (wizard), marker balance, conflict boundary,
-    grammar `match`, legacy required keys, non-atomic write, and `set`
-    creating the file each make the focused block fail; the launcher's own
-    `conflict` call is mutated in the integration tests.
+    grammar `match`, legacy required keys, non-atomic write, `set` creating the
+    file, `init` rechecking without validation, and a catalog entry
+    dereferenced without a type guard each make the focused block fail; the
+    launcher's own `conflict` call is mutated in the integration tests.
 14. Fresh target has no `model-profiles.json`; verifier, `codex-mode.sh
     status` and `agent-hook.sh doctor` return 0 on it; `--dry-run` on a
     committed target leaves `git status --porcelain` empty; the installer
     export plus the inventory test cover `agent-seats.sh` and the schema.
-15. Atomic writes and locking: a failing write (size limit) keeps the old
-    bytes; a symlinked `AGENTS.md` is written through; twenty concurrent
-    `set` pairs lose no update; a held lock makes `set` refuse after ~10 s
-    while reads stay unblocked.
+15. Atomic writes and locking: a failing write (`RLIMIT_FSIZE` applied inside
+    the interpreter) keeps the old bytes; a symlinked `AGENTS.md` is written
+    through; twenty concurrent `set` pairs lose no update; a held lock makes
+    `set` refuse after ~10 s while reads stay unblocked; a `seats.json` that
+    appears while `init` waits for that lock is never overwritten (valid → rc 0,
+    invalid or malformed → rc 1, bytes kept).
 16. Upgrade fixture with the old generator default `model-profiles.json` →
     `@gate` Astra/ultra, catalog without `gpt-5.6-sol`, note printed; a
     customized legacy migrates; `init` under a PTY never prompts.

@@ -1,0 +1,43 @@
+{
+  "head": "cf8f326b61788ed3ed8577eb12511613303dc44a",
+  "branch": "feature/simplify-task-relations",
+  "changed_since_review_started": [
+    ".agents/tasks/agent-seats/build-handoff.md",
+    ".agents/tasks/agent-seats/codex-review.md",
+    ".agents/tasks/agent-seats/state.json",
+    ".agents/tasks/agent-seats/task.md",
+    "docs/superpowers/specs/2026-09-06-agent-seats-design.md"
+  ],
+  "production_reference_harness_unchanged": true,
+  "spec_edit": "status line only after tests; reviewed content unchanged",
+  "commit_or_amend": false,
+  "index_lock_exists": false,
+  "state_consistent": true,
+  "git_diff_check_rc": 0,
+  "evidence_sha256": {
+    "bootstrap.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bootstrap.stdout": "fd536bff2439283b65591f569ca0884e4849f4ff99dcb72caa0c75b3154950a7",
+    "independent-probes.py": "be3a5c167340dcebbdafd7e22c45620af82e94185692f36b225d1addfc4d9b85",
+    "independent-summary.json": "2d997be7fd37e1483c44f2cedd093b2d3c5068e89c2f97bb9bf47c00a53b33dc",
+    "m6-inplace-independent.sh": "f2d4cefd27e76149c5b86837d51f04735df232b7ba1a95f8b72ed29f8a380726",
+    "m6-inplace-summary.json": "3377d20ace665e1285c98ee3273c7470ddbc6348a899ff690828b6a78dcf9418",
+    "m6-inplace.patch": "72a1b6316bda15eb2c73289cc933dfa2f8b7a065acbd05f124c0746b4354ace8",
+    "m6-inplace.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m6-inplace.stdout": "7da5fb149469f5e15fb869932a2596ef4db3fdc51ef2b979c7ebcb995a0677fd",
+    "m8-init-recheck-summary.json": "6fd5818394cfd98b03bbe6c19c29d2bf3f9cd912ffd1787670a3b1f8df460fb8",
+    "m8-init-recheck.patch": "d26f23582dd5d12ea8563d25b48a62a3fe386ba659bbc1ff4f7cd272c44965bd",
+    "m8-init-recheck.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m8-init-recheck.stdout": "3fc74191a6ea1ff13263ac65724e2c8dce7a8a098aee5ff5b9eef71471b819ff",
+    "m9-model-shape-summary.json": "cc3691aae48a220d02cbe5ea9b0a8cf29bcc764c965f1be8692b0da542fab4ce",
+    "m9-model-shape.patch": "3d2ae0438c4af797b303ece5e0e4bd127f171a0c1aef3309de56c3fb784e3f5e",
+    "m9-model-shape.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m9-model-shape.stdout": "fc8cc5ce877a8430864cb51827493e114069c3182b2d04101f4248ad705124fd",
+    "meta.json": "fc75ec9f5215675517d0e1ca0c569c9875c676479914dfeb58b4c3fdd47e22a0",
+    "mutation-summary.json": "4d26430c1a86a2b773e836c8971e619e55783e05cc2d4ba3c24adabde843380e",
+    "qa-summary.json": "761a2fd4f179f191967ff34dcd1aee1803fad5c063df62201560220761b7ef7f",
+    "qa.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "qa.stdout": "f4e76b2891a39e7817d14a12702e60b0966825c9ad18d1e926c133e5e5016ae4",
+    "seats-qa-pty/init-pty.pty.txt": "a73a2196a4f0b91f54bb375dadecdde2d346f3cb9189c4d4f691278f0320091b",
+    "static-summary.json": "5d9b42446e1f0621e55a16d92bee0eda5342608fb5342f800802bc1adf30af76"
+  }
+}

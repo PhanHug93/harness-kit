@@ -1,0 +1,42 @@
+{
+  "rc": 0,
+  "source_sha256": {
+    "agent-bootstrap/lib/writers-docs.sh": "3cd0db2dbfe495939e8517d28af78a06c04e8f0bf05930155b7d5d461648aac7",
+    "agent-bootstrap/agent-seats.sh": "0182febcfefffd32d969fa97302d8bd51fa8f45882c99ee6ed97acfa3cebfaac",
+    "scripts/test-agent-seats-launcher.py": "fd3b928de3b986ec9b036687f3e4a3d7f72044e2d4569b6b85a6f20f5bbdf646"
+  },
+  "result": {
+    "status": "PASS",
+    "tests": {
+      "generated_surface": {
+        "status": "PASS"
+      },
+      "resolve_and_model_info": {
+        "status": "PASS"
+      },
+      "launch_matrix": {
+        "status": "PASS"
+      },
+      "conflict_and_non_codex": {
+        "status": "PASS"
+      },
+      "read_only_and_auto_init": {
+        "status": "PASS"
+      },
+      "active_invalid_seats": {
+        "status": "PASS"
+      },
+      "doctor_and_non_codex_status": {
+        "status": "PASS"
+      },
+      "persistence_nested_and_failures": {
+        "status": "PASS"
+      }
+    },
+    "mutations": [
+      "merge-stderr",
+      "bypass-conflict",
+      "skip-explicit-effort"
+    ]
+  }
+}

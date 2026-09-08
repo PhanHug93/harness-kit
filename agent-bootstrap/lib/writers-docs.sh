@@ -733,6 +733,7 @@ write_agent_docs() {
   local stack_overlay_content
   local mobile_skill_read_on_demand_bullet
   local context_generated_at
+  local seat_roster_block
   stack_bullets="$(format_bullets "${TECH_STACKS[@]}")"
   module_bullets="$(format_bullets "${MODULES[@]}")"
   verify_bullets="$(format_bullets "${VERIFY_COMMANDS[@]}")"
@@ -744,11 +745,14 @@ write_agent_docs() {
   stack_overlay_content="$(render_stack_overlays)"
   mobile_skill_read_on_demand_bullet="$(mobile_optimization_agents_pointer)"
   context_generated_at="$(project_agent_context_generated_at)"
+  if ! seat_roster_block="$(seats_program roster-block 2>/dev/null)"; then
+    seat_roster_block=$'<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->\n- roster unavailable: docs/agent-configs/seats.json is missing or invalid; run scripts/agent-seats.sh wizard (or reset), then scripts/agent-seats.sh render\n<!-- END MANAGED: multi-agent-bootstrap:seat-roster -->'
+  fi
 
   write_overlay_file "$TARGET_DIR/AGENTS.md" <<EOF
 # Agent Conventions - $PROJECT_NAME
 
-Codex/Claude workflow with thin tool adapters. Durable rules:
+Project rules:
 \`docs/agent-configs/\`.
 
 ## Startup Context Budget
@@ -777,48 +781,33 @@ Keep core startup context under roughly 4k estimated tokens.
 \`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
 estimate, which excludes tool-specific wrappers (\`CLAUDE.md\`, \`GEMINI.md\`).
 
-At the start of substantive work:
+At the start of substantive work, run \`scripts/agent-guard.sh preflight\` and
+\`scripts/detect-agent-tech-stack.sh --markdown\`. Before claiming ordinary
+completion, run \`scripts/agent-guard.sh pre-final --run-verify\`.
 
-\`\`\`bash
-scripts/agent-guard.sh preflight
-scripts/detect-agent-tech-stack.sh --markdown
-\`\`\`
+For release/high-risk/final PR readiness, review detected commands and replace
+the fast check with \`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`.
+Record placeholder or unavailable-service reasons in the handoff/final summary;
+use \`--advisory\` only when the user or CI requires it. Optional git gate:
+\`scripts/install-git-hooks.sh\`.
 
-Before claiming ordinary completion:
-
-\`\`\`bash
-scripts/agent-guard.sh pre-final --run-verify
-\`\`\`
-
-For release/high-risk/final PR readiness, review detected commands, then replace
-this fast verification with
-\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`. For
-placeholders/unavailable local services, record why in the handoff or final
-summary. Rerun with \`--advisory\` only if the user or CI explicitly requires it.
-Optional git gate: \`scripts/install-git-hooks.sh\`.
-
-Keep detection logic in \`scripts/agent-tech-stack-lib.sh\`, without duplication.
-\`docs/agent-configs/agent-bootstrap.lock.json\` binds runtime detector output;
-after stack/module changes, intentionally refresh it with
+Keep detection logic in \`scripts/agent-tech-stack-lib.sh\`; the lock
+\`docs/agent-configs/agent-bootstrap.lock.json\` binds detector output. After
+stack/module changes, refresh it with
 \`bash scripts/bootstrap-multi-agent-project.sh --refresh-lock\`.
 
 If detection is unavailable, infer from build/config files and state uncertainty.
 
 ## Agentmemory Usage
 
-With global Agentmemory MCP, use auto-installed
-\`.agents/skills/agentmemory-mcp/SKILL.md\` for long-term recall/save.
-Shared product/domain requirements use platform_scope=shared; implementation
-memories use platform-specific scopes, e.g. platform_scope=android or
-platform_scope=ios.
-
-For non-trivial decisions, \`doubt-driven\`
-(\`.agents/skills/doubt-driven/SKILL.md\`) offers a fresh-context adversarial check.
+Use \`.agents/skills/agentmemory-mcp/SKILL.md\` for long-term recall/save;
+memory is advisory and must be verified against current files. Use
+\`.agents/skills/doubt-driven/SKILL.md\` for a fresh-context adversarial check.
 
 ## Collaboration
 
-Canonical sources above: mode contract for roles/transitions/gates/review limits;
-handoff schema for local packet/artifact formats. No concurrent same-file edits.
+Use the mode contract for roles, transitions, gates and review limits;
+the handoff schema for packet formats. No concurrent same-file edits.
 
 ## Local State And No-Scan Guard
 
@@ -833,8 +822,8 @@ scripts/agent-hook.sh guard-local-state
 
 No-scan: local worktrees, vendor runtime state, personal overrides, tool caches,
 build output, local Codex state, \`.env*\`, \`local.properties\`,
-\`keystore.properties\`, keys/keystores. The tracked-state guard fails on agent
-runtime state; sensitive project files remain no-scan.
+\`keystore.properties\`, keys/keystores. The tracked-state guard fails on
+agent runtime state; sensitive project files remain no-scan.
 
 ## Work Modes
 
@@ -843,6 +832,13 @@ runtime state; sensitive project files remain no-scan.
   the canonical adequacy gate.
 - \`reviewing\`: one findings-first pass; project-local verification allowed.
   Remediate only the exact requested scope.
+
+## Seat Roster
+
+$seat_roster_block
+
+Occupants change with \`scripts/agent-seats.sh\`; data lives in
+\`docs/agent-configs/seats.json\`.
 
 ## Detected Project Stack
 
@@ -870,22 +866,13 @@ $warning_bullets
 
 Default: project-local full-flow in all modes. Use supervised/read-only/propose
 only for user-requested step-by-step approval. Exact approval is required for
-external-path mutations, installs,
-commits, pushes, force operations, or local-only secret/permission file changes.
+external-path mutations, installs, commits, pushes, force operations, or
+local-only secret/permission file changes.
 
 ## Git Workflow
 
-Run all shell git commands through:
-
-\`\`\`bash
-./scripts/rtk git ...
-\`\`\`
-
-If missing or unable to resolve pinned rtk, run:
-
-\`\`\`bash
-bash scripts/install-rtk.sh
-\`\`\`
+Run all shell git commands through \`./scripts/rtk git ...\`. If missing or
+unable to resolve pinned rtk, run \`bash scripts/install-rtk.sh\`.
 
 - One branch, one commit: fold work with \`git commit --amend\` (or
   \`git reset --soft <base>\` for several commits).
@@ -924,10 +911,9 @@ $stack_bullets
 
 ## Deep Project Context
 
-Detection seeds \`docs/agent-configs/project-brief.md\` (durable context).
-If \`<!-- UNFILLED -->\`, run \`docs/agent-configs/project-onboarding.md\` before
-substantive work; it updates this file's tech-stack notes and fills
-\`docs/superpowers/specs/project-tech-stack.md\`.
+Detection seeds \`docs/agent-configs/project-brief.md\`. If \`<!-- UNFILLED -->\`,
+run \`docs/agent-configs/project-onboarding.md\` before substantive work; it
+updates tech-stack notes and fills \`docs/superpowers/specs/project-tech-stack.md\`.
 
 ## Detected Modules
 
@@ -935,8 +921,8 @@ substantive work; it updates this file's tech-stack notes and fills
 $module_bullets
 <!-- END MANAGED: multi-agent-bootstrap:detected-modules -->
 
-Refine file-signature detection here after inspecting architecture, modules,
-tests, and deployment.
+Refine file-signature detection after inspecting architecture, modules, tests,
+and deployment.
 
 ## Verification Commands
 
@@ -944,8 +930,8 @@ tests, and deployment.
 $verify_bullets
 <!-- END MANAGED: multi-agent-bootstrap:verification-candidates -->
 
-Prefer relevant commands; replace invalid ones here with workflow fixes in the
-same change.
+Prefer relevant commands; replace invalid ones with workflow fixes in the same
+change.
 
 ## Detection Warnings
 
@@ -963,48 +949,37 @@ $stack_overlay_content
 
 - Transfers between agents/phases follow
   \`docs/agent-configs/agent-handoff-schema.md\`.
-- Before protected edits, run \`scripts/agent-guard.sh pre-edit <path>\`; use
-  \`--ack <reason>\` and log it. Claude Code denies unacked edits
-  (exit 2); per-path reuse: \`AGENT_GUARD_ACK_TTL_SECONDS\` (1-hour default).
+- Before protected edits, run \`scripts/agent-guard.sh pre-edit <path>\` with
+  \`--ack <reason>\`; Claude Code denies unacked edits (exit 2), and
+  \`AGENT_GUARD_ACK_TTL_SECONDS\` controls per-path reuse (1-hour default).
 - Before broad search, run \`scripts/agent-hook.sh no-scan-paths\`; avoid
-  local-only/tool-cache/generated/sensitive paths unless explicitly requested.
+  local-only, tool-cache, generated, and sensitive paths unless requested.
 
 ## Project-Specific Rules To Fill In
 
-- Protected files and directories:
-- Generated files that must not be edited manually:
-- Security, privacy, compliance, or credential rules:
-- Architecture boundaries:
-- Test strategy:
-- Release or deployment constraints:
-- Project-specific tech-stack overrides and commands:
+Record protected paths, generated files, security/privacy/credential rules,
+architecture boundaries, test strategy, release constraints, and project-specific
+tech-stack overrides and commands.
 
-## Tech-Stack Customization Rule
-
-At substantive-work startup, run \`scripts/agent-guard.sh preflight\` and
-\`scripts/detect-agent-tech-stack.sh --markdown\`.
-
-Recall relevant context with available agentmemory MCP tools. Otherwise combine
-this file, detector output, and nearby build/config files; state uncertainty.
+Use agentmemory if available; otherwise read this context, detector output and
+nearby build/config files. State uncertainty.
 EOF
 
   write_file "$TARGET_DIR/docs/agent-configs/agent-handoff-schema.md" <<'EOF'
 # Agent Handoff Schema
 
-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
-
-Role, transition, and gate policy lives only in
+Seat, transition, and gate policy lives only in
 `docs/agent-configs/agent-mode-contracts.md`.
 
-## Local packet and active-task selection
+## Select a packet
 
-Packets at `.agents/tasks/<task-id>/` are ignored, ephemeral, and may be lost.
-Git does not enforce their rules: ownership and append-only behavior are conventions, not access controls.
+Packets at `.agents/tasks/<task-id>/` are ignored, ephemeral; ownership and
+append-only behavior are conventions, not access controls.
 
 `.agents/tasks/ACTIVE` is a cache; each task's `state.json` is authoritative.
-On resume, scan states; select exactly one open task if it is the only one.
-Repair or ignore a stale `ACTIVE` cache. Multiple open tasks require the user to choose.
-Never select the newest task automatically. Report malformed state; do not infer it.
+On resume, select exactly one open task if it is the only one; repair stale
+`ACTIVE`. Multiple open tasks require the user to choose. Never select the
+newest task automatically. Report malformed state; do not infer it.
 
 ## Canonical artifact set
 
@@ -1015,15 +990,12 @@ Never select the newest task automatically. Report malformed state; do not infer
 5. `claude-review.md`
 6. `user-decision.md`
 
-Only `state.json` and `task.md` are created initially. Create the rest on demand.
-
-These are the canonical packet artifacts, not a hard maximum. A supporting
-evidence file is allowed when `task.md` links it and states its purpose. Do not
-add a machine-readable attachment registry.
+Only `state.json` and `task.md` are created initially. Other evidence is allowed
+when linked from `task.md`; do not add a machine-readable attachment registry.
 
 ## State contract
 
-Concrete initial example:
+Initial state:
 
 ```json
 {
@@ -1031,8 +1003,9 @@ Concrete initial example:
   "task_id": "checkout-timeout-fix",
   "status": "open",
   "phase": "analysis",
+  "seat": "@spec",
   "owner": "claude",
-  "requested_action": "prepare the specification for Sol technical review",
+  "requested_action": "prepare spec for @gate",
   "base_commit": null,
   "source_task": null,
   "blocks": [],
@@ -1052,37 +1025,53 @@ Concrete initial example:
 }
 ```
 
-Exact allowed values:
+Allowed values:
 
 - `status`: `open | awaiting_user | closed`
 - `phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`
-- `owner`: `claude | codex | user`
+- `owner`: `claude | codex | user | agent`
 - `spec_sufficiency.verdict`: `not_reviewed | sufficient | partially_sufficient | insufficient`
 - `spec_sufficiency.sufficient_for_coding_model`: `not_reviewed | yes | no`
-- `verification.runner`: `none | claude | codex`
+- `verification.runner`: `none | claude | codex | agent`
 - `verification.status`: `not_run | pass | fail | blocked`
 
-`requested_action` names one next action. `base_commit` is captured on the first entry into implementation for full-diff review. `revision_rounds` starts at zero;
-increment on return to implementation. Verification records runner, result,
-reason, and real report path.
+`seat` is a protocol tag. When absent, derive it from `phase`: `analysis` →
+`@spec`, `technical_review` → `@gate`, `implementation` → `@build`,
+`verification` → `@verify`, `cross_review` → `@audit`, `resolution` → `@owner`.
+Packets without `seat` remain valid. `owner` names the occupant host class;
+nonstandard hosts use `owner: agent` and `occupant: {"host": "<host>"}`;
+`verification.runner: agent` records `runner_host: <host>`.
+
+Packet mapping examples (partial states):
+
+```json
+{"phase": "technical_review", "seat": "@gate", "owner": "codex"}
+{"phase": "analysis", "seat": "@spec", "owner": "codex"}
+{"phase": "technical_review", "seat": "@gate", "owner": "claude"}
+{"phase": "technical_review", "seat": "@gate", "owner": "agent", "occupant": {"host": "gemini"}}
+{"phase": "verification", "seat": "@verify", "owner": "agent", "occupant": {"host": "cursor"}, "verification": {"runner": "agent", "runner_host": "cursor"}}
+```
+
+`requested_action` names the next action. Capture `base_commit` on first entry
+into implementation for full-diff review; `revision_rounds` starts at zero and
+increments on return. Verification records runner, result, reason, and report.
 
 ### Task relations
 
-`source_task` is `null`, a task id, or `<task-id>#<finding-id>`. It records why
-the task exists; finding details, evidence, and scope remain in `task.md`.
-The task-id portion must name an existing packet when it is available.
-Missing `source_task` is equivalent to `null`.
+`source_task` is `null`, a task id, or `<task-id>#<finding-id>`; it records why
+the task exists while details, evidence, and scope remain in `task.md`. The
+task-id portion must name an existing packet when it is available. Missing
+`source_task` is equivalent to `null`.
 
-`blocks` is a unique list of task ids that cannot continue while this packet
-is active. Missing `blocks` is equivalent to `[]`. A closed packet's `blocks`
-edges are inactive and no edit to the blocked packet is required. Closing a
-child returns control with an outcome to evaluate; it does not claim that the
-source finding was resolved or automatically advance the blocked task.
+`blocks` is a unique list of task ids that cannot continue while this packet is
+active. Missing `blocks` is equivalent to `[]`. A closed packet's `blocks` edges
+are inactive; no edit to the blocked packet is required. Closing a child returns an outcome to evaluate; closure alone neither proves
+the source finding resolved nor advances the blocked task.
 
 Existing `claude-codex-collaboration/v1` packets remain valid. No protocol-version
 bump, bulk migration, or reverse relationship write is required. Missing
-referenced packets do not invalidate the current packet; agents record
-uncertainty and continue.
+referenced packets do not invalidate the current packet; agents record uncertainty
+and continue.
 
 1. Continue the current task when the root cause and implementation scope are
    unchanged.
@@ -1093,13 +1082,12 @@ uncertainty and continue.
    same target.
 4. A task cannot source from or block itself.
 5. Active blocking edges must be acyclic.
-6. A child must not create another child merely because its review produced a
-   new attempt. Attempts stay in the same packet.
+6. A review retry alone never creates a child task; attempts stay in the same
+   packet.
 
-Relations are authoring conventions. Self-reference, duplicate active
-children, and cycles are avoided by the agent writing the packet and checked
-by the reviewer reading it. No guard, hook, or runtime reads `source_task` or
-`blocks` in this phase.
+Relations are authoring conventions. The packet writer avoids self-reference,
+duplicate active children, and cycles; the reviewer checks them. No guard, hook,
+or runtime reads `source_task` or `blocks` in this phase.
 
 ## Artifact contracts
 
@@ -1115,23 +1103,24 @@ by the reviewer reading it. No guard, hook, or runtime reads `source_task` or
 
 Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
 interfaces, edge cases, migration/security/privacy impact, verification,
-assumptions, and implementation boundaries. When Sol returns `task.md` to analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)` and prior history.
+assumptions, and implementation boundaries. When `@gate` returns `task.md` to
+analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)`
+and prior history.
 
 Before marking the task `closed`, append one concise section to `task.md`:
 
 ```markdown
 ## Outcome
 
-- Summary: <what changed or what was learned>
-- Evidence: <test, report, or review path>
-- Effect on source: <what the source task can decide or do next>
+- Summary: <change or finding>
+- Evidence: <test/report/review path>
+- Effect on source: <source task decision/action>
 ```
 
-The fields are prose, not enums, and do not drive an automatic transition.
-If an outcome should survive packet loss, manually mirror its Summary,
-Evidence, and Effect on source into the optional task journal described in
+The fields are prose, not enums, and do not drive an automatic transition. If
+an outcome should survive packet loss, manually mirror its Summary, Evidence,
+and Effect on source into the optional task journal described in
 `docs/agent-configs/task-journal.md`. Mirroring is optional, not a closure gate.
-No automatic synchronization or per-task journal creation is introduced.
 
 ### `codex-review.md`
 
@@ -1168,32 +1157,32 @@ State sufficiency matches the latest pre-coding attempt.
 ### `implementation.md`
 
 Append `## Implementation attempt <n>` with model/source, route, scope, files,
-verification, deviations, risks, blockers, and any adequacy downgrade. Sol coding records
-`policy_exception=sol_coding`, `authorization=user_session`, and the reason;
-its policy meaning is defined in `docs/agent-configs/agent-mode-contracts.md`.
+verification, deviations, risks, blockers, and adequacy downgrade. A `@gate`
+coding escalation records `policy_exception=gate_coding`,
+`authorization=user_session`, and the reason; readers accept legacy `sol_coding`
+for one release. Its policy meaning is in
+`docs/agent-configs/agent-mode-contracts.md`.
 
 ### `claude-review.md`
 
-Append one findings-first `## Cross-review attempt <n>`. The cross-review
-checklist and required procedural declarations live in
+Append one findings-first `## Cross-review attempt <n>`; its checklist and
+procedural declarations live in
 `docs/agent-configs/agent-mode-contracts.md`.
 
 ### `user-decision.md`
 
 When required, append dated action, scope, authorization, and alternatives.
 
-Prior attempts remain immutable by convention; repeats append the next numbered attempt.
+Prior attempts remain immutable by convention; repeats append the next numbered
+attempt.
 
-Exclude secrets, local-only permission state, and large generated logs when a
-path and concise summary suffice.
+Exclude secrets, permission state and large logs; use paths and summaries.
 EOF
 
   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
 # Agent Mode Contracts
 
-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
-
-Canonical roles, transitions, and gates for host files/launchers.
+Canonical seat tags, transitions, and gates for host files/launchers.
 
 Common rules:
 - Refresh stack context via `scripts/detect-agent-tech-stack.sh --markdown`
@@ -1209,23 +1198,23 @@ Common rules:
 
 ### Constrained transitions
 
-- `analysis` · Claude -> `technical_review`
-- `technical_review` · Codex Sol -> `analysis` | `implementation` | `resolution`
-- `implementation` · Codex Luna -> `verification` | `resolution`
-- `verification` · Codex Sol -> `implementation` | `cross_review` | `resolution`
-- `cross_review` · Claude -> `implementation` | `resolution`
-- `resolution` · User -> `closed` | user-selected prior phase
+- `analysis` · `@spec` -> `technical_review`
+- `technical_review` · `@gate` -> `analysis` | `implementation` | `resolution`
+- `implementation` · `@build` -> `verification` | `resolution`
+- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`
+- `cross_review` · `@audit` -> `implementation` | `resolution`
+- `resolution` · `@owner` -> `closed` | user-selected prior phase
 
-`awaiting_user` is valid only with `resolution` · User. `closed` is valid only with phase `closed`.
+`awaiting_user` is valid only with `resolution` · `@owner`. `closed` is valid only with phase `closed`.
 Other active combinations use `open` and the listed owner. Claude implementation
 requires an explicit user decision in the packet.
 
 ### Gates and authority
 
-- Sol owns the blocking adequacy verdict for requirements, interfaces, edge
+- `@gate` owns the blocking adequacy verdict for requirements, interfaces, edge
   cases, tests, migrations, security/privacy, and implementation boundaries.
-- Luna may downgrade `yes` for a spec gap found during implementation,
-  but may never upgrade `no`; missing/inconsistent Sol verdicts block coding.
+- `@build` may downgrade `yes` for a spec gap found during implementation,
+  but may never upgrade `no`; missing/inconsistent `@gate` verdicts block coding.
 - After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost. The user may authorize another pass in the same task. Do not create a child task or a new lifecycle state solely because the checkpoint was reached.
 - Record verification runner, status, reason, and real report. Unavailable/skipped
   execution cannot pass. Only the executing host may declare a pass; other
@@ -1233,15 +1222,17 @@ requires an explicit user decision in the packet.
 - An equivalence or invariance guard names the production boundary its fixture
   crosses, declares its mutation in the packet before the test is written, and
   must fail when the fixture transform is replaced with identity.
-- Claude's one findings-first cross-review covers state/review consistency,
-  `base_commit`, verification, any Sol-coding decision and reason, and
+- `@audit`'s one findings-first cross-review covers state/review consistency,
+  `base_commit`, verification, any gate-coding decision and reason, and
   approved scope. Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
   Check author/reviewer model and session declarations for contradictions.
-- Sol coding is an escalation: the user must open a new Sol coding session.
-  `policy_exception=sol_coding` plus `authorization=user_session` is an
+- Gate coding is an escalation: the user must open a new session for the
+  `@gate` occupant to code. `policy_exception=gate_coding` plus
+  `authorization=user_session` is an
   audit-only procedural declaration and cannot provide file-based authorization.
 - The user is the final authority for closure, bounded revision, prior-phase
-  return, Claude implementation, or a Sol-coding policy exception.
+  return, implementation, or a gate-coding policy exception. Readers accept
+  `sol_coding` as a legacy read alias for one release.
 
 ## Planning Mode
 
@@ -1250,7 +1241,7 @@ Council is on-demand for high-risk/disputed work.
 
 ## Coding Mode
 
-Luna needs the latest Sol coding approval. Prefer focused root-cause patches,
+`@build` needs the latest `@gate` approval. Prefer focused root-cause patches,
 tests, and fresh verification; otherwise move to resolution.
 
 ## Reviewing Mode
@@ -1268,8 +1259,6 @@ EOF
 
   write_file "$TARGET_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" <<'EOF'
 # LLM Coding Workflow
-
-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
 
 Natural language is a control plane, not engineering understanding. Preserve
 user work. Production changes require this procedure.
@@ -1296,17 +1285,15 @@ EOF
   write_file "$TARGET_DIR/docs/agent-configs/llm-council-agent-workflow.md" <<'EOF'
 # Hybrid Council Workflow
 
-Config version: `docs/agent-configs/agent-bootstrap.lock.json`.
-
-Council is advisory: one patch executor. Use on demand for user-requested,
-high-risk, or disputed architecture, migration, data loss,
-security/privacy, billing, release, performance, concurrency, or unclear root cause.
+Council advises one patch executor on user-requested high-risk/disputed
+architecture, migration, data loss, security/privacy, billing, release,
+performance, concurrency or unclear root causes.
 
 Planner/BA: scope; Dev Lead: architecture; QC: regressions; Tester: evidence;
 Chair: synthesis.
 
 The coordinator chairs. Override only with evidence, user instruction, or a
-safer stop. Preserve high-impact minority objections.
+safer stop; preserve high-impact minority objections.
 
 Ordinary review is one findings-first pass under
 `docs/agent-configs/agent-mode-contracts.md`; council is optional.
@@ -1317,12 +1304,12 @@ Before non-trivial verdicts, optionally apply `doubt-driven`
 ## Procedure
 
 1. State the question and council rationale.
-2. Each role states its position, evidence (file:line), and confidence.
-3. Cross-review the strongest assumptions and missing evidence.
-4. Chair synthesizes: approach, rejected alternatives, preserved
-   minority objections, executor, verification commands, stop-conditions.
-5. Return the verdict to the executor using
-   `docs/agent-configs/agent-handoff-schema.md` when ownership changes.
+2. Each role gives its position, file:line evidence, and confidence.
+3. Cross-review assumptions and missing evidence.
+4. Chair synthesizes approach, rejected alternatives, minority objections,
+   executor, verification commands, and stop-conditions.
+5. Return the verdict using `docs/agent-configs/agent-handoff-schema.md` when
+   ownership changes.
 
 ## Stop conditions
 
@@ -1337,30 +1324,24 @@ write_task_journal_doc() {
   write_file "$TARGET_DIR/docs/agent-configs/task-journal.md" <<'EOF'
 # Task Journal (Optional working memory)
 
-Optional git-tracked journals preserve decisions, never select active tasks.
-`.agents/tasks/*/state.json` is authoritative; see
+Optional journals preserve decisions in Git; they never select active tasks. `.agents/tasks/*/state.json` is authoritative; see
 `docs/agent-configs/agent-handoff-schema.md`.
 
-For task decisions to survive packet loss/compaction, create
-`docs/superpowers/plans/<topic>/journal.md`; append concise dated entries.
-Bootstrap never creates per-task journals.
+Create `docs/superpowers/plans/<topic>/journal.md` with dated entries to survive
+packet loss/compaction. Bootstrap never creates per-task journals.
 
-To preserve a closure outcome, manually copy the Summary, Evidence, and Effect
-on source from `task.md` into a concise dated journal entry. Mirroring is
-optional, not a closure gate. No automatic synchronization or per-task journal
-creation is introduced.
+Manually mirror `task.md` Summary, Evidence, and Effect on source into a dated
+entry when useful. Mirroring is optional, not a closure gate.
 
 ## Optional fields
 
-- `memory`: saved durable-memory id, `none`, or `n/a` without a backend.
+- `memory`: saved durable-memory id, `none`, or `n/a`.
 - `save_decision`: `saved`, `journal-only`, `rejected`, or `n/a`.
 - `evidence`: supporting file, test, command, or user-decision summary.
-- `recall_verified`: `yes`, `n/a`, or `acked-deferred` when recall was relevant.
-- `verification`: real verification report path, e.g.
-  `.agents/state/last-verify-report.json`, or `n/a` with a reason.
+- `recall_verified`: `yes`, `n/a`, or `acked-deferred` when relevant.
+- `verification`: real verification report path, or `n/a` with a reason.
 
-Never rewrite prior decisions. Exclude secrets, credentials, local permission
-state, and large generated logs.
+Keep prior decisions; exclude secrets, credentials, permission state and large logs.
 EOF
 }
 
@@ -1379,6 +1360,7 @@ Follow the canonical roles and gates in
 `docs/agent-configs/agent-mode-contracts.md`, follow the packet format in
 `docs/agent-configs/agent-handoff-schema.md`, and use `.agents/tasks/` for the
 active Claude–Codex handoff.
+Claude occupies `@spec` and `@audit` by default (see roster).
 
 ## First run
 
@@ -1490,6 +1472,7 @@ markers into Folder Instructions once:
 <!-- BEGIN COWORK FOLDER INSTRUCTIONS -->
 Read the target `CLAUDE.md` first.
 Follow the canonical role and handoff docs named there.
+Claude occupies `@spec` and `@audit` by default (see roster).
 Use `.agents/tasks/` for active Claude–Codex handoff.
 Do not assume Claude Code hooks run in Cowork.
 If Bash is unavailable, continue analysis and cross-review, and record verification as blocked or delegated with a reason.
@@ -1550,9 +1533,10 @@ EOF
 Apply `docs/agent-configs/agent-mode-contracts.md` Coding Mode.
 Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
 `.agents/tasks/<task-id>/`.
+Claude occupies `@spec` and `@audit` by default (see roster).
 
 Default Claude behavior is handoff, not direct implementation. Execute only
-after an explicit user decision and a blocking Sol adequacy verdict permit
+after an explicit user decision and a blocking `@gate` adequacy verdict permit
 Claude implementation; unavailability alone does not change ownership. If
 selected, implement scoped changes, verify, and inspect the final diff. Respect
 `scripts/agent-hook.sh no-scan-paths`.
@@ -1634,6 +1618,9 @@ argument-hint: [--doctor|--status] <optional Codex setup task>
 
 # Codex Setup Bridge
 
+Claude occupies `@spec` and `@audit` by default (see roster); Codex launches
+use the selected `@spec`, `@gate`, `@build`, `@verify`, or `@audit` seat.
+
 Read `AGENTS.md`, `CLAUDE.md`, `docs/agent-configs/agent-mode-contracts.md`,
 `docs/agent-configs/agent-handoff-schema.md`, and
 `docs/agent-configs/project-agent-context.md`. Use the selected packet under
@@ -1659,10 +1646,13 @@ EOF
   write_file "$TARGET_DIR/.claude/commands/codex/rescue.md" <<'EOF'
 ---
 description: Convert current Claude context into a Codex-ready rescue handoff.
-argument-hint: [planning|coding|reviewing] <stalled task or rescue target>
+argument-hint: [@spec|@gate|@build|@verify|@audit|planning|coding|reviewing] <stalled task or rescue target>
 ---
 
 # Codex Rescue Handoff
+
+Claude occupies `@spec` and `@audit` by default (see roster). Choose the
+Codex seat tag that matches the packet phase.
 
 Default to handoff, not direct implementation. Read
 `docs/agent-configs/agent-mode-contracts.md`,
@@ -1675,7 +1665,7 @@ Default to handoff, not direct implementation. Read
 Return one launch command and one schema-compliant handoff:
 
 ```bash
-.codex/codex-mode.sh <planning|coding|reviewing> "<handoff prompt>"
+.codex/codex-mode.sh <@spec|@gate|@build|@verify|@audit|planning|coding|reviewing> "<handoff prompt>"
 ```
 
 Include target files, repo-state caveats, constraints, non-goals, acceptance
@@ -1690,6 +1680,9 @@ argument-hint: [--doctor] <optional status question>
 ---
 
 # Codex Status
+
+Claude occupies `@spec` and `@audit` by default (see roster). Status reports
+the locked seat and its effective catalog model/effort.
 
 Read `docs/agent-configs/agent-mode-contracts.md` and
 `docs/agent-configs/agent-handoff-schema.md`. Use the selected packet under
@@ -1757,6 +1750,11 @@ standard three-mode workflow.
 Commands:
 
 ```bash
+.codex/codex-mode.sh @spec
+.codex/codex-mode.sh @gate
+.codex/codex-mode.sh @build
+.codex/codex-mode.sh @verify
+.codex/codex-mode.sh @audit
 .codex/codex-mode.sh planning
 .codex/codex-mode.sh planning --supervised
 .codex/codex-mode.sh coding
@@ -1773,9 +1771,10 @@ scripts/verify-ai-deps.sh
 Runtime stack detection lives in `scripts/agent-tech-stack-lib.sh`; the
 detector is only a wrapper.
 
-Model defaults live in `docs/agent-configs/model-profiles.json`; set
-`CODEX_MODEL_PROFILE=<profile>` to test a different profile without editing
-generated scripts. All modes default to project-local full-flow execution. Use
+Seat occupants and model defaults live in `docs/agent-configs/seats.json`;
+inspect them with `scripts/agent-seats.sh show` and validate with
+`scripts/agent-seats.sh validate`. `CODEX_MODEL_PROFILE=<profile>` is ignored
+with a warning for one release. All modes default to project-local full-flow. Use
 `--supervised`, `--read-only`, `--propose`, or `--standard` only when the user
 wants to observe and approve actions.
 Reviewing is findings-first; it may run project-local verification, but applies
@@ -1796,11 +1795,11 @@ CODEX_USE_FALLBACK=1 .codex/codex-mode.sh coding
 CODEX_USE_FALLBACK=1 .codex/codex-mode.sh reviewing
 ```
 
-Fallback defaults come from `docs/agent-configs/model-profiles.json`. Override
-per launch when capacity or rollout needs a one-shot change:
+Fallback defaults come from the selected seat in `docs/agent-configs/seats.json`.
+Override per launch when capacity or rollout needs a one-shot change:
 
 ```bash
-CODEX_MODEL_OVERRIDE=gpt-5.4 .codex/codex-mode.sh planning
+CODEX_MODEL_OVERRIDE=gpt-5.6-terra .codex/codex-mode.sh planning
 CODEX_REASONING_EFFORT=high CODEX_USE_FALLBACK=1 .codex/codex-mode.sh coding
 ```
 
@@ -1822,44 +1821,60 @@ AGENT_HOOK="$PROJECT_ROOT/scripts/agent-hook.sh"
 AGENT_GUARD="$PROJECT_ROOT/scripts/agent-guard.sh"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 VERIFY_AI_DEPS="$PROJECT_ROOT/scripts/verify-ai-deps.sh"
-MODEL_PROFILES="$PROJECT_ROOT/docs/agent-configs/model-profiles.json"
+SEATS_SCRIPT="$PROJECT_ROOT/scripts/agent-seats.sh"
+SEATS_FILE="$PROJECT_ROOT/docs/agent-configs/seats.json"
+LEGACY_PROFILES="$PROJECT_ROOT/docs/agent-configs/model-profiles.json"
+AGENTS_MD="$PROJECT_ROOT/AGENTS.md"
 
 DEFAULT_MODE="planning"
 DEFAULT_FLOW="full_flow"
 STANDARD_APPROVAL="on-request"
 FULL_FLOW_APPROVAL="never"
-REASONING_EFFORT=""
-MODEL_PROFILE=""
-MODEL_PROFILE_ERROR=""
 
-PLANNING_MODEL=""
-CODING_MODEL=""
-REVIEWING_MODEL=""
-PLANNING_FALLBACK_MODEL=""
-CODING_FALLBACK_MODEL=""
-REVIEWING_FALLBACK_MODEL=""
+TEMP_FILES=()
+NEW_TEMP=""
+SEAT_DATA=()
+MODEL_DATA=()
+DATA_LINES=()
+EFFECTIVE_MODEL=""
+EFFECTIVE_EFFORT=""
+MODEL_SOURCE=""
+LOCKED_SEAT=""
+LOCKED_TAG=""
+LOCKED_PHASE=""
+LOCKED_HOST=""
+CONFLICT="0"
 
-if [[ -n "${HOME:-}" ]]; then
-  export PATH="$HOME/.local/bin:$PATH"
-fi
+cleanup() {
+  local path
+  if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
+    for path in "${TEMP_FILES[@]}"; do
+      rm -f "$path"
+    done
+  fi
+}
+trap cleanup EXIT
 
 usage() {
   printf '%s\n' \
     "Usage:" \
-    "  .codex/codex-mode.sh planning [prompt]" \
-    "  .codex/codex-mode.sh planning --supervised [prompt]" \
-    "  .codex/codex-mode.sh coding [prompt]" \
-    "  .codex/codex-mode.sh coding --supervised [prompt]" \
-    "  .codex/codex-mode.sh reviewing [prompt]" \
-    "  .codex/codex-mode.sh reviewing --supervised [prompt]" \
-    "  .codex/codex-mode.sh run [prompt]" \
+    "  .codex/codex-mode.sh <@seat|seat|planning|coding|reviewing> [options] [prompt]" \
+    "  .codex/codex-mode.sh run [options] [prompt]" \
     "  .codex/codex-mode.sh status" \
     "  .codex/codex-mode.sh doctor" \
     "" \
-    "Capacity handling:" \
-    "- CODEX_USE_FALLBACK=1 uses the configured fallback model for the selected mode." \
-    "- CODEX_MODEL_OVERRIDE=<model> selects an explicit model for one launch." \
-    "- CODEX_REASONING_EFFORT=<effort> overrides xhigh only when capacity requires it."
+    "Seats:" \
+    "  @spec spec  @gate gate planning  @build build coding  @verify verify reviewing  @audit audit" \
+    "" \
+    "Flow options:" \
+    "  --full-flow | --full_flow | -full_flow" \
+    "  --supervised | --read-only | --propose | --approval-gate | --standard" \
+    "" \
+    "Environment:" \
+    "  CODEX_MODEL_OVERRIDE=<model> overrides the selected seat for one launch." \
+    "  CODEX_<ROUTE>_MODEL_OVERRIDE=<model> keeps route-named compatibility overrides." \
+    "  CODEX_USE_FALLBACK=1 selects the configured fallback for the selected seat." \
+    "  CODEX_REASONING_EFFORT=<effort> explicitly selects a catalog-supported effort."
 }
 
 is_valid_mode() {
@@ -1870,9 +1885,50 @@ is_valid_flow() {
   [[ "$1" == "standard" || "$1" == "full_flow" ]]
 }
 
+is_valid_seat() {
+  case "$1" in
+    spec|gate|build|verify|audit|owner) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+seat_from_arg() {
+  case "$1" in
+    @spec|spec) printf '%s' "spec" ;;
+    @gate|gate|planning) printf '%s' "gate" ;;
+    @build|build|coding) printf '%s' "build" ;;
+    @verify|verify|reviewing) printf '%s' "verify" ;;
+    @audit|audit) printf '%s' "audit" ;;
+    @owner|owner) printf '%s' "owner" ;;
+    *) return 1 ;;
+  esac
+}
+
+route_for_seat() {
+  case "$1" in
+    spec|gate) printf '%s' "planning" ;;
+    build) printf '%s' "coding" ;;
+    verify|audit) printf '%s' "reviewing" ;;
+    owner) return 1 ;;
+    *) return 1 ;;
+  esac
+}
+
+seat_tag() {
+  case "$1" in
+    spec) printf '%s' '@spec' ;;
+    gate) printf '%s' '@gate' ;;
+    build) printf '%s' '@build' ;;
+    verify) printf '%s' '@verify' ;;
+    audit) printf '%s' '@audit' ;;
+    owner) printf '%s' '@owner' ;;
+    *) return 1 ;;
+  esac
+}
+
 read_mode() {
+  local mode
   if [[ -f "$MODE_FILE" ]]; then
-    local mode
     mode="$(sed -n 's/^mode=//p' "$MODE_FILE" | tail -n1)"
     if is_valid_mode "$mode"; then
       printf '%s' "$mode"
@@ -1883,8 +1939,8 @@ read_mode() {
 }
 
 read_flow() {
+  local flow
   if [[ -f "$MODE_FILE" ]]; then
-    local flow
     flow="$(sed -n 's/^flow=//p' "$MODE_FILE" | tail -n1)"
     if is_valid_flow "$flow"; then
       printf '%s' "$flow"
@@ -1894,18 +1950,33 @@ read_flow() {
   printf '%s' "$DEFAULT_FLOW"
 }
 
+read_locked_seat() {
+  local seat mode
+  if [[ -f "$MODE_FILE" ]]; then
+    seat="$(sed -n 's/^seat=//p' "$MODE_FILE" | tail -n1)"
+    if is_valid_seat "$seat"; then
+      printf '%s' "$seat"
+      return 0
+    fi
+  fi
+  mode="$(read_mode)"
+  seat_from_arg "$mode"
+}
+
 write_mode() {
   local mode="$1"
   local flow="$2"
+  local seat="$3"
   cat > "$MODE_FILE" <<LOCK
 mode=$mode
 flow=$flow
+seat=$seat
 updated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LOCK
 }
 
 truthy() {
-  case "${1:-}" in
+  case "$1" in
     1|true|TRUE|yes|YES|on|ON) return 0 ;;
     *) return 1 ;;
   esac
@@ -1915,256 +1986,371 @@ fallback_requested() {
   truthy "${CODEX_USE_FALLBACK:-}"
 }
 
-load_model_profile() {
-  local requested_profile="${CODEX_MODEL_PROFILE:-}"
-  local parsed=""
-  local effective_effort=""
-  local -a fields=()
+profile_warning() {
+  if [[ -n "${CODEX_MODEL_PROFILE:-}" ]]; then
+    echo "WARN: CODEX_MODEL_PROFILE is ignored for this release; seats.json is authoritative." >&2
+  fi
+}
 
-  MODEL_PROFILE_ERROR=""
-  if ! command -v python3 >/dev/null 2>&1; then
-    MODEL_PROFILE_ERROR="model profile error: python3 is required to load $MODEL_PROFILES"
+new_temp() {
+  local temp_dir
+  temp_dir="${TMPDIR:-/tmp}"
+  NEW_TEMP="$(mktemp "$temp_dir/agent-seats-launcher.XXXXXX")" || {
+    echo "ERROR: cannot allocate a temporary capture file" >&2
+    return 1
+  }
+  TEMP_FILES+=("$NEW_TEMP")
+}
+
+emit_file_stderr() {
+  if [[ -s "$1" ]]; then
+    cat "$1" >&2
+  fi
+  return 0
+}
+
+read_data_lines() {
+  DATA_LINES=()
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    DATA_LINES+=("$line")
+  done < "$1"
+}
+
+resolve_seat_data() {
+  local requested="$1"
+  local output_file error_file line_count
+  new_temp || return 1
+  output_file="$NEW_TEMP"
+  new_temp || return 1
+  error_file="$NEW_TEMP"
+  if ! AGENT_SEATS_FILE="$SEATS_FILE" \
+    AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+    AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+    "$SEATS_SCRIPT" resolve "$requested" >"$output_file" 2>"$error_file"; then
+    emit_file_stderr "$error_file"
+    echo "ERROR: cannot resolve seat $requested; repair seats.json with scripts/agent-seats.sh validate or reset." >&2
+    return 1
+  fi
+  emit_file_stderr "$error_file"
+  read_data_lines "$output_file"
+  line_count=0
+  for line in "${DATA_LINES[@]}"; do
+    line_count=$((line_count + 1))
+  done
+  if [[ "$line_count" -ne 8 ]]; then
+    echo "ERROR: seats resolve interface returned $line_count lines; expected exactly 8." >&2
+    return 1
+  fi
+  SEAT_DATA=("${DATA_LINES[@]}")
+}
+
+model_info_data() {
+  local model="$1"
+  local output_file error_file line_count
+  new_temp || return 1
+  output_file="$NEW_TEMP"
+  new_temp || return 1
+  error_file="$NEW_TEMP"
+  if ! AGENT_SEATS_FILE="$SEATS_FILE" \
+    AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+    AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+    "$SEATS_SCRIPT" model-info "$model" >"$output_file" 2>"$error_file"; then
+    emit_file_stderr "$error_file"
+    echo "ERROR: model $model is unavailable in the seats catalog; add it to catalog.models before launching." >&2
+    return 1
+  fi
+  emit_file_stderr "$error_file"
+  read_data_lines "$output_file"
+  line_count=0
+  for line in "${DATA_LINES[@]}"; do
+    line_count=$((line_count + 1))
+  done
+  if [[ "$line_count" -ne 3 ]]; then
+    echo "ERROR: model-info interface returned $line_count lines; expected exactly 3." >&2
+    return 1
+  fi
+  MODEL_DATA=("${DATA_LINES[@]}")
+}
+
+validate_explicit_effort() {
+  local model="$1"
+  local effort="$2"
+  local supported_efforts="$3"
+  case "$effort" in
+    [a-z]*)
+      case "$effort" in
+        *[!a-z0-9_-]*)
+          echo "ERROR: effort '$effort' must be one lowercase single token matching [a-z][a-z0-9_-]*." >&2
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "ERROR: effort '$effort' must be one lowercase single token matching [a-z][a-z0-9_-]*." >&2
+      return 1
+      ;;
+  esac
+  local supported
+  for supported in $supported_efforts; do
+    if [[ "$supported" == "$effort" ]]; then
+      return 0
+    fi
+  done
+  echo "ERROR: effort '$effort' is not supported by $model (supported: $supported_efforts); add the effort to catalog.models.$model.efforts or choose one listed." >&2
+  return 1
+}
+
+require_seats_for_launch() {
+  if [[ ! -e "$SEATS_FILE" ]]; then
+    echo "WARN: seats.json is missing; initializing it once before launch." >&2
+    if ! AGENT_SEATS_FILE="$SEATS_FILE" \
+      AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+      AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+      "$SEATS_SCRIPT" init >/dev/null; then
+      echo "ERROR: seats.json could not be initialized; run scripts/agent-seats.sh init or reset and retry." >&2
+      return 1
+    fi
+  fi
+  if [[ ! -f "$SEATS_FILE" ]]; then
+    echo "ERROR: seats.json is unavailable after initialization; run scripts/agent-seats.sh init." >&2
+    return 1
+  fi
+  if ! AGENT_SEATS_FILE="$SEATS_FILE" \
+    AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+    AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+    "$SEATS_SCRIPT" validate >/dev/null; then
+    echo "ERROR: active seats.json is invalid; repair it with scripts/agent-seats.sh set or reset." >&2
+    return 1
+  fi
+}
+
+resolve_effective() {
+  local requested_seat="$1"
+  local route="$2"
+  local default_model fallback_model mode_override mode_override_source
+  local selected_effort explicit_effort supported_efforts
+  local catalog_host catalog_default_effort
+  local source fallback_effort
+
+  resolve_seat_data "$requested_seat" || return 1
+  LOCKED_SEAT="${SEAT_DATA[0]}"
+  LOCKED_TAG="${SEAT_DATA[1]}"
+  LOCKED_PHASE="${SEAT_DATA[2]}"
+  LOCKED_HOST="${SEAT_DATA[3]}"
+  default_model="${SEAT_DATA[4]}"
+  selected_effort="${SEAT_DATA[5]}"
+  fallback_model="${SEAT_DATA[6]}"
+  fallback_effort="${SEAT_DATA[7]}"
+
+  [[ "$LOCKED_HOST" == "codex" ]] || return 2
+  if [[ "$requested_seat" == "owner" ]]; then
+    return 2
+  fi
+
+  mode_override=""
+  mode_override_source=""
+  case "$route" in
+    planning)
+      mode_override="${CODEX_PLANNING_MODEL_OVERRIDE:-}"
+      mode_override_source="CODEX_PLANNING_MODEL_OVERRIDE"
+      ;;
+    coding)
+      mode_override="${CODEX_CODING_MODEL_OVERRIDE:-}"
+      mode_override_source="CODEX_CODING_MODEL_OVERRIDE"
+      ;;
+    reviewing)
+      mode_override="${CODEX_REVIEWING_MODEL_OVERRIDE:-}"
+      mode_override_source="CODEX_REVIEWING_MODEL_OVERRIDE"
+      ;;
+    *) echo "ERROR: invalid route for seat $requested_seat" >&2; return 1 ;;
+  esac
+
+  if [[ -n "${CODEX_MODEL_OVERRIDE:-}" ]]; then
+    EFFECTIVE_MODEL="$CODEX_MODEL_OVERRIDE"
+    MODEL_SOURCE="CODEX_MODEL_OVERRIDE"
+    source="override"
+  elif [[ -n "$mode_override" ]]; then
+    EFFECTIVE_MODEL="$mode_override"
+    MODEL_SOURCE="$mode_override_source"
+    source="override"
+  elif fallback_requested; then
+    if [[ -z "$fallback_model" ]]; then
+      echo "ERROR: seat $LOCKED_TAG has no configured fallback; clear CODEX_USE_FALLBACK or configure fallback_model and fallback_effort in seats.json." >&2
+      return 1
+    fi
+    EFFECTIVE_MODEL="$fallback_model"
+    MODEL_SOURCE="CODEX_USE_FALLBACK"
+    source="fallback"
+  else
+    if [[ -z "$default_model" ]]; then
+      echo "ERROR: seat $LOCKED_TAG has no configured Codex model." >&2
+      return 1
+    fi
+    EFFECTIVE_MODEL="$default_model"
+    MODEL_SOURCE="default"
+    source="default"
+  fi
+
+  model_info_data "$EFFECTIVE_MODEL" || return 1
+  catalog_host="${MODEL_DATA[0]}"
+  catalog_default_effort="${MODEL_DATA[1]}"
+  supported_efforts="${MODEL_DATA[2]}"
+  if [[ "$catalog_host" != "codex" ]]; then
+    echo "ERROR: model $EFFECTIVE_MODEL belongs to host $catalog_host; choose a Codex model in catalog.models." >&2
     return 1
   fi
 
-  if ! parsed="$(python3 - "$MODEL_PROFILES" "$requested_profile" 2>&1 <<'PY_MODEL_PROFILE'
-import json
-import pathlib
-import re
-import sys
+  case "$source" in
+    fallback) EFFECTIVE_EFFORT="$fallback_effort" ;;
+    default) EFFECTIVE_EFFORT="$selected_effort" ;;
+    override) EFFECTIVE_EFFORT="$catalog_default_effort" ;;
+  esac
+  if [[ -z "$EFFECTIVE_EFFORT" ]]; then
+    echo "ERROR: seat $LOCKED_TAG has no effort for model $EFFECTIVE_MODEL; repair seats.json." >&2
+    return 1
+  fi
 
-path = pathlib.Path(sys.argv[1])
-requested = sys.argv[2]
-required_keys = (
-    "reasoning_effort",
-    "planning_model",
-    "coding_model",
-    "reviewing_model",
-    "planning_fallback_model",
-    "coding_fallback_model",
-    "reviewing_fallback_model",
-)
-allowed_efforts = {"none", "low", "medium", "high", "xhigh", "max"}
-model_pattern = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+  explicit_effort="${CODEX_REASONING_EFFORT:-}"
+  if [[ -n "$explicit_effort" ]]; then
+    validate_explicit_effort "$EFFECTIVE_MODEL" "$explicit_effort" "$supported_efforts" || return 1
+    EFFECTIVE_EFFORT="$explicit_effort"
+  else
+    validate_explicit_effort "$EFFECTIVE_MODEL" "$EFFECTIVE_EFFORT" "$supported_efforts" || return 1
+  fi
+}
 
-try:
-    document = json.loads(path.read_text(encoding="utf-8"))
-except FileNotFoundError:
-    raise SystemExit(f"model profile error: file not found: {path}")
-except (OSError, UnicodeError) as exc:
-    raise SystemExit(f"model profile error: cannot read {path}: {exc}")
-except json.JSONDecodeError as exc:
-    raise SystemExit(
-        f"model profile error: malformed JSON in {path}: line {exc.lineno} column {exc.colno}"
-    )
-
-if not isinstance(document, dict):
-    raise SystemExit("model profile error: top-level JSON value must be an object")
-if document.get("schema") != "agent-model-profiles/v1":
-    raise SystemExit("model profile error: schema must be agent-model-profiles/v1")
-
-profile_name = requested or document.get("default_profile")
-if not isinstance(profile_name, str) or not profile_name:
-    raise SystemExit("model profile error: default_profile must be a non-empty string")
-profiles = document.get("profiles")
-if not isinstance(profiles, dict):
-    raise SystemExit("model profile error: profiles must be an object")
-profile = profiles.get(profile_name)
-if not isinstance(profile, dict):
-    raise SystemExit(f"model profile error: selected profile '{profile_name}' is missing")
-
-for key in required_keys:
-    if key not in profile:
-        raise SystemExit(
-            f"model profile error: profile '{profile_name}' is missing required field '{key}'"
-        )
-    if not isinstance(profile[key], str):
-        raise SystemExit(
-            f"model profile error: profile '{profile_name}' field '{key}' must be a string"
-        )
-
-effort = profile["reasoning_effort"]
-if effort not in allowed_efforts:
-    raise SystemExit(f"model profile error: unsupported reasoning_effort '{effort}'")
-for key in required_keys[1:]:
-    if not model_pattern.fullmatch(profile[key]):
-        raise SystemExit(f"model profile error: invalid model id for '{key}'")
-
-print("\t".join([profile_name] + [profile[key] for key in required_keys]))
-PY_MODEL_PROFILE
+compute_conflict() {
+  local seat_id="$1"
+  local effective_model="$2"
+  local conflict_stderr
+  new_temp || return 1
+  conflict_stderr="$NEW_TEMP"
+  if ! CONFLICT="$(
+    AGENT_SEATS_FILE="$SEATS_FILE" \
+      AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+      AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+      "$SEATS_SCRIPT" conflict "$seat_id" "$effective_model" 2>"$conflict_stderr"
   )"; then
-    MODEL_PROFILE_ERROR="$parsed"
+    emit_file_stderr "$conflict_stderr"
+    echo "ERROR: could not evaluate seat conflict for $seat_id." >&2
     return 1
   fi
-
-  IFS=$'\t' read -r -a fields <<< "$parsed"
-  if [[ "${#fields[@]}" -ne 8 ]]; then
-    MODEL_PROFILE_ERROR="model profile error: parser returned ${#fields[@]} fields; expected 8"
-    return 1
-  fi
-
-  effective_effort="${fields[1]}"
-  if [[ -n "${CODEX_REASONING_EFFORT:-}" ]]; then
-    case "$CODEX_REASONING_EFFORT" in
-      none|low|medium|high|xhigh|max) effective_effort="$CODEX_REASONING_EFFORT" ;;
-      *)
-        MODEL_PROFILE_ERROR="model profile error: unsupported CODEX_REASONING_EFFORT '$CODEX_REASONING_EFFORT'"
-        return 1
-        ;;
-    esac
-  fi
-
-  MODEL_PROFILE="${fields[0]}"
-  REASONING_EFFORT="$effective_effort"
-  PLANNING_MODEL="${fields[2]}"
-  CODING_MODEL="${fields[3]}"
-  REVIEWING_MODEL="${fields[4]}"
-  PLANNING_FALLBACK_MODEL="${fields[5]}"
-  CODING_FALLBACK_MODEL="${fields[6]}"
-  REVIEWING_FALLBACK_MODEL="${fields[7]}"
-}
-
-model_for_mode() {
-  case "$1" in
-    planning) printf '%s' "$PLANNING_MODEL" ;;
-    coding) printf '%s' "$CODING_MODEL" ;;
-    reviewing) printf '%s' "$REVIEWING_MODEL" ;;
-    *) return 1 ;;
+  emit_file_stderr "$conflict_stderr"
+  case "$CONFLICT" in
+    0|1) ;;
+    *) echo "ERROR: conflict interface returned '$CONFLICT'; expected 0 or 1." >&2; return 1 ;;
   esac
 }
 
-fallback_model_for_mode() {
-  case "$1" in
-    planning) printf '%s' "$PLANNING_FALLBACK_MODEL" ;;
-    coding) printf '%s' "$CODING_FALLBACK_MODEL" ;;
-    reviewing) printf '%s' "$REVIEWING_FALLBACK_MODEL" ;;
-    *) return 1 ;;
-  esac
+print_launch_summary() {
+  local route="$1"
+  local flow="$2"
+  local seat_id="$3"
+  local model="$4"
+  local model_source="$5"
+  local effort="$6"
+  local sandbox="$7"
+  local approval="$8"
+  {
+    echo "Codex launch: seat=$(seat_tag "$seat_id") route=$route flow=$flow model=$model reasoning=$effort sandbox=$sandbox approval=$approval"
+    echo "Model source: $model_source"
+    if [[ "$CONFLICT" == "1" ]]; then
+      echo "policy_exception=gate_coding authorization=user_session"
+    fi
+    if [[ "$model_source" == "default" ]]; then
+      echo "If Codex reports model capacity, rerun: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $(seat_tag "$seat_id")"
+    fi
+  } >&2
 }
 
-DOCTOR_FAIL=0
-DOCTOR_WARN=0
-
-doctor_ok() {
-  printf '  ok    %s\n' "$1"
-}
-
-doctor_bad() {
-  printf '  FAIL  %s\n' "$1"
-  DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
-}
-
-doctor_warn() {
-  printf '  warn  %s\n' "$1"
-  DOCTOR_WARN=$((DOCTOR_WARN + 1))
-}
-
-doctor_file() {
-  if [[ -f "$PROJECT_ROOT/$1" ]]; then
-    doctor_ok "file exists: $1"
-  else
-    doctor_bad "missing file: $1"
-  fi
-}
-
-doctor_exec() {
-  if [[ -x "$PROJECT_ROOT/$1" ]]; then
-    doctor_ok "executable: $1"
-  else
-    doctor_bad "not executable: $1"
-  fi
-}
-
-doctor_bash() {
-  if bash -n "$PROJECT_ROOT/$1"; then
-    doctor_ok "bash syntax: $1"
-  else
-    doctor_bad "bash syntax failed: $1"
-  fi
-}
-
-estimate_tokens_for_file() {
-  local path="$1"
-  local words="0"
-  local chars="0"
-  if [[ ! -f "$path" ]]; then
-    printf '0'
+resolve_codex_bin() {
+  local candidate
+  if command -v codex >/dev/null 2>&1; then
+    command -v codex
     return 0
   fi
-  read -r words chars < <(wc -w -c < "$path")
-  awk -v words="$words" -v chars="$chars" 'BEGIN {
-    by_chars = chars / 4
-    by_words = words * 1.3
-    printf "%d", (by_chars > by_words ? by_chars : by_words)
-  }'
-}
-
-sum_estimated_tokens() {
-  local total=0
-  local token_count=0
-  local relpath
-  for relpath in "$@"; do
-    token_count="$(estimate_tokens_for_file "$PROJECT_ROOT/$relpath")"
-    total=$((total + token_count))
+  for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex \
+    "$HOME/.local/bin/codex" "$HOME/.npm-global/bin/codex" "$HOME/.bun/bin/codex"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
   done
-  printf '%s' "$total"
+  echo "ERROR: Codex CLI not found. Install it or add it to PATH." >&2
+  return 127
 }
 
-doctor_context_budget() {
-  local core_tokens
-  local full_tokens
-  core_tokens="$(sum_estimated_tokens \
-    AGENTS.md \
-    docs/agent-configs/project-agent-context.md \
-    docs/agent-configs/project-brief.md)"
-  full_tokens="$(sum_estimated_tokens \
-    AGENTS.md \
-    docs/agent-configs/project-agent-context.md \
-    docs/agent-configs/project-brief.md \
-    docs/agent-configs/agent-mode-contracts.md \
-    docs/agent-configs/agent-handoff-schema.md \
-    docs/agent-configs/karpathy-llm-coding-agent-config.md \
-    docs/agent-configs/llm-council-agent-workflow.md \
-    docs/agent-configs/task-journal.md)"
-
-  if [[ "$core_tokens" -gt 4000 ]]; then
-    doctor_warn "core startup context estimate: ${core_tokens} tokens exceeds gate 4000; the 4000 gate is enforced by the harness test suite"
-  elif [[ "$core_tokens" -gt 3800 ]]; then
-    doctor_warn "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800); measure after any edit to a counted file"
-  else
-    doctor_ok "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800)"
+mode_prompt() {
+  local route="$1"
+  local flow="$2"
+  local seat_id="$3"
+  local model="$4"
+  local model_source="$5"
+  local effort="$6"
+  local seed
+  seed="SEAT LOCK: $(seat_tag "$seat_id") · phase $LOCKED_PHASE · launch_model=$model model_source=$model_source"
+  if [[ "$CONFLICT" == "1" ]]; then
+    seed="$seed policy_exception=gate_coding authorization=user_session"
   fi
-
-  if [[ "$full_tokens" -gt 6200 ]]; then
-    doctor_warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite"
-  elif [[ "$full_tokens" -gt 5900 ]]; then
-    doctor_warn "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900); measure after any edit to a counted file"
-  else
-    doctor_ok "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900)"
-  fi
+  case "$route:$flow" in
+    planning:standard)
+      printf '%s' "$seed MODE LOCK: PLANNING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action." ;;
+    planning:full_flow)
+      printf '%s' "$seed MODE LOCK: PLANNING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local execution only; respect scripts/agent-hook.sh no-scan-paths and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes." ;;
+    coding:standard)
+      printf '%s' "$seed MODE LOCK: CODING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action." ;;
+    coding:full_flow)
+      printf '%s' "$seed MODE LOCK: CODING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local implementation, tests, and verification only; respect pre-edit/no-scan guards and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes." ;;
+    reviewing:standard)
+      printf '%s' "$seed MODE LOCK: REVIEWING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope." ;;
+    reviewing:full_flow)
+      printf '%s' "$seed MODE LOCK: REVIEWING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval." ;;
+    *) echo "ERROR: invalid route/flow combination." >&2; return 1 ;;
+  esac
 }
 
 run_doctor() {
+  local doctor_mode doctor_flow doctor_seat doctor_route resolve_rc no_scan_paths
+  local path
   DOCTOR_FAIL=0
   DOCTOR_WARN=0
-  local no_scan_paths=""
-  local doctor_mode=""
-  local doctor_model=""
-  local doctor_model_source=""
-  local doctor_resolved_model=""
-  local old_ifs=""
   echo "Codex helper doctor..."
+  profile_warning
+  doctor_mode="$(read_mode)"
+  doctor_flow="$(read_flow)"
+  doctor_seat="$(read_locked_seat)"
+  doctor_route="$(route_for_seat "$doctor_seat" || true)"
 
-  if load_model_profile; then
-    doctor_mode="$(read_mode)"
-    doctor_resolved_model="$(resolve_model_for_mode "$doctor_mode")"
-    old_ifs="$IFS"
-    IFS=$'\t'
-    read -r doctor_model doctor_model_source <<< "$doctor_resolved_model"
-    IFS="$old_ifs"
-    doctor_ok "model profile $MODEL_PROFILE: route=$doctor_mode model=$doctor_model source=$doctor_model_source effort=$REASONING_EFFORT"
+  if [[ ! -e "$SEATS_FILE" ]]; then
+    doctor_warn "seats.json missing; launch commands may initialize it"
+  elif AGENT_SEATS_FILE="$SEATS_FILE" \
+    AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+    AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+    "$SEATS_SCRIPT" validate >/dev/null; then
+    doctor_ok "seats.json is valid"
+    if AGENT_SEATS_FILE="$SEATS_FILE" \
+      AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+      AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+      "$SEATS_SCRIPT" show; then
+      if resolve_effective "$doctor_seat" "$doctor_route"; then
+        doctor_ok "locked $(seat_tag "$doctor_seat"): model=$EFFECTIVE_MODEL effort=$EFFECTIVE_EFFORT source=$MODEL_SOURCE"
+      else
+        resolve_rc=$?
+        if [[ "$resolve_rc" -eq 2 ]]; then
+          doctor_ok "locked $(seat_tag "$doctor_seat"): host=$LOCKED_HOST (Codex launch unavailable)"
+        else
+          doctor_bad "locked $(seat_tag "$doctor_seat") could not resolve effective model"
+        fi
+      fi
+    else
+      doctor_bad "seat roster could not be displayed"
+    fi
+    if [[ -f "$LEGACY_PROFILES" ]]; then
+      doctor_warn "legacy model-profiles.json present; seats.json is authoritative"
+    fi
   else
-    doctor_bad "$MODEL_PROFILE_ERROR"
+    doctor_bad "seats.json is invalid; run scripts/agent-seats.sh validate or reset"
   fi
 
   for path in \
@@ -2211,8 +2397,9 @@ run_doctor() {
   else
     doctor_ok "project brief is filled or not required"
   fi
-  doctor_context_budget
 
+  doctor_context_budget
+  doctor_exec scripts/agent-seats.sh
   doctor_exec scripts/install-rtk.sh
   doctor_exec scripts/rtk
   doctor_exec scripts/agent-hook.sh
@@ -2220,7 +2407,7 @@ run_doctor() {
   doctor_exec scripts/agent-tech-stack-lib.sh
   doctor_exec scripts/detect-agent-tech-stack.sh
   doctor_exec scripts/verify-ai-deps.sh
-
+  doctor_bash scripts/agent-seats.sh
   doctor_bash scripts/install-rtk.sh
   doctor_bash scripts/rtk
   doctor_bash .codex/codex-mode.sh
@@ -2230,50 +2417,41 @@ run_doctor() {
   doctor_bash scripts/detect-agent-tech-stack.sh
   doctor_bash scripts/verify-ai-deps.sh
 
-  if command -v python3 >/dev/null 2>&1; then
-    if python3 -m json.tool "$PROJECT_ROOT/.claude/settings.json" >/dev/null 2>&1; then
-      doctor_ok "Claude settings JSON is valid"
-    else
-      doctor_bad "Claude settings JSON is invalid"
-    fi
+  if command -v python3 >/dev/null 2>&1 && python3 -m json.tool "$PROJECT_ROOT/.claude/settings.json" >/dev/null 2>&1; then
+    doctor_ok "Claude settings JSON is valid"
+  else
+    doctor_bad "Claude settings JSON is invalid"
   fi
-
-	  if grep -Fq './scripts/agent-hook.sh claude-pretool' "$PROJECT_ROOT/.claude/settings.json"; then
-	    doctor_ok "Claude PreToolUse uses shared agent hook"
-	  else
-	    doctor_bad "Claude PreToolUse does not use shared agent hook"
-	  fi
-
-	  if grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
-	    doctor_ok "Claude PreToolUse guards edit/write tools"
-	  else
-	    doctor_bad "Claude PreToolUse does not guard edit/write tools"
-	  fi
-
-	  if "$PROJECT_ROOT/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
+  if grep -Fq './scripts/agent-hook.sh claude-pretool' "$PROJECT_ROOT/.claude/settings.json"; then
+    doctor_ok "Claude PreToolUse uses shared agent hook"
+  else
+    doctor_bad "Claude PreToolUse does not use shared agent hook"
+  fi
+  if grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
+    doctor_ok "Claude PreToolUse guards edit/write tools"
+  else
+    doctor_bad "Claude PreToolUse does not guard edit/write tools"
+  fi
+  if [[ -x "$PROJECT_ROOT/scripts/rtk" ]] && "$PROJECT_ROOT/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
     doctor_ok "rtk wrapper resolves pinned version 0.37.2"
   else
     doctor_warn "rtk pinned binary is not installed; run: bash scripts/install-rtk.sh before using rtk-specific hooks"
   fi
-
   if [[ -x "$DETECTOR" ]] && "$DETECTOR" --summary >/dev/null 2>&1; then
     doctor_ok "runtime detector runs"
   else
     doctor_bad "runtime detector failed"
   fi
-
   if [[ -x "$AGENT_HOOK" ]] && "$AGENT_HOOK" guard-local-state >/dev/null 2>&1; then
     doctor_ok "local-only agent state is not tracked"
   else
     doctor_bad "local-only agent state guard failed"
   fi
-
   if [[ -x "$AGENT_GUARD" ]] && "$AGENT_GUARD" check >/dev/null 2>&1; then
     doctor_ok "agent guard check passes"
   else
     doctor_bad "agent guard check failed"
   fi
-
   no_scan_paths="$("$AGENT_HOOK" no-scan-paths 2>/dev/null || true)"
   if [[ -x "$AGENT_HOOK" ]] &&
     printf '%s\n' "$no_scan_paths" | grep -Fq '.claude/worktrees/' &&
@@ -2285,8 +2463,7 @@ run_doctor() {
   else
     doctor_bad "no-scan guard missing local/vendor/sensitive paths"
   fi
-
-  if [[ -x "$AGENT_HOOK" ]] && "$AGENT_HOOK" codex-preflight --check-only "$(read_mode)" "$(read_flow)" >/dev/null 2>&1; then
+  if [[ -x "$AGENT_HOOK" ]] && "$AGENT_HOOK" codex-preflight --check-only "$doctor_route" "$doctor_flow" >/dev/null 2>&1; then
     doctor_ok "shared agent hook codex preflight passes"
   else
     doctor_bad "shared agent hook codex preflight failed"
@@ -2294,9 +2471,8 @@ run_doctor() {
 
   if [[ "$DOCTOR_FAIL" -gt 0 ]]; then
     echo "Doctor failed: $DOCTOR_FAIL issue(s)." >&2
-    exit 1
+    return 1
   fi
-
   if [[ "$DOCTOR_WARN" -gt 0 ]]; then
     echo "Doctor passed with $DOCTOR_WARN warning(s)."
   else
@@ -2304,144 +2480,138 @@ run_doctor() {
   fi
 }
 
-resolve_model_for_mode() {
-  local mode="$1"
-  local default_model=""
-  local fallback_model=""
-  local mode_override=""
-  local mode_override_source=""
-
-  default_model="$(model_for_mode "$mode")"
-  fallback_model="$(fallback_model_for_mode "$mode")"
-
-  case "$mode" in
-    planning)
-      mode_override="${CODEX_PLANNING_MODEL_OVERRIDE:-}"
-      mode_override_source="CODEX_PLANNING_MODEL_OVERRIDE"
-      ;;
-    coding)
-      mode_override="${CODEX_CODING_MODEL_OVERRIDE:-}"
-      mode_override_source="CODEX_CODING_MODEL_OVERRIDE"
-      ;;
-    reviewing)
-      mode_override="${CODEX_REVIEWING_MODEL_OVERRIDE:-}"
-      mode_override_source="CODEX_REVIEWING_MODEL_OVERRIDE"
-      ;;
-  esac
-
-  if [[ -n "${CODEX_MODEL_OVERRIDE:-}" ]]; then
-    printf '%s\t%s\n' "$CODEX_MODEL_OVERRIDE" "CODEX_MODEL_OVERRIDE"
-  elif [[ -n "$mode_override" ]]; then
-    printf '%s\t%s\n' "$mode_override" "$mode_override_source"
-  elif fallback_requested; then
-    printf '%s\t%s\n' "$fallback_model" "CODEX_USE_FALLBACK"
+doctor_ok() {
+  printf '  ok    %s\n' "$1"
+}
+doctor_bad() {
+  printf '  FAIL  %s\n' "$1"
+  DOCTOR_FAIL=$((DOCTOR_FAIL + 1))
+}
+doctor_warn() {
+  printf '  WARN  %s\n' "$1"
+  DOCTOR_WARN=$((DOCTOR_WARN + 1))
+}
+doctor_file() {
+  if [[ -f "$PROJECT_ROOT/$1" ]]; then
+    doctor_ok "file exists: $1"
   else
-    printf '%s\t%s\n' "$default_model" "default"
+    doctor_bad "missing file: $1"
   fi
 }
-
-sol_coding_audit_record() {
-  printf 'policy_exception=%s authorization=%s' "sol_coding" "user_session"
-}
-
-print_launch_summary() {
-  local mode="$1"
-  local flow="$2"
-  local model="$3"
-  local model_source="$4"
-  local sandbox="$5"
-  local approval="$6"
-  local fallback_model=""
-  local flow_arg=""
-
-  fallback_model="$(fallback_model_for_mode "$mode")"
-  if [[ "$flow" == "standard" ]]; then
-    flow_arg=" --supervised"
+doctor_exec() {
+  if [[ -x "$PROJECT_ROOT/$1" ]]; then
+    doctor_ok "executable: $1"
+  else
+    doctor_bad "not executable: $1"
   fi
-
-  {
-    echo "Codex launch: mode=$mode flow=$flow model=$model reasoning=$REASONING_EFFORT sandbox=$sandbox approval=$approval"
-    echo "Model source: $model_source"
-    if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
-      sol_coding_audit_record
-      echo
-    fi
-    if [[ "$model_source" == "default" ]]; then
-      echo "If Codex reports model capacity, rerun: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $mode$flow_arg"
-      echo "Fallback model for $mode: $fallback_model. Explicit override: CODEX_MODEL_OVERRIDE=<model> .codex/codex-mode.sh $mode$flow_arg"
-    fi
-  } >&2
 }
-
-resolve_codex_bin() {
-  if command -v codex >/dev/null 2>&1; then
-    command -v codex
+doctor_bash() {
+  if bash -n "$PROJECT_ROOT/$1"; then
+    doctor_ok "bash syntax: $1"
+  else
+    doctor_bad "bash syntax failed: $1"
+  fi
+}
+estimate_tokens_for_file() {
+  local path="$1" words chars
+  if [[ ! -f "$path" ]]; then
+    printf '0'
     return 0
   fi
+  read -r words chars < <(wc -w -c < "$path")
+  awk -v words="$words" -v chars="$chars" 'BEGIN {
+    by_chars = chars / 4
+    by_words = words * 1.3
+    printf "%d", (by_chars > by_words ? by_chars : by_words)
+  }'
+}
+sum_estimated_tokens() {
+  local total=0 token_count relpath
+  for relpath in "$@"; do
+    token_count="$(estimate_tokens_for_file "$PROJECT_ROOT/$relpath")"
+    total=$((total + token_count))
+  done
+  printf '%s' "$total"
+}
+doctor_context_budget() {
+  local core_tokens full_tokens
+  core_tokens="$(sum_estimated_tokens AGENTS.md docs/agent-configs/project-agent-context.md docs/agent-configs/project-brief.md)"
+  full_tokens="$(sum_estimated_tokens AGENTS.md docs/agent-configs/project-agent-context.md docs/agent-configs/project-brief.md docs/agent-configs/agent-mode-contracts.md docs/agent-configs/agent-handoff-schema.md docs/agent-configs/karpathy-llm-coding-agent-config.md docs/agent-configs/llm-council-agent-workflow.md docs/agent-configs/task-journal.md)"
+  if [[ "$core_tokens" -gt 4000 ]]; then
+    doctor_warn "core startup context estimate: $core_tokens tokens exceeds gate 4000"
+  elif [[ "$core_tokens" -gt 3800 ]]; then
+    doctor_warn "core startup context estimate: $core_tokens tokens (gate 4000, amber above 3800)"
+  else
+    doctor_ok "core startup context estimate: $core_tokens tokens (gate 4000, amber above 3800)"
+  fi
+  if [[ "$full_tokens" -gt 6200 ]]; then
+    doctor_warn "on-demand full workflow context estimate: $full_tokens tokens exceeds gate 6200"
+  elif [[ "$full_tokens" -gt 5900 ]]; then
+    doctor_warn "on-demand full workflow context estimate: $full_tokens tokens (gate 6200, amber above 5900)"
+  else
+    doctor_ok "on-demand full workflow context estimate: $full_tokens tokens (gate 6200, amber above 5900)"
+  fi
+}
 
-  local candidate
-  for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex "$HOME/.local/bin/codex" "$HOME/.npm-global/bin/codex" "$HOME/.bun/bin/codex"; do
-    if [[ -x "$candidate" ]]; then
-      printf '%s\n' "$candidate"
+run_status() {
+  local current_mode current_flow current_seat
+  profile_warning
+  current_mode="$(read_mode)"
+  current_flow="$(read_flow)"
+  current_seat="$(read_locked_seat)"
+  echo "Current mode: $current_mode"
+  echo "Current flow: $current_flow"
+  echo "Locked seat: $(seat_tag "$current_seat")"
+  if [[ ! -e "$SEATS_FILE" ]]; then
+    echo "WARN: seats.json missing; status is read-only and launch commands will initialize it." >&2
+    return 0
+  fi
+  if ! AGENT_SEATS_FILE="$SEATS_FILE" \
+    AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+    AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
+    "$SEATS_SCRIPT" show; then
+    echo "ERROR: seats.json is invalid; status is read-only." >&2
+    return 1
+  fi
+  if [[ -f "$LEGACY_PROFILES" ]]; then
+    echo "WARN: legacy model-profiles.json present; seats.json is authoritative." >&2
+  fi
+  local current_route resolve_rc
+  current_route="$(route_for_seat "$current_seat" || true)"
+  if resolve_effective "$current_seat" "$current_route"; then
+    echo "Effective model: $EFFECTIVE_MODEL"
+    echo "Effective effort: $EFFECTIVE_EFFORT"
+    echo "Model source: $MODEL_SOURCE"
+  else
+    resolve_rc=$?
+    if [[ "$resolve_rc" -eq 2 ]]; then
+      echo "Locked occupant: $LOCKED_HOST (Codex launch unavailable)"
       return 0
     fi
-  done
-
-  echo "ERROR: Codex CLI not found. Install it or add it to PATH." >&2
-  exit 127
-}
-
-mode_prompt() {
-  local mode="$1"
-  local flow="$2"
-  local model="$3"
-  local model_source="$4"
-  local provenance="actual_model=$model model_source=$model_source."
-  local sol_coding_audit=""
-  if [[ "$mode" == "coding" && "$model" == "gpt-5.6-sol" ]]; then
-    sol_coding_audit=" $(sol_coding_audit_record). Record the existing task's escalation_reason in implementation.md."
+    return "$resolve_rc"
   fi
-  case "$mode:$flow" in
-    planning:standard)
-      printf '%s' "MODE LOCK: PLANNING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action."
-      ;;
-    planning:full_flow)
-      printf '%s' "MODE LOCK: PLANNING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local execution only; respect scripts/agent-hook.sh no-scan-paths and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes."
-      ;;
-    coding:standard)
-      printf '%s' "MODE LOCK: CODING-SUPERVISED. $provenance$sol_coding_audit Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action."
-      ;;
-    coding:full_flow)
-      printf '%s' "MODE LOCK: CODING-FULL-FLOW. $provenance$sol_coding_audit Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local implementation, tests, and verification only; respect pre-edit/no-scan guards and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes."
-      ;;
-    reviewing:standard)
-      printf '%s' "MODE LOCK: REVIEWING-SUPERVISED. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope."
-      ;;
-    reviewing:full_flow)
-      printf '%s' "MODE LOCK: REVIEWING-FULL-FLOW. $provenance Use the selected packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity must name its trigger condition and frequency, or mark itself as an estimate. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval."
-      ;;
-  esac
 }
 
-run_codex_with_mode() {
-  local mode="$1"
-  local flow="$2"
-  local persist="${3:-false}"
-  shift 3 || true
-
-  local model model_source sandbox approval seed codex_bin
-  case "$mode" in
-    planning|coding|reviewing) ;;
-    *) echo "ERROR: invalid mode: $mode" >&2; exit 2 ;;
-  esac
-
-  local resolved_model old_ifs
-  resolved_model="$(resolve_model_for_mode "$mode")"
-  old_ifs="$IFS"
-  IFS=$'\t'
-  read -r model model_source <<< "$resolved_model"
-  IFS="$old_ifs"
-
+run_launch() {
+  local requested_seat="$1"
+  local route="$2"
+  local flow="$3"
+  local persist="$4"
+  shift 4 || true
+  local sandbox approval seed codex_bin prompt resolve_rc
+  reject_nested_launch || return 1
+  profile_warning
+  require_seats_for_launch || return 1
+  if resolve_effective "$requested_seat" "$route"; then
+    :
+  else
+    resolve_rc=$?
+    if [[ "$resolve_rc" -eq 2 ]]; then
+      echo "ERROR: seat $LOCKED_TAG is occupied by $LOCKED_HOST; open it in that host." >&2
+    fi
+    return "$resolve_rc"
+  fi
+  compute_conflict "$requested_seat" "$EFFECTIVE_MODEL" || return 1
   if [[ "$flow" == "full_flow" ]]; then
     sandbox="workspace-write"
     approval="$FULL_FLOW_APPROVAL"
@@ -2449,23 +2619,29 @@ run_codex_with_mode() {
     sandbox="read-only"
     approval="$STANDARD_APPROVAL"
   fi
-
-  seed="$(mode_prompt "$mode" "$flow" "$model" "$model_source")"
-  codex_bin="$(resolve_codex_bin)"
-  [[ "$persist" == "true" ]] && write_mode "$mode" "$flow"
-  if [[ -x "$AGENT_HOOK" ]]; then
-    "$AGENT_HOOK" codex-preflight "$mode" "$flow"
+  seed="$(mode_prompt "$route" "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE" "$EFFECTIVE_EFFORT")"
+  codex_bin="$(resolve_codex_bin)" || return $?
+  if [[ "$persist" == "true" ]]; then
+    write_mode "$route" "$flow" "$requested_seat"
   fi
-  print_launch_summary "$mode" "$flow" "$model" "$model_source" "$sandbox" "$approval"
-
-  local prompt=""
-  if [[ $# -gt 0 ]]; then
+  if [[ -x "$AGENT_HOOK" ]] &&
+    ! "$AGENT_HOOK" codex-preflight "$route" "$flow"; then
+    echo "ERROR: agent hook preflight failed for route $route." >&2
+    return 1
+  fi
+  print_launch_summary "$route" "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE" "$EFFECTIVE_EFFORT" "$sandbox" "$approval"
+  prompt=""
+  if [[ "$#" -gt 0 ]]; then
     prompt="$*"
     export CODEX_HARNESS_SESSION=1
-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
+    cleanup
+    trap - EXIT
+    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
   else
     export CODEX_HARNESS_SESSION=1
-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$model" -c "model_reasoning_effort=\"$REASONING_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
+    cleanup
+    trap - EXIT
+    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
   fi
 }
 
@@ -2476,68 +2652,59 @@ reject_nested_launch() {
   fi
 }
 
-require_model_profile() {
-  if load_model_profile; then
+run_flow_flag() {
+  FLOW="$DEFAULT_FLOW"
+  if [[ "$1" == "-full_flow" || "$1" == "--full-flow" || "$1" == "--full_flow" ]]; then
+    FLOW="full_flow"
     return 0
   fi
-  echo "ERROR: $MODEL_PROFILE_ERROR" >&2
+  if [[ "$1" == "-standard" || "$1" == "--standard" || "$1" == "--supervised" ||
+    "$1" == "--read-only" || "$1" == "--propose" || "$1" == "--approval-gate" ]]; then
+    FLOW="standard"
+    return 0
+  fi
   return 1
 }
 
-cmd="${1:-status}"
+cmd="status"
+if [[ "$#" -gt 0 ]]; then
+  cmd="$1"
+  shift
+fi
 case "$cmd" in
   -h|--help|help)
     usage
     ;;
-  planning|coding|reviewing)
-    reject_nested_launch || exit 1
-    require_model_profile || exit 1
-    shift || true
+  planning|coding|reviewing|@spec|spec|@gate|gate|@build|build|@verify|verify|@audit|audit)
+    requested_seat="$(seat_from_arg "$cmd")"
+    route="$(route_for_seat "$requested_seat")"
     flow="$DEFAULT_FLOW"
-    if [[ "${1:-}" == "-full_flow" || "${1:-}" == "--full-flow" || "${1:-}" == "--full_flow" ]]; then
-      flow="full_flow"
-      shift || true
-    elif [[ "${1:-}" == "-standard" || "${1:-}" == "--standard" || "${1:-}" == "--supervised" || "${1:-}" == "--read-only" || "${1:-}" == "--propose" || "${1:-}" == "--approval-gate" ]]; then
-      flow="standard"
-      shift || true
+    if [[ "$#" -gt 0 ]] && run_flow_flag "$1"; then
+      flow="$FLOW"
+      shift
     fi
-    run_codex_with_mode "$cmd" "$flow" true "$@"
+    run_launch "$requested_seat" "$route" "$flow" true "$@"
+    ;;
+  @owner|owner)
+    echo "ERROR: seat @owner is human-owned and is never launchable by this helper." >&2
+    exit 2
     ;;
   run)
-    reject_nested_launch || exit 1
-    require_model_profile || exit 1
-    shift || true
-    flow="$(read_flow)"
-    if [[ "${1:-}" == "-full_flow" || "${1:-}" == "--full-flow" || "${1:-}" == "--full_flow" ]]; then
-      flow="full_flow"
-      shift || true
-    elif [[ "${1:-}" == "-standard" || "${1:-}" == "--standard" || "${1:-}" == "--supervised" || "${1:-}" == "--read-only" || "${1:-}" == "--propose" || "${1:-}" == "--approval-gate" ]]; then
-      flow="standard"
-      shift || true
+    stored_flow="$(read_flow)"
+    stored_seat="$(read_locked_seat)"
+    flow="$stored_flow"
+    if [[ "$#" -gt 0 ]] && run_flow_flag "$1"; then
+      flow="$FLOW"
+      shift
     fi
-    run_codex_with_mode "$(read_mode)" "$flow" false "$@"
+    route="$(route_for_seat "$stored_seat")"
+    run_launch "$stored_seat" "$route" "$flow" false "$@"
+    ;;
+  status)
+    run_status
     ;;
   doctor)
     run_doctor
-    ;;
-  status)
-    require_model_profile || exit 1
-    current_mode="$(read_mode)"
-    current_flow="$(read_flow)"
-    resolved_model="$(resolve_model_for_mode "$current_mode")"
-    old_ifs="$IFS"
-    IFS=$'\t'
-    read -r current_model current_model_source <<< "$resolved_model"
-    IFS="$old_ifs"
-    echo "Current mode: $current_mode"
-    echo "Current flow: $current_flow"
-    echo "Model profile: $MODEL_PROFILE"
-    echo "Reasoning effort: $REASONING_EFFORT"
-    echo "Default model: $(model_for_mode "$current_mode")"
-    echo "Effective model: $current_model ($current_model_source)"
-    echo "Fallback model: $(fallback_model_for_mode "$current_mode")"
-    echo "Capacity fallback: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $current_mode$([[ "$current_flow" == "standard" ]] && printf ' --supervised')"
-    echo "Explicit override: CODEX_MODEL_OVERRIDE=<model> .codex/codex-mode.sh $current_mode$([[ "$current_flow" == "standard" ]] && printf ' --supervised')"
     ;;
   *)
     echo "ERROR: unknown command: $cmd" >&2

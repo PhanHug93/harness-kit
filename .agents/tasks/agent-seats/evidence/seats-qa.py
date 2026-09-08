@@ -111,6 +111,29 @@ def no_traceback(err):
     return "Traceback" not in err
 
 
+def fsize_limited_run(nbytes, *args):
+    """Run the script with RLIMIT_FSIZE applied to python3 only, through a shim
+    earlier on PATH. The limit therefore reaches write_atomic instead of the
+    shell's heredoc spool file, on Bash 3.2 as on Bash 5."""
+    real = os.path.realpath(sys.executable)
+    d = tempfile.mkdtemp(prefix="seats-qa-fsize-")
+    shim = os.path.join(d, "python3")
+    with open(shim, "w", encoding="utf-8") as fh:
+        fh.write(
+            "#!" + real + "\n"
+            "import os, resource, signal, sys\n"
+            "signal.signal(signal.SIGXFSZ, signal.SIG_IGN)\n"
+            f"resource.setrlimit(resource.RLIMIT_FSIZE, ({nbytes}, {nbytes}))\n"
+            f"os.execv({real!r}, [{real!r}] + sys.argv[1:])\n"
+        )
+    os.chmod(shim, 0o755)
+    env = dict(os.environ, PATH=d + os.pathsep + os.environ.get("PATH", ""))
+    try:
+        return subprocess.run([BASH, SCRIPT, *args], cwd=TARGET, env=env, capture_output=True, text=True)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _read_master(master):
     try:
         return os.read(master, 65536)
@@ -398,6 +421,18 @@ with open(SEATS, "w", encoding="utf-8") as fh:
 outs = [run(*c) for c in (["show"], ["validate"], ["resolve", "gate"])]
 check("M2 top-level list: rc 1 without traceback", all(r[0] == 1 and no_traceback(r[2]) for r in outs))
 run("reset")
+# The entry an occupant points at is the one that gets dereferenced (gate attempt 3, F2).
+for label, value in (("string", "xhigh"), ("list", ["xhigh"]), ("boolean", True)):
+    run("reset")
+    mutate(lambda d, v=value: d["catalog"]["models"].__setitem__("gpt-6-astra", v))
+    before = sha(SEATS)
+    cmds = (["show"], ["validate"], ["model-info", "gpt-6-astra"], ["conflict", "build", "gpt-6-astra"],
+            ["resolve", "gate"], ["render"], ["set", "build", "--effort", "high"])
+    outs = [run(*c) for c in cmds]
+    check(f"M3 catalog entry for a seat's model is a {label}: rc 1, diagnostic not traceback, file kept",
+          all(r[0] == 1 and no_traceback(r[2]) and "ERROR" in (r[1] + r[2]) for r in outs) and sha(SEATS) == before,
+          "; ".join(f"{c[0]}:{r[0]}" for c, r in zip(cmds, outs)))
+run("reset")
 
 # ---------- R: renderer, atomic writes, filesystem failures (B6/R4/F1) ----------
 write_agents(base)
@@ -426,17 +461,21 @@ before = sha(SEATS)
 rc, o, e = run("set", "@build", "--effort", "xhigh")
 check("R6 set with broken markers -> seats written, exit 2, explicit message", rc == 2 and sha(SEATS) != before and "NOT rendered" in e)
 write_agents(base); run("render")
-# atomic write: a failing write must leave the old bytes (ulimit -f as an ENOSPC stand-in).
+# atomic write: a failing write must leave the old bytes. The size limit is applied
+# to the interpreter that runs the seats program, never to the shell around it:
+# Bash 3.2 spools a large heredoc through a temp file, so `ulimit -f` there fails
+# before the program is even loaded (gate attempt 3, F3). SIGXFSZ is ignored so the
+# write returns EFBIG and the program's own error handling is what gets tested.
 # AGENTS.md is padded above the 4 KiB limit so that seats.json (~2 KiB) still writes.
 write_agents(base + b"<!-- filler -->\n" + (b"filler line for the size limit test\n" * 300)); run("render")
 agents_before = open(AGENTS, "rb").read(); seats_before = sha(SEATS)
-p = subprocess.run([BASH, "-c", f'ulimit -f 4; "{BASH}" "{SCRIPT}" set build --effort high'], cwd=TARGET, capture_output=True, text=True)
+p = fsize_limited_run(4096, "set", "build", "--effort", "high")
 agents_after = open(AGENTS, "rb").read()
-check("R7 failed AGENTS write (file size limit) -> rc 2, old AGENTS bytes intact, seats written, no traceback", p.returncode == 2 and agents_after == agents_before and sha(SEATS) != seats_before and no_traceback(p.stderr) and "NOT rendered" in p.stderr, (p.stderr.strip().splitlines() or [""])[-1])
+check("R7 failed AGENTS write (RLIMIT_FSIZE in the interpreter) -> rc 2, old AGENTS bytes intact, seats written, no traceback", p.returncode == 2 and agents_after == agents_before and sha(SEATS) != seats_before and no_traceback(p.stderr) and "NOT rendered" in p.stderr, (p.stderr.strip().splitlines() or [""])[-1])
 run("reset")
 seats_before = sha(SEATS); agents_before = open(AGENTS, "rb").read()
-p = subprocess.run([BASH, "-c", f'ulimit -f 1; "{BASH}" "{SCRIPT}" set build --effort high'], cwd=TARGET, capture_output=True, text=True)
-check("R8 failed seats write (file size limit) -> rc 1, nothing written, no traceback", p.returncode == 1 and sha(SEATS) == seats_before and open(AGENTS, "rb").read() == agents_before and no_traceback(p.stderr) and "nothing written" in p.stderr, (p.stderr.strip().splitlines() or [""])[-1])
+p = fsize_limited_run(1024, "set", "build", "--effort", "high")
+check("R8 failed seats write (RLIMIT_FSIZE in the interpreter) -> rc 1, nothing written, no traceback", p.returncode == 1 and sha(SEATS) == seats_before and open(AGENTS, "rb").read() == agents_before and no_traceback(p.stderr) and "nothing written" in p.stderr, (p.stderr.strip().splitlines() or [""])[-1])
 # symlink write-through
 real = os.path.join(TARGET, "AGENTS.real.md")
 shutil.copy(AGENTS, real); os.remove(AGENTS); os.symlink("AGENTS.real.md", AGENTS)
@@ -477,6 +516,29 @@ holder.wait()
 check("K2b lock held beyond the wait window: set refuses after ~10s, nothing written", rc2 == 1 and "in progress" in e2 and 9 < t_set < 14 and sha(SEATS) == before, f"set={t_set:.1f}s rc2={rc2}")
 rc, o, e = run("init")
 check("K3 init on a present file needs no lock (fast path)", rc == 0 and "nothing written" in o)
+run("reset")
+# A file that appears while init waits for the lock is never overwritten, and the
+# recheck applies the same rules as the fast path (gate attempt 3, F1).
+good = read_seats()
+appearing = [
+    ("valid", json.dumps(good, indent=2) + "\n", 0, "appeared while waiting"),
+    ("invalid schema", json.dumps({**good, "seats": {**good["seats"], "gate": {**good["seats"]["gate"], "occupant": {"host": "codex", "model": "nope", "effort": "ultra"}}}}, indent=2) + "\n", 1, "does not overwrite"),
+    ("malformed JSON", "{ malformed\n", 1, "does not overwrite"),
+]
+for label, payload, want_rc, want_msg in appearing:
+    os.remove(SEATS)
+    holder = subprocess.Popen([sys.executable, "-c", f"import fcntl,os,time; fd=os.open({CFG!r}, os.O_RDONLY); fcntl.flock(fd, fcntl.LOCK_EX); time.sleep(3)"])
+    time.sleep(0.3)
+    proc = subprocess.Popen([BASH, SCRIPT, "init"], cwd=TARGET, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    time.sleep(0.6)
+    with open(SEATS, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+    o2, e2 = proc.communicate(timeout=30)
+    holder.wait()
+    kept = open(SEATS, encoding="utf-8").read()
+    check(f"K4 {label} seats.json appears while init waits: rc {want_rc}, bytes kept, no traceback",
+          proc.returncode == want_rc and kept == payload and no_traceback(e2) and want_msg in (o2 + e2),
+          f"rc={proc.returncode} kept={kept == payload} msg={(e2 or o2).strip().splitlines()[-1:]}")
 run("reset")
 
 # ---------- W: wizard on a real PTY (B1/R3) ----------

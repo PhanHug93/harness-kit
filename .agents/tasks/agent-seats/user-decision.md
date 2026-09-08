@@ -21,3 +21,7 @@
 - Scope: packet artifacts and the tracked design spec; production source under
   `agent-bootstrap/` and `scripts/` remains `@build`'s after `@gate`
   records sufficient/yes.
+
+## User decision — 2026-09-08, combined release
+
+User approved continuous implementation and release of guard + stderr isolation + agent seats, explicitly requiring migration for older project versions without losing configuration. Implement stderr semantics in the final seats launcher, without requiring a separate legacy-parser commit. Preserve existing seats and customized legacy settings, USER overlays and brief; verify disposable upgrades before release. See release-plan.md.

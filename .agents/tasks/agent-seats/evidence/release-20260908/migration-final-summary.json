@@ -1,0 +1,197 @@
+{
+  "source": "/Users/admin/projects/agent-bootstrap",
+  "work": "/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-migration-emvfq82t",
+  "historical_refs": [
+    "v2026.08.10.1",
+    "v2026.09.07.1"
+  ],
+  "checks": [
+    {
+      "check": "v2026.08.10.1 public dry-run no writes",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 public dry-run no home installation",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 creates seats runtime",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 keeps live AGENTS before apply",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 legacy input bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 migrates gate model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 migrates build model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 migrates verify model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 apply brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 apply USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 apply keeps seats and legacy",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 obsolete legacy candidate is not promoted",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 no seats candidate",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 launcher uses migrated model",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 repeated migration keeps exact config bytes",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 repeat brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 repeat USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.08.10.1 retired candidate agrees with complete lock and zero pending",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 public dry-run no writes",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 public dry-run no home installation",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 creates seats runtime",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 keeps live AGENTS before apply",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 legacy input bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 migrates gate model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 migrates build model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 migrates verify model/effort/fallback",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 apply brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 apply USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 apply keeps seats and legacy",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 obsolete legacy candidate is not promoted",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 no seats candidate",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 launcher uses migrated model",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 repeated migration keeps exact config bytes",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 repeat brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 repeat USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "v2026.09.07.1 retired candidate agrees with complete lock and zero pending",
+      "ok": true
+    },
+    {
+      "check": "existing seats win and remain byte-identical",
+      "ok": true
+    },
+    {
+      "check": "damaged inactive legacy remains untouched",
+      "ok": true
+    },
+    {
+      "check": "existing seats brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "existing seats USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "malformed legacy never seeds defaults",
+      "ok": true
+    },
+    {
+      "check": "malformed legacy brief bytes preserved",
+      "ok": true
+    },
+    {
+      "check": "malformed legacy USER overlay preserved",
+      "ok": true
+    },
+    {
+      "check": "old uncustomized defaults adopt Astra ultra",
+      "ok": true
+    },
+    {
+      "check": "old default input is retained",
+      "ok": true
+    },
+    {
+      "check": "fresh target has seats and no legacy",
+      "ok": true
+    }
+  ],
+  "passed": 46,
+  "failed": 0,
+  "error": null
+}

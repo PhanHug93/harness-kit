@@ -1,5 +1,9 @@
 ## Pre-coding technical review
 
+Latest verdict: [Attempt 4](#attempt-4), 2026-09-08 — **sufficient / yes**;
+F1–F3 closed. Earlier attempts below are historical. Production verification
+has not started.
+
 ### Attempt 1
 
 seat: @gate
@@ -384,3 +388,236 @@ Routing: `analysis/claude`, sửa R1–R4 và harness, cập nhật chỉ dẫn 
 test bindings rồi quay lại `technical_review`. `base_commit` vẫn null;
 chưa giao `@build`, không commit. Guard/stderr prerequisite commits vẫn chưa
 hoàn tất ở HEAD được review.
+
+### Attempt 3
+
+reviewed_date: 2026-09-08 (Asia/Ho_Chi_Minh)
+seat: @gate
+reviewer_model: unverified (served model identifier is not exposed in this task)
+model_source: current_user_invoked_codex_task
+fresh_session_attestation: no (continuation of prior reviews)
+reviewed_branch: feature/simplify-task-relations
+reviewed_head: cf8f326b61788ed3ed8577eb12511613303dc44a
+reviewed_checkout: /Users/admin/projects/agent-bootstrap
+reviewed_target: Specification revision 2, reference v3, harness v2, generator reference hunks
+spec_sufficiency: partially_sufficient
+sufficient_for_coding_model: no
+blocker_count: 3
+blocking_gaps: F1 init under-lock recheck; F2 malformed catalog entries; F3 portable atomic-write failure tests
+
+**Chưa thể nghiệm thu một implementation seats hoàn chỉnh.** Sau khi tiếp tục
+task, branch đã chuyển từ worktree cũ về checkout chính, HEAD mới `cf8f326`.
+Commit chứa design và packet/reference; chưa có canonical
+`agent-bootstrap/agent-seats.sh`, schema seats hoặc launcher seats trong
+production. `writers-docs.sh` vẫn có `load_model_profile` và
+`require_model_profile` (:1918, :2479). Packet cũng vẫn yêu cầu pre-coding
+review. Vì vậy verdict dưới đây áp dụng cho artifact chuẩn bị implementation.
+
+#### Kết quả độc lập
+
+Đã đọc contract/reference/harness/patch và ghi
+[independent-findings.md](evidence/review-attempt3-20260908/independent-findings.md)
+**trước** khi mở council record và sáu báo cáo council. Không lấy số test từ
+council làm kết quả của lần review này.
+
+- Reference v3, harness nguyên bản v2, macOS `/bin/bash` 3.2.57, uid 501:
+  **101 pass / 2 fail / 0 skip**. Các ca PTY, concurrent set, lock timeout,
+  read-only AGENTS, symlink, marker/CRLF đều pass. Syntax và shellcheck rc 0.
+- Rerun các probe attempt 2: invalid host/model/fallback đều rc 1 và không ghi;
+  newline ở model/effort/non-Codex/orphan fallback bị chặn; legacy thiếu field
+  không tạo config; AGENTS read-only sau save trả đúng rc 2. Các lỗi cũ này đóng.
+- Trong bản sao kit tạm, áp đúng reference generator hunks và copy reference
+  làm canonical: fresh → Astra/ultra, không tạo legacy; upgrade default cũ →
+  Astra; apply-candidates giữ USER overlay; dry-run fresh rc 0, không ghi file.
+  `validate` rc 0. Đây là kiểm tra patch mẫu, không thay đổi source branch.
+- Verifier và launcher status trên fresh target của bản sao đó vẫn rc 1 do
+  còn yêu cầu legacy. Handoff correction 2 đã liệt kê các consumer phải đổi
+  cùng lúc; đây xác nhận phần integration còn thiếu, không phải finding mới
+  chống lại một patch tự nhận hoàn chỉnh.
+
+#### F1 — [P1] `init` có thể ghi đè file xuất hiện trong lúc chờ lock
+
+Reference :658–667 đọc lại file sau khi lấy lock, nhưng khác fast path ở
+:648–657: nếu JSON parse được thì trả 0 mà không validate; nếu có bất kỳ lỗi
+đọc/parse nào thì đi tiếp tới `save(defaults)`.
+
+Đã tái hiện: giữ flock thư mục config, gọi `init` khi seats chưa tồn tại,
+ghi `{ malformed` trong lúc process đang chờ, rồi nhả lock. `init` **rc 0 và
+ghi đè bytes vừa xuất hiện**. Với JSON parse được nhưng schema sai,
+`init` giữ bytes nhưng vẫn báo thành công. Không cần sửa reference để gây lỗi.
+
+Required: chỉ kết quả `missing` sau khi lấy lock mới được phép tạo file.
+File đã có phải đi qua cùng validation/error handling như fast path; lỗi
+đọc/parse phải từ chối và giữ bytes. Bổ sung test held-lock cho file xuất hiện
+hợp lệ, sai schema, malformed/unreadable; kiểm cả rc và nội dung được giữ.
+
+Evidence: [edge-summary.json](evidence/review-attempt3-20260908/edge-summary.json),
+`init-after-lock-malformed.*`, `init-after-lock-invalid.*`.
+
+#### F2 — [P2] Catalog entry sai kiểu vẫn gây traceback
+
+`validate:224–230` nhận ra model spec không phải object rồi `continue`, nhưng
+vòng kiểm occupant tiếp tục lấy cùng entry và gọi `spec.get` tại :274–281.
+Thay `catalog.models["gpt-6-astra"]` bằng string, list hoặc boolean đều tạo
+AttributeError traceback, rc 1. Test M1 chỉ thử outer catalog/models sai kiểu,
+chưa thử phần tử model mà occupant đang tham chiếu.
+
+Required: không dereference entry chưa qua kiểm kiểu; trả diagnostic rõ với
+rc 1 và giữ file. Bổ sung các shape này cho validate/show/resolve/model-info
+và write commands liên quan. Đây là gap của cam kết "mis-shaped documents
+never traceback"; không phải bằng chứng đã launch sai model.
+
+Evidence: `model-shape-str.stderr`, `model-shape-list.stderr`,
+`model-shape-bool.stderr` và `edge-summary.json`.
+
+#### F3 — [P2] Hai test atomic-write chưa kiểm đúng điểm gây lỗi trên Bash 3.2
+
+Harness :433, :438 đặt `ulimit -f` trước khi shell nạp chương trình Python từ
+heredoc. Bash 3.2 cần temporary file cho heredoc lớn; limit làm bước đó thất
+bại, sau đó báo `SEATS_PY: unbound variable`. R7/R8 không tới `write_atomic`.
+Đây là hai ca đỏ trong lần chạy 101/103; không quy chúng thành lỗi truncation
+của reference v3.
+
+Đã kiểm riêng bằng chính chương trình Python trích từ reference, đặt
+`RLIMIT_FSIZE` sau khi nạp code: limit 4096 bytes → rc 2, config mới, AGENTS cũ
+giữ nguyên; limit 1024 bytes → rc 1, cả hai file giữ nguyên; không traceback.
+Atomic-write behavior qua các probe này đạt yêu cầu.
+
+Required: đổi cách inject lỗi tới đúng write boundary (ví dụ giới hạn trong
+Python sau khi nạp code), giữ nguyên assertions về bytes/rc/message và thêm
+mutation in-place-write làm mất bytes để xác nhận test bắt đúng regression.
+Không bỏ hai assertion hoặc chỉ đổi thành assert non-zero. Chạy lại harness
+nguyên bản đã sửa trên Bash 3.2 trước khi port vào suite.
+
+Evidence: [qa-summary.json](evidence/review-attempt3-20260908/qa-summary.json),
+`atomic-python-limit-4096.*`, `atomic-python-limit-1024.*`.
+
+#### Reconciliation với council
+
+Council bổ sung những điểm chưa có trong review attempt 2: atomic write chống
+truncate, lost updates khi concurrent set, symlink/ownership implications,
+repair bằng set, option whitelist, missing duty, EOF/interrupt và catalog
+không có Codex model. Reference v3 và các ca tương ứng trong harness hiện
+chứng minh phần lớn các sửa đó trên máy này. Không có bản log Linux đầy đủ
+`/tmp/qa3-*` trong môi trường hiện tại để xác nhận độc lập mọi con số x3.
+
+Lần review này phát hiện thêm F1 (nhánh init sau lock), F2 (model entry con)
+và F3 (heredoc chịu size limit trên Bash 3.2), chưa thấy được nêu trong sáu
+báo cáo council. Council nhận diện đúng nhóm concurrency/shape/portability,
+nhưng chưa phủ ba trường hợp cụ thể này.
+
+| Chair decision | Gate attempt 3 |
+|---|---|
+| 1. Conflict theo primary model | **Confirm theo định nghĩa mới**: audit authority đã cấu hình. Giữ minority limitation: không phát hiện model fallback thực sự đã review. `launch_model` là khai báo yêu cầu, không chứng minh actual reviewer. Sửa câu warning primary-or-fallback còn sót ở Data model để khớp. |
+| 2. Auto-seed chỉ ở launch; status/doctor read-only | **Confirm**, thay khuyến nghị first-status-seed trước đây. Tránh lệnh đọc đổi tree. |
+| 3. Init fast path không lock; writer chờ tối đa 10 s | **Confirm thiết kế**, implementation chưa đạt do F1. Fast path và recheck phải có cùng nghĩa validation. |
+| 4. Set không tạo file, có thể repair | **Confirm**; lifecycle rõ và các ca hiện tại pass. |
+| 5. Legacy bằng default cũ, không có effort override → defaults mới | **Confirm như quy tắc migration công bố**, không coi bằng chứng values-equal là bằng chứng "no user decision". Giữ note và test parity với bundle, không đụng seats đã tồn tại. |
+| 6. Exit 0/1/2/3/130, BOM/duplicate policy | **Confirm contract**; permission/interrupt/BOM/duplicate pass, F2 còn cần diagnostic đúng cho model entry sai kiểu. |
+| 7. Dừng emit legacy cùng consumer/installer/test changes | **Confirm**. Kết quả verifier/status rc 1 của patch-only target xác nhận không thể ship riêng hunks. |
+| 8. Bash override, exact PTY prompts, transcripts, permission skip | **Confirm phương pháp**, chưa confirm portable-green vì F3. Các ca PTY lần này đều pass, không còn race attempt 2. |
+
+Không đảo quyết định product nào của chair; các điều kiện sửa còn lại là kỹ
+thuật và test binding. Bảy mutation trong council summary **chưa được chạy
+lại đầy đủ ở attempt này**, không dùng count đó để tuyên bố verification pass.
+
+#### Artifacts và bước tiếp theo
+
+- [Metadata/source hashes](evidence/review-attempt3-20260908/meta.json).
+- [Regression probe results](evidence/review-attempt3-20260908/independent-summary.json).
+- [Generator patch results](evidence/review-attempt3-20260908/generator-summary.json).
+- [Additional reproducer](evidence/review-attempt3-20260908/edge-probes.py).
+
+Routing: `analysis/claude`, sửa F1–F3 và test bindings, rồi quay lại technical
+review trước khi nhận reference vào production. Giữ `base_commit=null` và
+feature verification `not_run`. Guard đã có trong HEAD mới; stderr packet vẫn
+ở technical_review. Không sửa production, spec hay reference; không commit.
+Ba suite release, seats launcher integration, budget cuối và installer/schema
+checks chưa được nghiệm thu vì phần integration đó chưa có trên branch.
+
+### Attempt 4
+
+reviewed_date: 2026-09-08 (Asia/Ho_Chi_Minh)
+seat: @gate
+reviewer_model: unverified (served model identifier is not exposed in this task)
+model_source: current_user_invoked_codex_task
+fresh_session_attestation: no (continuation of prior reviews)
+reviewed_branch: feature/simplify-task-relations
+reviewed_head: cf8f326b61788ed3ed8577eb12511613303dc44a
+reviewed_checkout: /Users/admin/projects/agent-bootstrap
+reviewed_target: task revision 4, spec revision 3, F1–F3 reference/harness fixes
+spec_sufficiency: sufficient
+sufficient_for_coding_model: yes
+blocker_count: 0
+blocking_gaps: none in the reviewed pre-coding scope
+
+**Đóng F1–F3; đủ điều kiện coding.** Diff hiện tại sửa đúng nguyên nhân đã
+tái hiện ở attempt 3; chưa phát hiện finding mới trong phạm vi sửa này.
+Verdict áp dụng cho spec/reference/harness, chưa phải nghiệm thu production
+agent seats. Canonical script, schema và seats launcher vẫn chưa được tích hợp.
+
+#### Kết quả tự chạy trên macOS
+
+Môi trường: macOS 26.6.2 arm64, `/bin/bash` 3.2.57, Python 3.13.2, uid 501
+(không phải root). Target được bootstrap trong thư mục tạm; không chạy các
+thao tác fixture lên checkout nguồn.
+
+| Kiểm tra | Kết quả |
+|---|---|
+| Harness được giao, không sửa assertion | **109 pass / 0 fail / 0 skip** |
+| Probe độc lập: init fast path + dưới lock với sai schema, malformed, unreadable; wizard với model entry str/list/bool | **9 pass / 0 fail** |
+| m8 được giao: recheck bỏ validation | rc 1, **2 K4 fail**: invalid báo thành công; malformed bị ghi đè |
+| m9 được giao: bỏ type guard vòng occupant | rc 1, **3 M3 fail** |
+| Mutation ghi in-place do gate dựng từ reference hiện tại | rc 1, **R7 và R8 đều fail**; tổng 4 fail, gồm R9/R10 chạy tiếp với seats fixture bị R8 truncate |
+| `/bin/bash -n`, shellcheck với exclusions CI | rc 0 |
+| AST parse Python với `feature_version=(3,8)` | pass cho embedded program và harness; không phải chạy interpreter Python 3.8 |
+
+Không lấy báo cáo Linux x3 hoặc tổng chín mutation của Claude làm kết quả
+của gate. Lần này tự chạy một baseline và ba mutation nêu trên. Wrapper tổng
+hợp đầu tiên của gate đã giả định m6 phải có đúng hai failure và assert sai
+sau khi lưu log; yêu cầu thực tế là **cả R7 lẫn R8 phải đỏ**, không cấm failure
+dây chuyền. Ghi chú này có trong mutation summary; không đổi harness/assertion.
+
+#### Kết luận từng finding
+
+- **F1 closed.** `init_precheck()` dùng chung cho fast path và nhánh sau lock;
+  chỉ `missing` được tạo file. K4 chứng minh valid giữ bytes/rc 0 và invalid,
+  malformed giữ bytes/rc 1. Probe riêng giữ flock trước khi khởi chạy, xác
+  nhận process đang chờ rồi mới publish file: cả wrong schema, malformed và
+  unreadable đều rc 1, giữ bytes, ghi rõ file xuất hiện lúc chờ. m8 bị bắt.
+- **F2 closed.** `model_spec()` và structural guard chặn entry con sai kiểu
+  trước khi dereference. M3 kiểm bảy command; probe riêng kiểm thêm
+  `wizard --yes`: diagnostic, rc 1, không traceback và không sửa config/AGENTS.
+  m9 bị bắt. Không còn coi outer-shape test là đủ cho nested model entries.
+- **F3 closed.** Harness hiện tại áp RLIMIT_FSIZE qua shim interpreter; R7/R8
+  trên Bash 3.2 nhận `[Errno 27] File too large` tại write boundary. Baseline
+  giữ nguyên bytes với rc 2/1 đúng contract; in-place mutant làm đỏ chính hai
+  assertion đó. Không còn lỗi heredoc `SEATS_PY: unbound variable` ở baseline.
+
+Spec revision 3 đã khớp primary-only conflict, lifecycle recheck và cách inject
+lỗi ở interpreter. Các chair decision được confirm ở attempt 3 giữ nguyên.
+
+#### Evidence và handback
+
+- [Metadata và hashes đầu review](evidence/review-attempt4-20260908/meta.json).
+- [Harness baseline](evidence/review-attempt4-20260908/qa-summary.json),
+  `qa.stdout`, `qa.stderr`; [static checks](evidence/review-attempt4-20260908/static-summary.json).
+- [Mutation kết quả](evidence/review-attempt4-20260908/mutation-summary.json);
+  từng `.patch`, stdout/stderr và summary được giữ cạnh đó.
+- [Probe độc lập](evidence/review-attempt4-20260908/independent-probes.py) và
+  [kết quả](evidence/review-attempt4-20260908/independent-summary.json).
+- [Handoff cho build](build-handoff.md), mục Gate attempt 4: hashes reference
+  và harness chính xác; cập nhật checkout hiện tại, reader tám dòng,
+  `model-info`, generator lifecycle và mutation boundary trong checklist.
+
+State ghi `sufficient/yes`; giữ `technical_review`, `base_commit=null` và
+feature verification `not_run` vì chưa dispatch implementation. Guard đã
+landed; prerequisite `codex-profile-stderr-isolation` còn mở. Bước tiếp theo là
+dispatch `@build` theo handoff sau khi prerequisite được xử lý; ghi base commit
+khi thực sự vào implementation. Không tự launch model trong lần review này.
+
+Không chạy lại ba suite release để lấy kết quả của production cũ làm bằng
+chứng cho seats: launcher/verifier/installer integration, schema, budget và
+release suites là gate của implementation sắp tới. Review chỉ cập nhật packet,
+handoff và dòng status của spec; không sửa production/reference/harness,
+không commit/amend, HEAD giữ nguyên `cf8f326`.

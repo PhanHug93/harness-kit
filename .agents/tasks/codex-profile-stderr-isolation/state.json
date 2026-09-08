@@ -1,24 +1,24 @@
 {
   "protocol_version": "claude-codex-collaboration/v1",
   "task_id": "codex-profile-stderr-isolation",
-  "status": "open",
-  "phase": "technical_review",
+  "status": "closed",
+  "phase": "closed",
   "owner": "codex",
-  "requested_action": "@gate pre-coding technical review of Specification revision 3 (scope = stderr isolation bug fix only; Astra/effort/rename moved to agent-seats)",
-  "base_commit": null,
+  "requested_action": "Resolved in the authorized combined agent-seats release candidate; see agent-seats/verification.md.",
+  "base_commit": "cf8f326b61788ed3ed8577eb12511613303dc44a",
   "source_task": null,
   "blocks": [],
   "revision_rounds": 0,
   "spec_sufficiency": {
-    "verdict": "not_reviewed",
-    "sufficient_for_coding_model": "not_reviewed"
+    "verdict": "sufficient",
+    "sufficient_for_coding_model": "yes"
   },
   "escalation_reason": null,
   "verification": {
-    "runner": "none",
-    "status": "not_run",
-    "reason": null,
-    "report": null
+    "runner": "codex",
+    "status": "pass",
+    "reason": "Final seats interface supersedes the legacy parser; isolation, failures, cleanup, caller trap and mutation checks pass.",
+    "report": ".agents/tasks/agent-seats/verification.md"
   },
-  "updated_at": "2026-09-06T17:16:24Z"
+  "updated_at": "2026-09-08T06:21:42.661297+00:00"
 }

@@ -1,0 +1,74 @@
+{
+  "target": "/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd",
+  "uid": 501,
+  "checks": [
+    {
+      "check": "init-fast-path-wrong-schema",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": null,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: schema must be agent-seats/v1\nagent-seats: ERROR: existing seats.json is invalid; init does not overwrite. Fix it by hand, repair the seat with set, or run reset\n"
+    },
+    {
+      "check": "init-fast-path-malformed",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": null,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: malformed JSON in /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json: line 1 column 3; init does not overwrite. Run reset\n"
+    },
+    {
+      "check": "init-fast-path-unreadable",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": null,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: cannot read /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json: [Errno 13] Permission denied: '/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json'; init does not overwrite. Run reset\n"
+    },
+    {
+      "check": "init-under-lock-wrong-schema",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": true,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: schema must be agent-seats/v1\nagent-seats: ERROR: existing seats.json is invalid (it appeared while waiting for the lock); init does not overwrite. Fix it by hand, repair the seat with set, or run reset\n"
+    },
+    {
+      "check": "init-under-lock-malformed",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": true,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: malformed JSON in /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json: line 1 column 3 (it appeared while waiting for the lock); init does not overwrite. Run reset\n"
+    },
+    {
+      "check": "init-under-lock-unreadable",
+      "ok": true,
+      "rc": 1,
+      "waiting_before_publish": true,
+      "bytes_preserved": true,
+      "stderr": "agent-seats: ERROR: cannot read /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json: [Errno 13] Permission denied: '/private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-independent-epk2snrd/docs/agent-configs/seats.json' (it appeared while waiting for the lock); init does not overwrite. Run reset\n"
+    },
+    {
+      "check": "wizard-model-entry-str",
+      "ok": true,
+      "rc": 1,
+      "stderr": "agent-seats: ERROR: catalog model gpt-6-astra: host must be one of claude, codex, gemini, cursor, windsurf, human\nagent-seats: ERROR: seat gate: catalog entry for gpt-6-astra must be an object, not str\nagent-seats: ERROR: seat verify: catalog entry for gpt-6-astra must be an object, not str\nagent-seats: ERROR: current seats.json is invalid; fix it by hand, repair the offending seat with set, or run reset\n"
+    },
+    {
+      "check": "wizard-model-entry-list",
+      "ok": true,
+      "rc": 1,
+      "stderr": "agent-seats: ERROR: catalog model gpt-6-astra: host must be one of claude, codex, gemini, cursor, windsurf, human\nagent-seats: ERROR: seat gate: catalog entry for gpt-6-astra must be an object, not list\nagent-seats: ERROR: seat verify: catalog entry for gpt-6-astra must be an object, not list\nagent-seats: ERROR: current seats.json is invalid; fix it by hand, repair the offending seat with set, or run reset\n"
+    },
+    {
+      "check": "wizard-model-entry-bool",
+      "ok": true,
+      "rc": 1,
+      "stderr": "agent-seats: ERROR: catalog model gpt-6-astra: host must be one of claude, codex, gemini, cursor, windsurf, human\nagent-seats: ERROR: seat gate: catalog entry for gpt-6-astra must be an object, not bool\nagent-seats: ERROR: seat verify: catalog entry for gpt-6-astra must be an object, not bool\nagent-seats: ERROR: current seats.json is invalid; fix it by hand, repair the offending seat with set, or run reset\n"
+    }
+  ],
+  "passed": 9,
+  "failed": 0
+}

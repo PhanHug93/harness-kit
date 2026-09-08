@@ -1,0 +1,38 @@
+{
+  "recorded_at": "2026-09-08T06:21:42.661297+00:00",
+  "status": "pass",
+  "suites": [
+    {
+      "command": "bash scripts/test-bootstrap-multi-agent-project.sh",
+      "exit_code": 0,
+      "log": "bootstrap-final-green.log",
+      "sha256": "30167b0ddc1246c6e3fe699619abe63f9f152379940dc55fb81c0a53d7102584",
+      "last_lines": [
+        "133 passed, 0 failed, 0 skipped",
+        "GREEN launcher integration: 8 test groups",
+        "bootstrap-test: ok (/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.DRbbQga0pZ)"
+      ]
+    },
+    {
+      "command": "bash scripts/test-onboarding-fixtures.sh",
+      "exit_code": 0,
+      "log": "onboarding-final.log",
+      "sha256": "1fe9ad020c05f220161363e286324c08527aa30f676657b1d263b344fe4362d6",
+      "last_lines": [
+        "filled golden contracts: 3",
+        "onboarding-fixtures: ok (/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.W7B7FSIvLR)"
+      ]
+    },
+    {
+      "command": "bash scripts/test-one-shot-upgrade.sh",
+      "exit_code": 0,
+      "log": "one-shot-final.log",
+      "sha256": "596088f2ba586d201540710eacb14ec57d2d1dd0f9d78176bbe9109f524e9b6b",
+      "last_lines": [
+        "PASS fresh target has seats and no legacy",
+        "Migration evidence: /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-migration-emvfq82t/evidence",
+        "one-shot-upgrade-test: ok (/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/tmp.KSN1ZvBoOs)"
+      ]
+    }
+  ]
+}

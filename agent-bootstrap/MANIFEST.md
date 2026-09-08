@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.09.07.1`
+Version: `2026.09.08.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -28,6 +28,7 @@ change, including doc, generator, or runtime-snapshot edits.
 | `agent-tech-stack-lib.sh` | Runtime detector library snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-tech-stack-lib.sh`. |
 | `agent-hook.sh` | Runtime hook snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-hook.sh`. |
 | `agent-guard.sh` | Agent Guard Lite runtime snapshot for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
+| `agent-seats.sh` | Runtime seat assignment, migration, validation, and roster renderer for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-seats.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
 | `agent-local-only-check.sh` | Runtime Git hygiene checker that blocks harness-kit generated files from being pushed. | Must match generated target `scripts/agent-local-only-check.sh` and pre-push hook expectations. |
 | `detect-agent-tech-stack.sh` | Runtime detector entrypoint snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/detect-agent-tech-stack.sh`. |
@@ -36,11 +37,12 @@ change, including doc, generator, or runtime-snapshot edits.
 | `install-rtk.sh` | Runtime rtk installer snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/install-rtk.sh`. |
 | `rtk` | Runtime rtk wrapper snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/rtk`. |
 | `verify-ai-deps.sh` | Runtime verifier snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/verify-ai-deps.sh`. |
-| `model-profiles/codex-model-profiles.json` | Source model profile catalog copied into generated target `docs/agent-configs/model-profiles.json`. | Must match canonical home export and generated target model profile catalog. |
+| `model-profiles/codex-model-profiles.json` | Legacy model profile catalog retained as one-release migration input; fresh targets do not receive `model-profiles.json`. | Must match canonical home export; used only when `seats.json` is missing. |
 | `policies/agent-context-policy.json` | Source Agent Guard Lite context policy copied into generated target `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target context policy. |
 | `provenance/rtk-v0.37.2.sha256` | Pinned rtk release asset checksums used by generated installer verification. | Must match canonical home export and generated target provenance catalog. |
 | `schemas/agent-context-policy-v1.schema.json` | JSON Schema for `policies/agent-context-policy.json` and generated `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target schema catalog. |
-| `schemas/agent-model-profiles-v1.schema.json` | JSON Schema for `model-profiles/codex-model-profiles.json` and generated `docs/agent-configs/model-profiles.json`. | Must match canonical home export and generated target schema catalog. |
+| `schemas/agent-model-profiles-v1.schema.json` | JSON Schema for the legacy model profile migration input and its generated schema catalog copy. | Must match canonical home export and generated target schema catalog. |
+| `schemas/agent-seats-v1.schema.json` | JSON Schema for generated `docs/agent-configs/seats.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-project-tech-stack-v1.schema.json` | JSON Schema for generated `docs/superpowers/specs/project-tech-stack.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-lock-v1.schema.json` | JSON Schema for `agent-bootstrap.lock.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-status-v1.schema.json` | JSON Schema for `--status --json` output. | Must match canonical home export and generated target schema catalog. |

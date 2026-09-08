@@ -4,6 +4,28 @@ Goal: one-shot setup of Codex/Claude multi-agent harness infrastructure when
 switching to any project, without maintaining a source template repo, build
 step, base64 payload, or generated dist artifact.
 
+## Agent seats and upgrades
+
+Work follows `@spec` → `@gate` → `@build` → `@verify` → `@audit` → `@owner`.
+Default occupants are Claude (spec/audit), Codex `gpt-6-astra` at `ultra`
+(gate/verify), Codex `gpt-5.6-luna` at `xhigh` (build), and human (owner).
+Codex fallbacks use `gpt-5.6-terra` at `xhigh`.
+
+`scripts/agent-seats.sh show|wizard|validate` inspects, edits or validates
+`docs/agent-configs/seats.json`; `set gate --effort high` changes one seat and
+updates the roster. The model catalog controls supported efforts. The launcher
+accepts Codex seats and the legacy planning/coding/reviewing aliases.
+
+Upgrading an older project migrates the selected customized legacy profile's
+models, efforts and fallbacks only when seats are missing. The original legacy
+file remains untouched; existing seats always win and are never candidates.
+An exact old bundle default adopts the new defaults with a note. Invalid active
+configuration is preserved and reported for repair, not reset automatically.
+Filled briefs and USER overlays survive the candidate/apply upgrade path.
+Inspect `show`, `validate` and `.codex/codex-mode.sh status` after upgrading.
+`CODEX_MODEL_PROFILE` is a warning no-op during this compatibility release.
+@gate authorization entries are audit declarations.
+
 ## Decision
 
 Use a repo-local source bundle plus one canonical home folder and shell
@@ -36,6 +58,7 @@ agent-bootstrap/
 │   ├── agent-bootstrap-status-v1.schema.json
 │   ├── agent-bootstrap-verify-report-v1.schema.json
 │   ├── agent-model-profiles-v1.schema.json
+│   ├── agent-seats-v1.schema.json
 │   └── agent-project-tech-stack-v1.schema.json
 ├── templates/
 │   ├── base/
@@ -44,6 +67,7 @@ agent-bootstrap/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
 ├── agent-guard.sh
+├── agent-seats.sh
 ├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
 ├── install-rtk.sh
@@ -75,6 +99,7 @@ $HOME/dev/agent-bootstrap/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
 ├── agent-guard.sh
+├── agent-seats.sh
 ├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
 ├── install-rtk.sh
@@ -186,7 +211,7 @@ agent-init --apply-candidates
 One-shot safe upgrade for an old project on another machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.07.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.08.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 That script installs the pinned harness release, creates
@@ -219,18 +244,20 @@ Core infra, installed by default:
 - `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules`, Cursor pointer rules.
 - `docs/agent-configs/project-agent-context.md`.
 - `docs/agent-configs/agent-bootstrap.lock.json`.
-- `docs/agent-configs/model-profiles.json`.
+- `docs/agent-configs/seats.json`, initialized once; existing legacy
+  `model-profiles.json` is retained as migration input when seats are missing.
 - `docs/agent-configs/context-policy.json`.
 - `docs/agent-configs/bootstrap-multi-agent-project/schemas/*.schema.json`.
 - `docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256`.
 - `scripts/verify-ai-deps.sh`, which performs manual contract validation for the
-  bootstrap lock, model profile catalog, context policy, schema catalog metadata,
+  bootstrap lock, active seats configuration, context policy, schema catalog metadata,
   Agent Guard Lite, and rtk provenance manifest.
 - `.claude/settings.json` and `.claude/README.md`.
 - `scripts/detect-agent-tech-stack.sh`.
 - `scripts/agent-tech-stack-lib.sh`.
 - `scripts/agent-hook.sh`.
 - `scripts/agent-guard.sh`.
+- `scripts/agent-seats.sh`.
 - `scripts/agent-local-only-check.sh`, which blocks tracked harness files during
   pre-push.
 - `scripts/install-rtk.sh` and `scripts/rtk`.

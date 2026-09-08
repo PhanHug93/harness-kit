@@ -1,0 +1,78 @@
+{
+  "m6-inplace": {
+    "rc": 1,
+    "passed": 105,
+    "failed": 4,
+    "skipped": 0,
+    "source_sha256": "f2d4cefd27e76149c5b86837d51f04735df232b7ba1a95f8b72ed29f8a380726",
+    "failures": [
+      {
+        "check": "R7 failed AGENTS write (RLIMIT_FSIZE in the interpreter) -> rc 2, old AGENTS bytes intact, seats written, no traceback",
+        "ok": false,
+        "detail": "agent-seats: ERROR: cannot write /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-m6-inplace-x38yzqda/AGENTS.md: [Errno 27] File too large"
+      },
+      {
+        "check": "R8 failed seats write (RLIMIT_FSIZE in the interpreter) -> rc 1, nothing written, no traceback",
+        "ok": false,
+        "detail": "agent-seats: ERROR: cannot write /private/var/folders/14/ld_yzzw53rzf0qb_wx7zvs400000gn/T/seats-attempt4-m6-inplace-x38yzqda/docs/agent-configs/seats.json: [Errno 27] File too large; nothing written"
+      },
+      {
+        "check": "R9 symlinked AGENTS.md is written through (link kept, target updated)",
+        "ok": false,
+        "detail": ""
+      },
+      {
+        "check": "R10 read-only AGENTS.md -> rc 2 with message, config changed",
+        "ok": false,
+        "detail": ""
+      }
+    ],
+    "required_regressions_caught": true
+  },
+  "m8-init-recheck": {
+    "rc": 1,
+    "passed": 107,
+    "failed": 2,
+    "skipped": 0,
+    "source_sha256": "4164b9dae187788c14aa32be18915e5a771fc0aefcff4ae497687893cfe41d5e",
+    "failures": [
+      {
+        "check": "K4 invalid schema seats.json appears while init waits: rc 1, bytes kept, no traceback",
+        "ok": false,
+        "detail": "rc=0 kept=True msg=['agent-seats: seats.json appeared while waiting for the lock; nothing written']"
+      },
+      {
+        "check": "K4 malformed JSON seats.json appears while init waits: rc 1, bytes kept, no traceback",
+        "ok": false,
+        "detail": "rc=0 kept=False msg=['- `@owner` \u00b7 resolution \u00b7 human (user)']"
+      }
+    ],
+    "required_regressions_caught": true
+  },
+  "m9-model-shape": {
+    "rc": 1,
+    "passed": 106,
+    "failed": 3,
+    "skipped": 0,
+    "source_sha256": "ef05d161895b3a99c9b54f4e5b5f24d5dee762fb9afd9d3146cf0234901b25ee",
+    "failures": [
+      {
+        "check": "M3 catalog entry for a seat's model is a string: rc 1, diagnostic not traceback, file kept",
+        "ok": false,
+        "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+      },
+      {
+        "check": "M3 catalog entry for a seat's model is a list: rc 1, diagnostic not traceback, file kept",
+        "ok": false,
+        "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+      },
+      {
+        "check": "M3 catalog entry for a seat's model is a boolean: rc 1, diagnostic not traceback, file kept",
+        "ok": false,
+        "detail": "show:1; validate:1; model-info:1; conflict:1; resolve:1; render:1; set:1"
+      }
+    ],
+    "required_regressions_caught": true
+  },
+  "review_note": "All required mutation failures observed. m6 also fails R9/R10, which run with the seats fixture truncated by R8. The first review wrapper incorrectly expected exactly two m6 failures and raised after saving results; required assertion is inclusion of R7 and R8, not exclusivity. Harness assertions and results are unchanged."
+}

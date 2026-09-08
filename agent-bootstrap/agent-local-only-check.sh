@@ -69,6 +69,7 @@ local_only_reason() {
     scripts/detect-agent-tech-stack.sh|\
     scripts/agent-hook.sh|\
     scripts/agent-guard.sh|\
+    scripts/agent-seats.sh|\
     scripts/agent-onboarding.sh|\
     scripts/agent-local-only-check.sh|\
     scripts/verify-ai-deps.sh|\

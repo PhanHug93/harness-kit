@@ -2,28 +2,27 @@
 
 Harness Kit is a portable, self-testing multi-agent harness kit for adding a
 predictable AI-assisted workflow to an existing project. It generates local
-instructions, routed model profiles, onboarding helpers, runtime checks, and
+instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.09.07.1`](agent-bootstrap/VERSION)
+Current release: [`2026.09.08.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
 The full workflow gives each participant a clear responsibility:
 
-1. Claude analyzes the problem and prepares the specification.
-2. Codex Sol checks whether the specification is safe and complete enough to
-   implement.
-3. Codex Luna implements the approved, bounded change.
-4. A fresh Codex Sol review checks the result and its verification evidence.
-5. Claude performs an independent cross-review.
-6. The user accepts, revises, escalates, or closes the task.
+1. `@spec` analyzes the problem and prepares the specification.
+2. `@gate` checks whether the specification is complete enough to implement.
+3. `@build` implements the approved, bounded change.
+4. A fresh `@verify` review checks the result and its verification evidence.
+5. `@audit` performs an independent cross-review.
+6. `@owner` accepts, revises, escalates, or closes the task.
 
 Coding cannot start until the technical review records that the task is ready
 for the configured coding model. The coding pass may send an apparently ready
 task back for clarification, but it cannot turn a blocking verdict into an
-approval. An initial implementation may be followed by at most two remediation
-rounds before the decision returns to the user.
+approval. After two unsuccessful remediation returns, the user decides whether
+another bounded pass is worth its cost.
 
 This is a coordination protocol, not an autonomous agent runner. The user opens
 each host session; Harness Kit does not launch one AI host from another.
@@ -65,7 +64,7 @@ or `agent-init --next`.
 rtk is intentionally hard-pinned to the bundle's audited version so projects
 do not drift with an unreviewed upstream release.
 
-## Upgrade an existing project to 2026.09.07.1
+## Upgrade an existing project to 2026.09.08.1
 
 ### Option A: one-shot pinned upgrade
 
@@ -77,10 +76,10 @@ home is missing or stale.
 
    ```bash
    cd /path/to/project
-   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.07.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.08.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
    ```
 
-3. The upgrader installs release `2026.09.07.1` into
+3. The upgrader installs release `2026.09.08.1` into
    `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
    reviewable candidates instead of overwriting existing managed files.
 4. Inspect the result before accepting candidates:
@@ -154,30 +153,40 @@ continues its analysis or cross-review role and records verification as blocked
 or delegated with a reason.
 
 The collaboration records are coordination and audit conventions, not security controls:
-packet ownership and append-only history are conventions; host, model, and session independence are declarations rather than proof; and Sol authorization entries are audit declarations. Important durable decisions
+packet ownership and append-only history are conventions; host, model, and session independence are declarations rather than proof; and @gate authorization entries are audit declarations. Important durable decisions
 belong in the project's tracked specification, plan, or memory rather than only
 in the local task packet.
 
-## Model routing
+## Agent seats
 
-The default profile uses three configurable Codex routes:
+Seats describe the work; their occupants are editable configuration.
 
-| Work | Default | Fallback |
+| Seat | Default occupant | Fallback |
 | --- | --- | --- |
-| Planning and specification review | `gpt-5.6-sol` | `gpt-5.6-terra` |
-| Bounded implementation | `gpt-5.6-luna` | `gpt-5.6-terra` |
-| Final technical review | `gpt-5.6-sol` | `gpt-5.6-terra` |
+| `@spec` | Claude | host-controlled |
+| `@gate` | Codex `gpt-6-astra` @ `ultra` | `gpt-5.6-terra` @ `xhigh` |
+| `@build` | Codex `gpt-5.6-luna` @ `xhigh` | `gpt-5.6-terra` @ `xhigh` |
+| `@verify` | Codex `gpt-6-astra` @ `ultra` | `gpt-5.6-terra` @ `xhigh` |
+| `@audit` | Claude | host-controlled |
+| `@owner` | Human | — |
 
-Defaults live in `docs/agent-configs/model-profiles.json` in a generated target.
-`CODEX_MODEL_OVERRIDE`, the mode-specific override variables,
-`CODEX_MODEL_PROFILE`, and `CODEX_REASONING_EFFORT` remain available for an
-explicit operator choice. Claude cross-review is host behavior, not a fourth
-Codex route.
+Use `scripts/agent-seats.sh show`, `wizard`, or
+`set gate --host codex --model gpt-6-astra --effort ultra` in a generated
+project. Assignments and model capabilities live in
+`docs/agent-configs/seats.json`; `set` and `wizard` refresh the AGENTS roster.
+`reset` explicitly restores bundle defaults. `validate` is read-only.
+
+The launcher accepts a seat or the compatible `planning`, `coding`, `reviewing`
+aliases. It launches only occupants configured with host `codex`.
+`CODEX_MODEL_OVERRIDE`, mode-specific overrides, `CODEX_USE_FALLBACK`, and
+`CODEX_REASONING_EFFORT` remain available. Explicit effort must be supported by
+the effective model in the catalog. `CODEX_MODEL_PROFILE` is a warning no-op for
+this compatibility release; configure seats instead.
 
 ## What the full workflow generates
 
 - Entry guidance for Claude, Codex, Gemini, Cursor, and Windsurf.
-- Canonical role, mode, handoff, context, and model-profile documents under
+- Canonical role, mode, handoff, context, and seat configuration under
   `docs/agent-configs/`.
 - Routed Codex helpers and Claude command surfaces.
 - Project-stack detection, onboarding, guard, local-only, rtk, and verification
@@ -198,8 +207,30 @@ allowlist, leaving unrelated generated files alone. Filled project briefs,
 tech-stack evidence, and USER overlay sections survive regeneration.
 
 `agent-init --status --json` reports bundle version, installed version, drift,
-and pending candidates for tooling or CI. Existing model profiles are migrated
-through the same candidate path rather than silently replaced.
+and pending candidates for tooling or CI.
+
+### Configuration migration from older releases
+
+Upgrades create `seats.json` only when it is missing. A customized legacy
+`model-profiles.json` migrates its selected default profile's models, efforts
+and fallbacks to `@gate`, `@build` and `@verify`. Unknown model ids and declared
+efforts are retained in the catalog with a diagnostic note. The original legacy
+file, including other named profiles, remains untouched for reference/recovery.
+It is no longer the active configuration after seats exist.
+
+A legacy profile exactly equal to the old bundle defaults, without route effort
+overrides, adopts the new default occupants with a visible migration note.
+Existing `seats.json` always wins and is kept byte-for-byte during generation,
+candidate application and repeated upgrades. Neither seats nor the legacy
+input are replaced by a generated candidate. A malformed or invalid active
+configuration is reported for repair; the launcher refuses to start and the
+upgrade does not silently replace it with defaults.
+
+After upgrading, run `scripts/agent-seats.sh show`,
+`scripts/agent-seats.sh validate`, and `.codex/codex-mode.sh status` to inspect
+the effective configuration. Repair invalid input before retrying; use `reset`
+only when you explicitly want default assignments. Filled briefs and USER
+overlays continue through the existing preservation path.
 
 ## Verification and operational limits
 
