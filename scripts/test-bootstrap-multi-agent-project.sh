@@ -3201,11 +3201,24 @@ OV_DIR="$FIXTURE_DIR/overlay-agents"
 mkdir -p "$OV_DIR"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$OV_DIR" --workflow full >/dev/null
 need_contains "$(cat "$OV_DIR/AGENTS.md")" "BEGIN USER: agents:extra" "AGENTS.md ships USER anchor"
-need_contains "$(cat "$OV_DIR/AGENTS.md")" "One branch, one commit" "AGENTS.md git workflow: one branch one commit"
-need_contains "$(cat "$OV_DIR/AGENTS.md")" "feature/<slug>" "AGENTS.md git workflow: branch naming"
-need_contains "$(cat "$OV_DIR/AGENTS.md")" "force-with-lease" "AGENTS.md git workflow: force-push safety"
-need_contains "$(cat "$OV_DIR/AGENTS.md")" "No agent identity" "AGENTS.md git workflow: no agent info"
-need_contains "$(cat "$OV_DIR/AGENTS.md")" "Conventional Commits" "AGENTS.md git workflow: commit format"
+git_workflow="$(cat "$OV_DIR/AGENTS.md")"
+for git_rule in \
+  "Never force-push main/dev/develop, even with --force-with-lease or APIs." \
+  "Each feature needs a branch and PR/MR to a user-named target." \
+  "Missing target: ask; no PR/integration." \
+  "No direct target push/fast-forward or PR bypass; merging needs separate explicit approval." \
+  "Prefer one commit since branch base." \
+  "Before exceeding two or if already >2, ask keep/squash/split; stop commit/push/rewrite." \
+  "Never auto-squash/amend/reset/rebase." \
+  "Creating/pushing tags needs action approval and a user-named source branch; verify commit." \
+  "Never infer these from release/HEAD/default/PR target." \
+  "No tag moves; tags grant no merge/branch-push permission." \
+  "Other force/rewrite actions need explicit approval." \
+  "Conventional Commits; no agent names/trailers."; do
+  need_contains "$git_workflow" "$git_rule" "AGENTS.md mandatory Git-flow rule"
+done
+need_not_contains "$git_workflow" "fold work with" "AGENTS.md no automatic commit rewriting"
+need_not_contains "$git_workflow" "Amended push:" "AGENTS.md no implicit force-push authorization"
 cp "$OV_DIR/AGENTS.md" "$TMP_DIR/ov-agents-1"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$OV_DIR" --workflow full --force >/dev/null
 cmp -s "$TMP_DIR/ov-agents-1" "$OV_DIR/AGENTS.md" || fail "empty USER render must be idempotent"
