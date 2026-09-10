@@ -11,8 +11,10 @@ file and `VERSION` with the bundle whenever it is copied to another project.
 This bundle carries two independent version stamps. Bump
 `AGENT_TECH_STACK_LIB_VERSION` (in `agent-tech-stack-lib.sh` and the
 `lib/detect.sh` emitter) only when detector logic changes. Bump
-`AGENT_BOOTSTRAP_VERSION` (entrypoint) together with `VERSION` for any bundle
-change, including doc, generator, or runtime-snapshot edits.
+`AGENT_BOOTSTRAP_VERSION` (entrypoint) together with `VERSION` when preparing a
+user-authorized release of any bundle change, including doc, generator, or
+runtime-snapshot edits. Unreleased feature branches retain the published pins;
+do not invent a release tag or source branch to complete a feature PR.
 
 ## Source Roles
 
