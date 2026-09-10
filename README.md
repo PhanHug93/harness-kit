@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.09.08.1`](agent-bootstrap/VERSION)
+Current release: [`2026.09.10.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -64,7 +64,7 @@ or `agent-init --next`.
 rtk is intentionally hard-pinned to the bundle's audited version so projects
 do not drift with an unreviewed upstream release.
 
-## Upgrade an existing project to 2026.09.08.1
+## Upgrade an existing project to 2026.09.10.1
 
 ### Option A: one-shot pinned upgrade
 
@@ -76,10 +76,10 @@ home is missing or stale.
 
    ```bash
    cd /path/to/project
-   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.08.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
    ```
 
-3. The upgrader installs release `2026.09.08.1` into
+3. The upgrader installs release `2026.09.10.1` into
    `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
    reviewable candidates instead of overwriting existing managed files.
 4. Inspect the result before accepting candidates:
@@ -208,6 +208,25 @@ tech-stack evidence, and USER overlay sections survive regeneration.
 
 `agent-init --status --json` reports bundle version, installed version, drift,
 and pending candidates for tooling or CI.
+
+### Default model effort catalog
+
+| Model | Allowed efforts | Default effort |
+|---|---|---|
+| `gpt-6-astra` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `ultra` |
+| `gpt-5.6-luna` | `low`, `medium`, `high`, `xhigh`, `max` | `xhigh` |
+| `gpt-5.6-terra` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `xhigh` |
+
+The [default seats JSON](scripts/fixtures/agent-seats-default.json) records the
+full roster. Release `2026.09.10.1` updates the catalog used for fresh `init`
+and explicit `reset`; occupant assignments and default efforts stay the same.
+Existing `seats.json` remains user-owned and is not rewritten by an upgrade.
+To adopt these capabilities in an existing project, edit only the three
+`catalog.models.<model>.efforts` arrays in that project's seats file, then run
+`scripts/agent-seats.sh validate`. Preserve unrelated settings. Before removing
+`none`, choose a supported value for any catalog default, primary effort or
+fallback effort that currently uses `none`. `reset` replaces the whole
+configuration and is not required for this catalog-only update.
 
 ### Configuration migration from older releases
 

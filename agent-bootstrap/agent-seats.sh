@@ -92,9 +92,9 @@ LEGACY_BUNDLE_DEFAULT = {"reasoning_effort": "xhigh", "planning_model": "gpt-5.6
                          "reviewing_model": "gpt-5.6-sol", "planning_fallback_model": "gpt-5.6-terra",
                          "coding_fallback_model": "gpt-5.6-terra", "reviewing_fallback_model": "gpt-5.6-terra"}
 DEFAULT_CATALOG = {
-    "gpt-6-astra": {"host": "codex", "efforts": ["none", "low", "medium", "high", "xhigh", "ultra"], "default_effort": "ultra"},
-    "gpt-5.6-luna": {"host": "codex", "efforts": list(LEGACY_EFFORTS), "default_effort": "xhigh"},
-    "gpt-5.6-terra": {"host": "codex", "efforts": list(LEGACY_EFFORTS), "default_effort": "xhigh"},
+    "gpt-6-astra": {"host": "codex", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "ultra"},
+    "gpt-5.6-luna": {"host": "codex", "efforts": ["low", "medium", "high", "xhigh", "max"], "default_effort": "xhigh"},
+    "gpt-5.6-terra": {"host": "codex", "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "default_effort": "xhigh"},
 }
 DEFAULT_SEATS = {
     "spec": {"host": "claude"},

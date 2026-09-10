@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.09.10.1 — Correct default seat effort catalogs
+
+- Fresh seat catalogs match the approved JSON: Astra gains `max`, Terra gains
+  `ultra`, and all three bundled models omit `none`. Luna supports through
+  `max`. Model assignments and default/fallback efforts are unchanged.
+- Existing project seats and customized legacy choices remain preserved during
+  upgrades. Documentation explains updating only effort arrays without resetting
+  the roster. The full default JSON is available as a regression fixture.
+- Tests check complete generated JSON, new effort launch arguments, refusal of
+  removed defaults, and preservation of legacy `none` choices.
+
 ## 2026.09.08.1 — Agent seats and configuration-preserving upgrades
 
 - **Configurable seats.** Fixed `@spec`, `@gate`, `@build`, `@verify`, `@audit`

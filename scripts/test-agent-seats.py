@@ -256,6 +256,19 @@ check("L5 suggest: customized legacy (unknown model, low) -> migrated proposal +
 rc, o, e = run("init")
 rc2, _, e2 = run("validate")
 check("L6 init: customized legacy migrates and validates", rc == 0 and "created from legacy" in o and rc2 == 0 and read_seats()["seats"]["gate"]["occupant"] == {"host": "codex", "model": "custom-planner", "effort": "low", "fallback_model": "gpt-5.6-terra", "fallback_effort": "low"}, e2)
+# A legacy choice remains user data even when fresh catalogs no longer offer it.
+os.remove(SEATS)
+legacy_none = json.loads(json.dumps(LEGACY_DEFAULT))
+legacy_none["profiles"]["stable"]["reasoning_effort"] = "none"
+write_json(LEGACY, legacy_none)
+legacy_before = open(LEGACY, "rb").read()
+rc, o, e = run("init")
+d = read_seats()
+check("L6b legacy none effort is preserved without rewriting the input",
+      rc == 0 and "created from legacy" in o and run("validate")[0] == 0
+      and open(LEGACY, "rb").read() == legacy_before
+      and all(d["seats"][seat]["occupant"][key] == "none"
+              for seat in ("gate", "build", "verify") for key in ("effort", "fallback_effort")))
 # extra route effort key: not "untouched", migrated with the declared effort
 os.remove(SEATS)
 extra = json.loads(json.dumps(LEGACY_DEFAULT)); extra["profiles"]["stable"]["planning_reasoning_effort"] = "max"
@@ -360,7 +373,7 @@ grammar_cases = [
     ("host LF", lambda d: d["seats"]["gate"]["occupant"].__setitem__("host", "codex\n")),
     ("tag TAB", lambda d: d["seats"]["gate"].__setitem__("tag", "@gate\t")),
     ("owner not human", lambda d: d["seats"]["owner"].__setitem__("occupant", {"host": "codex", "model": "gpt-5.6-luna", "effort": "xhigh"})),
-    ("default_effort not in efforts", lambda d: d["catalog"]["models"]["gpt-6-astra"].__setitem__("default_effort", "max")),
+    ("default_effort not in efforts", lambda d: d["catalog"]["models"]["gpt-6-astra"].__setitem__("default_effort", "unsupported")),
     ("non-string efforts", lambda d: d["catalog"]["models"]["gpt-6-astra"].__setitem__("efforts", [1, 2])),
 ]
 for label, fn in grammar_cases:
@@ -380,8 +393,21 @@ rc, o, e = run("validate")
 check("G6b duplicate efforts -> valid with a warning (existing files stay usable)", rc == 0 and "duplicates" in e)
 run("reset")
 rc, o, e = run("model-info", "gpt-5.6-terra")
-check("G7 model-info: host/default_effort/efforts", rc == 0 and o.split("\n")[:3] == ["codex", "xhigh", "none low medium high xhigh max"], o.strip().replace("\n", " / "))
+check("G7 model-info: host/default_effort/efforts", rc == 0 and o.split("\n")[:3] == ["codex", "xhigh", "low medium high xhigh max ultra"], o.strip().replace("\n", " / "))
 check("G8 model-info unknown model -> rc 1 with guidance", run("model-info", "nope")[0] == 1 and "catalog" in run("model-info", "nope")[2])
+
+# Newly declared efforts work through the CLI; removed defaults fail without writing.
+for model, effort in (("gpt-6-astra", "max"), ("gpt-5.6-terra", "ultra")):
+    run("reset")
+    rc, o, e = run("set", "gate", "--model", model, "--effort", effort)
+    check(f"G9 set accepts {model} at {effort}", rc == 0 and run("validate")[0] == 0
+          and read_seats()["seats"]["gate"]["occupant"]["effort"] == effort, e.strip())
+for model in ("gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-terra"):
+    run("reset")
+    before = open(SEATS, "rb").read()
+    rc, o, e = run("set", "gate", "--model", model, "--effort", "none")
+    check(f"G9 fresh catalog refuses none for {model} without writing",
+          rc == 1 and open(SEATS, "rb").read() == before and "not supported" in e, e.strip())
 
 # ---------- C: conflict on the effective model (B5) ----------
 run("reset")

@@ -71,17 +71,17 @@ def seats_document() -> dict:
     catalog = {
         "gpt-6-astra": {
             "host": "codex",
-            "efforts": ["none", "low", "medium", "high", "xhigh", "ultra"],
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
             "default_effort": "ultra",
         },
         "gpt-5.6-luna": {
             "host": "codex",
-            "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+            "efforts": ["low", "medium", "high", "xhigh", "max"],
             "default_effort": "xhigh",
         },
         "gpt-5.6-terra": {
             "host": "codex",
-            "efforts": ["none", "low", "medium", "high", "xhigh", "max"],
+            "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
             "default_effort": "xhigh",
         },
         "gpt-5.4": {
@@ -239,6 +239,8 @@ def generate_target(work: Path) -> Path:
     check(installed.is_file() and os.access(installed, os.X_OK), "generator did not emit executable scripts/agent-seats.sh")
     check(installed.read_bytes() == canonical.read_bytes(), "generated agent-seats.sh drifted from the canonical bundle")
     check(seats.is_file(), "generator did not initialize docs/agent-configs/seats.json")
+    expected = json.loads((ROOT / "scripts/fixtures/agent-seats-default.json").read_text(encoding="utf-8"))
+    check(json.loads(seats.read_text(encoding="utf-8")) == expected, "generated seats differ from the approved default JSON")
     write_json(seats, seats_document())
     return target
 
@@ -376,7 +378,7 @@ def test_resolve_and_model_info(target: Path, env: Dict[str, str]) -> None:
         env=env,
     )
     check(result.returncode == 0, f"model-info failed: {result.stderr}")
-    check(result.stdout.splitlines() == ["codex", "xhigh", "none low medium high xhigh max"], "model-info contract changed")
+    check(result.stdout.splitlines() == ["codex", "xhigh", "low medium high xhigh max"], "model-info contract changed")
     check("efforts" not in result.stdout, "model-info emitted a legacy command label")
 
 
@@ -404,6 +406,20 @@ def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_
         check(f'model_reasoning_effort="{effort}"' in args, f"{name} selected the wrong effort")
         hook = hook_log.read_text(encoding="utf-8")
         check(route in hook.splitlines()[-1], f"{name} did not map to route {route} for the hook")
+
+    for seat, override, model, effort in (
+        ("@gate", {"CODEX_REASONING_EFFORT": "max"}, "gpt-6-astra", "max"),
+        ("@verify", {"CODEX_USE_FALLBACK": "1", "CODEX_REASONING_EFFORT": "ultra"}, "gpt-5.6-terra", "ultra"),
+    ):
+        result = invoke(target, [seat], {**env, **override})
+        check(result.returncode == 0, f"{model} at {effort} failed: {result.stderr}")
+        args = captured_args(codex_log)
+        check(arg_value(args, "--model") == model, "new effort selected the wrong model")
+        check(f'model_reasoning_effort="{effort}"' in args, "new effort was not passed to Codex")
+    for seat, extra in (("@gate", {}), ("@build", {}), ("@verify", {"CODEX_USE_FALLBACK": "1"})):
+        result = invoke(target, [seat], {**env, **extra, "CODEX_REASONING_EFFORT": "none"})
+        assert_no_launch(result, codex_log)
+        check("not supported" in result.stderr, "removed none effort lacks catalog guidance")
 
     result = invoke(target, ["@build", "--supervised", "bounded prompt"], env)
     check(result.returncode == 0, "supervised launch failed")

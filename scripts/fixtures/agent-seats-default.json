@@ -1,0 +1,104 @@
+{
+  "schema": "agent-seats/v1",
+  "catalog": {
+    "models": {
+      "gpt-6-astra": {
+        "host": "codex",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "default_effort": "ultra"
+      },
+      "gpt-5.6-luna": {
+        "host": "codex",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "default_effort": "xhigh"
+      },
+      "gpt-5.6-terra": {
+        "host": "codex",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+          "ultra"
+        ],
+        "default_effort": "xhigh"
+      }
+    }
+  },
+  "seats": {
+    "spec": {
+      "tag": "@spec",
+      "phase": "analysis",
+      "duty": "analysis and specification",
+      "occupant": {
+        "host": "claude"
+      }
+    },
+    "gate": {
+      "tag": "@gate",
+      "phase": "technical_review",
+      "duty": "pre-coding technical review (blocking adequacy verdict)",
+      "occupant": {
+        "host": "codex",
+        "model": "gpt-6-astra",
+        "effort": "ultra",
+        "fallback_model": "gpt-5.6-terra",
+        "fallback_effort": "xhigh"
+      }
+    },
+    "build": {
+      "tag": "@build",
+      "phase": "implementation",
+      "duty": "bounded implementation",
+      "occupant": {
+        "host": "codex",
+        "model": "gpt-5.6-luna",
+        "effort": "xhigh",
+        "fallback_model": "gpt-5.6-terra",
+        "fallback_effort": "xhigh"
+      }
+    },
+    "verify": {
+      "tag": "@verify",
+      "phase": "verification",
+      "duty": "final technical review",
+      "occupant": {
+        "host": "codex",
+        "model": "gpt-6-astra",
+        "effort": "ultra",
+        "fallback_model": "gpt-5.6-terra",
+        "fallback_effort": "xhigh"
+      }
+    },
+    "audit": {
+      "tag": "@audit",
+      "phase": "cross_review",
+      "duty": "independent cross-review",
+      "occupant": {
+        "host": "claude"
+      }
+    },
+    "owner": {
+      "tag": "@owner",
+      "phase": "resolution",
+      "duty": "final decision",
+      "occupant": {
+        "host": "human"
+      }
+    }
+  }
+}
