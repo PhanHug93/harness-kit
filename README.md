@@ -303,6 +303,27 @@ bash /path/to/harness-kit/agent-bootstrap/bootstrap-multi-agent-project.sh \
 
 ## Development and release gate
 
+The [mandatory Git-flow rules](AGENTS.md#mandatory-git-flow-authorization)
+apply to this repository and are emitted into downstream `AGENTS.md` in both
+`full` and `infra` workflows. Work on a dedicated branch and use a PR/MR with a
+target explicitly named by the user; stop the integration step if none is named.
+Name feature branches `feature/<slug>` and fix branches `bugfix/<slug>`.
+Do not use `codex/` or agent names as branch prefixes; this convention takes
+precedence over host defaults.
+Do not directly push or fast-forward the target, and do not merge without a
+separate explicit user instruction. Never force-push `main`, `dev` or `develop`.
+
+Prefer one commit per work branch. Ask the user before exceeding two commits,
+or when a branch already has more than two; do not automatically rewrite history.
+Creating or pushing a tag requires the user's explicit source branch and
+authorization for that action. A release request does not select a branch or
+authorize merging. Keep unreleased changes on the feature branch until that
+release scope is supplied.
+
+These are agent operating rules, not server-side branch protection. They do not
+change the existing optional Git hook. Existing downstream projects receive the
+updated instructions through the normal reviewed upgrade/candidate flow.
+
 Run all affected entrypoints before publishing bundle changes:
 
 ```bash

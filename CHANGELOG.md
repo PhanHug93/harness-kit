@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Preserve branch naming in repository and generated instructions:
+  `feature/<slug>` for features, `bugfix/<slug>` for fixes; no `codex/` or
+  agent-name prefixes, regardless of host defaults.
+- Require explicit Git-flow authorization in repository contributor instructions
+  and generated full/infra agent instructions: a user-named PR/MR target,
+  separate merge authorization, and an explicit source branch for every tag.
+- Prohibit force-pushing main/dev/develop and bypassing PRs with direct target
+  updates. Prefer one commit and ask before exceeding two instead of silently
+  squashing or rewriting history. Existing hooks and release pins are unchanged.
+
 ## 2026.09.10.1 — Correct default seat effort catalogs
 
 - Fresh seat catalogs match the approved JSON: Astra gains `max`, Terra gains

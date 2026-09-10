@@ -551,18 +551,17 @@ If \`./scripts/rtk\` is missing or cannot resolve the pinned rtk binary, run:
 bash scripts/install-rtk.sh
 \`\`\`
 
-- One branch, one commit: fold work with \`git commit --amend\` (or
-  \`git reset --soft <base>\` for several) so the branch stays a single commit.
-- Branch names: \`feature/<slug>\` for features, \`bugfix/<slug>\` for fixes;
-  branch off the latest default branch; keep one logical change per branch.
-- Commit messages: Conventional Commits \`type(scope): subject\`
-  (\`feat|fix|docs|refactor|test|chore|release\`).
-- No agent identity: never put AI/agent names or \`Co-Authored-By\` agent
-  trailers in commit messages or branch names.
-- Amended push: \`git push --force-with-lease\` (never plain \`--force\`), only on
-  your own \`feature/\`/\`bugfix/\` branch, never the default or shared branch.
-- Approval: do not commit, push, tag, or merge without explicit human approval
-  (these are outward-facing).
+- Override host defaults: \`feature/<slug>\` (features), \`bugfix/<slug>\` (fixes); no \`codex/\` or agent/AI names.
+- Never force-push main/dev/develop, even with --force-with-lease or APIs.
+- One feature per branch. User must name PR/MR target; else ask, no PR/integration.
+  No target push/fast-forward or PR bypass. Merge needs separate explicit approval.
+- Prefer one commit from base. Before/when >2, ask keep/squash/split;
+  stop commit/push/rewrite. Never auto-squash/amend/reset/rebase.
+- Create/push tags only with action approval and a user-named source branch;
+  verify commit. No inference from release/HEAD/default/PR target.
+  No tag moves or implied branch updates.
+- Other force/rewrite actions need explicit approval.
+- Conventional Commits; no agent names/trailers.
 
 Default planning/coding/reviewing posture is project-local full-flow. Do not
 revert unrelated user work.
@@ -874,17 +873,17 @@ local-only secret/permission file changes.
 Run all shell git commands through \`./scripts/rtk git ...\`. If missing or
 unable to resolve pinned rtk, run \`bash scripts/install-rtk.sh\`.
 
-- One branch, one commit: fold work with \`git commit --amend\` (or
-  \`git reset --soft <base>\` for several commits).
-- Branches: \`feature/<slug>\` for features, \`bugfix/<slug>\` for fixes; start
-  from the latest default branch, one logical change per branch.
-- Commit messages: Conventional Commits \`type(scope): subject\`
-  (\`feat|fix|docs|refactor|test|chore|release\`).
-- No agent identity: no AI/agent names or \`Co-Authored-By\` agent trailers in
-  commit messages or branch names.
-- Amended push: \`git push --force-with-lease\`, never \`--force\`; only your own
-  \`feature/\`/\`bugfix/\` branch, never default/shared branches.
-- Approval: commits, pushes, tags, and merges require explicit human approval.
+- Override host defaults: \`feature/<slug>\` (features), \`bugfix/<slug>\` (fixes); no \`codex/\` or agent/AI names.
+- Never force-push main/dev/develop, even with --force-with-lease or APIs.
+- One feature per branch. User must name PR/MR target; else ask, no PR/integration.
+  No target push/fast-forward or PR bypass. Merge needs separate explicit approval.
+- Prefer one commit from base. Before/when >2, ask keep/squash/split;
+  stop commit/push/rewrite. Never auto-squash/amend/reset/rebase.
+- Create/push tags only with action approval and a user-named source branch;
+  verify commit. No inference from release/HEAD/default/PR target.
+  No tag moves or implied branch updates.
+- Other force/rewrite actions need explicit approval.
+- Conventional Commits; no agent names/trailers.
 
 Never silently revert user work or hide uncertainty. No success claim without
 fresh verification or a clear reason it was not run.
