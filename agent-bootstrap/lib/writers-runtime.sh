@@ -197,6 +197,104 @@ managed blocks while doing this.
 customization from git history or your local notes after bootstrap regenerates
 the file. Keep machine-specific or personal settings in local files where the
 tool supports them.
+
+## retired artifact recovery
+
+`bootstrap-multi-agent-project.sh --apply-retirements` removes only exact
+copies of the retired agent-guard CI files (`.github/workflows/agent-guard.yml`
+and `docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml`),
+and only after writing a verified backup next to each one named
+`<path>.bak.retirement.<run-id>`. Backups are never removed automatically, and
+status never reads them to infer history.
+
+To restore one file, run this from the project root after setting the path and
+the run ID printed in the retirement report. It walks the parent directories
+without following links, requires a single-link regular backup holding the
+known 605-byte SHA-256, refuses an existing original, then creates the original
+exclusively with the backup's mode and mtime and verifies the restored bytes.
+On any failed check it stops without overwriting either file; keep the backup
+for audit. A restored file is eligible again and is retired only by a later
+explicit `--apply-retirements`.
+
+```bash
+RETIRED_PATH=.github/workflows/agent-guard.yml
+RUN_ID=YYYYMMDDTHHMMSSZ-0123456789abcdef
+python3 - "$RETIRED_PATH" "$RUN_ID" <<'PY'
+import hashlib, os, re, stat, sys
+
+SIZE = 605
+DIGEST = "751c8c3f88fd1fc3bcc5c1ddff940e1280b1a5149c787d3110a4408a39810ebb"
+ALLOWED = (".github/workflows/agent-guard.yml",
+           "docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml")
+NOFOLLOW = os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+
+
+def read_all(fd):
+    data = b""
+    while len(data) <= SIZE:
+        chunk = os.read(fd, SIZE + 1 - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
+
+
+def restore(path, run_id):
+    if path not in ALLOWED or not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}", run_id):
+        return "unsupported path or run ID"
+    parents, name = path.split("/")[:-1], path.split("/")[-1]
+    backup = name + ".bak.retirement." + run_id
+    fd = os.open(".", os.O_RDONLY | os.O_DIRECTORY)
+    for part in parents:
+        if not stat.S_ISDIR(os.lstat(part, dir_fd=fd).st_mode):
+            return "unsafe parent (link or not a directory): " + part
+        child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | NOFOLLOW, dir_fd=fd)
+        os.close(fd)
+        fd = child
+    st = os.lstat(backup, dir_fd=fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        return "backup is not a single-link regular file"
+    source = os.open(backup, os.O_RDONLY | os.O_NONBLOCK | NOFOLLOW, dir_fd=fd)
+    data = read_all(source)
+    os.close(source)
+    if len(data) != SIZE or hashlib.sha256(data).hexdigest() != DIGEST:
+        return "backup does not hold the known retired bytes"
+    try:
+        os.lstat(name, dir_fd=fd)
+        return "original path exists; nothing was overwritten"
+    except FileNotFoundError:
+        pass
+    out = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, 0o600, dir_fd=fd)
+    try:
+        offset = 0
+        while offset < len(data):
+            written = os.write(out, data[offset:])
+            if written <= 0:
+                return "short write; inspect the partial " + path
+            offset += written
+        os.fchmod(out, stat.S_IMODE(st.st_mode))
+        os.utime(out, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.fsync(out)
+    finally:
+        os.close(out)
+    check = os.open(name, os.O_RDONLY | NOFOLLOW, dir_fd=fd)
+    restored = read_all(check)
+    os.close(check)
+    os.fsync(fd)
+    if hashlib.sha256(restored).hexdigest() != DIGEST:
+        return "restored bytes do not verify; inspect " + path
+    print("recovery: restored " + path + " from " + backup)
+    return None
+
+
+try:
+    problem = restore(sys.argv[1], sys.argv[2])
+except OSError as exc:
+    problem = "%s (%s)" % (exc.strerror, exc.__class__.__name__)
+if problem:
+    sys.exit("recovery: stopped: " + problem)
+PY
+```
 EOF
 }
 
@@ -231,6 +329,12 @@ write_schema_model_and_provenance_catalog() {
   copy_bundle_file \
     "schemas/agent-bootstrap-status-v1.schema.json" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json"
+  copy_bundle_file \
+    "schemas/agent-bootstrap-status-v2.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v2.schema.json"
+  copy_bundle_file \
+    "schemas/agent-bootstrap-retirement-v1.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-retirement-v1.schema.json"
   copy_bundle_file \
     "schemas/agent-bootstrap-verify-report-v1.schema.json" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json"
@@ -338,6 +442,7 @@ seats_program() {
   AGENT_SEATS_FILE="$TARGET_DIR/docs/agent-configs/seats.json" \
   AGENT_SEATS_LEGACY_PROFILES="$TARGET_DIR/docs/agent-configs/model-profiles.json" \
   AGENT_SEATS_AGENTS_MD="$TARGET_DIR/AGENTS.md" \
+  AGENT_SEATS_PROJECT_ROOT="$TARGET_DIR" \
     bash "$BUNDLE_DIR/agent-seats.sh" "$@"
 }
 
@@ -346,7 +451,11 @@ seed_agent_seats() {
     log "DRY-RUN agent-seats init docs/agent-configs/seats.json"
     return 0
   fi
-  ensure_dir "$TARGET_DIR/docs/agent-configs"
+  if ! bootstrap_write_parent_is_eligible "$TARGET_DIR/docs/agent-configs/.seats-preflight"; then
+    printf 'ERROR: refusing seats configuration directory outside eligible project root\n' >&2
+    return 1
+  fi
+  ensure_dir "$TARGET_DIR/docs/agent-configs" || return 1
   if ! seats_program init >/dev/null; then
     log "warn: docs/agent-configs/seats.json was not created; run scripts/agent-seats.sh wizard (or reset) after generation"
   fi
@@ -603,12 +712,17 @@ PY
 }
 
 guard_claude_edit_tool() {
-  local edit_path="$1" rc=0
+  local edit_path="$1" ask_reason="${2:-}" rc=0 classification=""
   [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
   if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
-    "$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path")" || rc=$?
   else
-    "$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path")" || rc=$?
+  fi
+  # Stdout must be pure JSON when the hook asks the user; otherwise keep the
+  # classification on stdout (debug log only), so denials stay two stderr lines.
+  if [[ -z "$ask_reason" && -n "$classification" ]]; then
+    printf '%s\n' "$classification"
   fi
   case "$rc" in
     0) return 0 ;;
@@ -617,16 +731,120 @@ guard_claude_edit_tool() {
   esac
 }
 
+claude_anchor_env() {
+  # Claude Code adapter: mint the workspace envelope from host-provided hook
+  # data (session_id, CLAUDE_PROJECT_DIR) only when no envelope exists. Never
+  # derive it from the agent's current directory or overwrite existing values.
+  local input="$1" minted
+  CLAUDE_ANCHOR_MINTED=false
+  [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" ]] || return 0
+  [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && command -v python3 >/dev/null 2>&1 || return 0
+  minted="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null
+import base64
+import json
+import os
+import re
+import sys
+
+try:
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    sys.exit(1)
+session = payload.get("session_id") if isinstance(payload, dict) else None
+root = os.environ.get("CLAUDE_PROJECT_DIR", "")
+if (not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9._:-]+", session)
+        or not os.path.isabs(root) or not os.path.isdir(root)):
+    sys.exit(1)
+context = dict(original_workspace=root, target_repository=root, target_source="user", session_id=session)
+print(session)
+print("base64:" + base64.b64encode(json.dumps(context, ensure_ascii=False).encode("utf-8")).decode("ascii"))
+PY
+)" || return 0
+  AGENT_HOST_SESSION_ID="${minted%%$'\n'*}"
+  AGENT_WORKSPACE_CONTEXT="${minted#*$'\n'}"
+  export AGENT_HOST_SESSION_ID AGENT_WORKSPACE_CONTEXT
+  CLAUDE_ANCHOR_MINTED=true
+}
+
+workspace_ask_reason() {
+  # Print a reason only when Claude Code should ask the user: a cross-repository
+  # mismatch. Worktree mismatches and unattested sessions stay advisory.
+  local report
+  report="$("$AGENT_GUARD" workspace-check 2>/dev/null)" && return 0
+  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    doc = json.loads(os.environ.get("REPORT", "").strip().splitlines()[-1])
+except Exception:
+    raise SystemExit(0)
+if doc.get("status") == "mismatch" and doc.get("mismatch_kind") == "repository":
+    print("Workspace-repository guard: " + str(doc.get("reason")) + "; context="
+          + json.dumps(doc.get("context"), ensure_ascii=False)
+          + "; confirm the target repository with the user before writing.")
+PY
+}
+
+claude_ask() {
+  ASK_REASON="$1" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                         "permissionDecisionReason": os.environ["ASK_REASON"]}},
+                 ensure_ascii=False))
+PY
+}
+
+claude_session_start() {
+  # SessionStart hook: anchor the session, persist the envelope for later Bash
+  # tool commands through CLAUDE_ENV_FILE, and report the status to Claude.
+  # Never blocks the session.
+  local input="" report
+  if [[ ! -t 0 ]]; then
+    input="$(cat || true)"
+  fi
+  claude_anchor_env "$input"
+  if [[ "$CLAUDE_ANCHOR_MINTED" == "true" && -n "${CLAUDE_ENV_FILE:-}" ]]; then
+    printf 'export AGENT_HOST_SESSION_ID=%s\nexport AGENT_WORKSPACE_CONTEXT=%s\n' \
+      "$AGENT_HOST_SESSION_ID" "$AGENT_WORKSPACE_CONTEXT" >>"$CLAUDE_ENV_FILE" 2>/dev/null || true
+  fi
+  report="$("$AGENT_GUARD" workspace-check 2>/dev/null || true)"
+  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    doc = json.loads(os.environ.get("REPORT", "").strip().splitlines()[-1])
+except Exception:
+    doc = {"status": "unknown"}
+status = str(doc.get("status", "unknown"))
+line = "Workspace-repository guard (advisory): " + status
+if status == "verified":
+    line += "; target " + str(doc.get("target_repository"))
+elif status == "mismatch":
+    line += " (" + str(doc.get("mismatch_kind")) + "): " + str(doc.get("reason")) \
+        + "; confirm the target repository with the user before writing"
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": line}},
+                 ensure_ascii=False))
+PY
+  exit 0
+}
+
 claude_pretool() {
   required_executable "$DETECTOR"
   required_executable "$AGENT_GUARD"
   local hook_input=""
   local tool_name=""
   local edit_path=""
+  local ask_reason=""
   if [[ ! -t 0 ]]; then
     hook_input="$(cat || true)"
   fi
+  claude_anchor_env "$hook_input"
   "$AGENT_GUARD" preflight >/dev/null
+  ask_reason="$(workspace_ask_reason)"
   if [[ -n "$hook_input" ]]; then
     tool_name=""
     edit_path=""
@@ -636,12 +854,17 @@ claude_pretool() {
     exec 3<&-
     case "$tool_name" in
       Edit|Write|MultiEdit)
-        guard_claude_edit_tool "$edit_path"
+        guard_claude_edit_tool "$edit_path" "$ask_reason"
+        [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
         exit 0
         ;;
     esac
   fi
   verify_detector_lock warn
+  if [[ -n "$ask_reason" ]]; then
+    claude_ask "$ask_reason"
+    exit 0
+  fi
   cd "$PROJECT_ROOT"
   if rtk_available; then
     exec "$RTK" hook claude
@@ -655,6 +878,9 @@ codex_preflight() {
   if [[ "${1:-}" == "--check-only" ]]; then
     check_only=true
     shift
+  fi
+  if [[ "$check_only" != "true" ]]; then
+    "$AGENT_GUARD" workspace-check >/dev/null || true
   fi
   local mode="${1:-unknown}"
   local flow="${2:-unknown}"
@@ -697,6 +923,7 @@ close_out() {
   # stay advisory and should call agent-guard pre-final manually.
   local input stop_active=false report failed=0 err_file
   input="$(cat 2>/dev/null || true)"
+  claude_anchor_env "$input"
   if command -v python3 >/dev/null 2>&1; then
     stop_active="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null || printf 'false\n'
 import json
@@ -745,6 +972,9 @@ case "${1:-}" in
     shift || true
     claude_pretool "$@"
     ;;
+  claude-session-start)
+    claude_session_start
+    ;;
   codex-preflight)
     shift || true
     codex_preflight "$@"
@@ -762,7 +992,7 @@ case "${1:-}" in
     close_out
     ;;
   -h|--help|help|"")
-    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
+    echo "Usage: scripts/agent-hook.sh claude-pretool|claude-session-start|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
     ;;
   *)
     fail "unknown command: $1"

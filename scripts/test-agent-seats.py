@@ -8,6 +8,7 @@ Covers the gate's B1-B6/R1-R4 and the council findings (atomic writes, locking,
 malformed shapes, set options, repair, wizard edge cases, init never prompts).
 Exit 1 when any check fails. Requires a non-root user for the permission cases
 (they are skipped with a note when running as root)."""
+import fcntl
 import hashlib
 import json
 import os
@@ -128,7 +129,7 @@ def fsize_limited_run(nbytes, *args):
             f"os.execv({real!r}, [{real!r}] + sys.argv[1:])\n"
         )
     os.chmod(shim, 0o755)
-    env = dict(os.environ, PATH=d + os.pathsep + os.environ.get("PATH", ""))
+    env = dict(os.environ, PATH=d + os.pathsep + os.environ.get("PATH", os.defpath))
     try:
         return subprocess.run([BASH, SCRIPT, *args], cwd=TARGET, env=env, capture_output=True, text=True)
     finally:
@@ -592,13 +593,311 @@ shutil.copy(AGENTS, real); os.remove(AGENTS); os.symlink("AGENTS.real.md", AGENT
 rc, o, e = run("set", "build", "--effort", "high")
 check("R9 symlinked AGENTS.md is written through (link kept, target updated)", rc == 0 and os.path.islink(AGENTS) and b"@ high" in open(real, "rb").read())
 os.remove(AGENTS); shutil.move(real, AGENTS)
+# The runtime writer passes both configured destinations through the project-root
+# boundary.  Exercise the configured-root override and a prefix-neighbor path so
+# the check cannot be satisfied by a string-prefix comparison.
+outside_dir = tempfile.mkdtemp(prefix="seats-qa-outside-")
+outside_seats = os.path.join(outside_dir, "seats.json")
+outside_agents = os.path.join(outside_dir, "AGENTS.md")
+with open(outside_seats, "wb") as fh:
+    fh.write(b"outside seats sentinel\n")
+with open(outside_agents, "wb") as fh:
+    fh.write(b"outside agents sentinel\n")
+outside_before = (open(outside_seats, "rb").read(), open(outside_agents, "rb").read())
+rc, o, e = run("render", env={
+    "AGENT_SEATS_PROJECT_ROOT": TARGET,
+    "AGENT_SEATS_FILE": outside_seats,
+    "AGENT_SEATS_AGENTS_MD": outside_agents,
+})
+check("R9b configured destinations outside AGENT_SEATS_PROJECT_ROOT -> rc 1, sentinels untouched",
+      rc == 1 and (open(outside_seats, "rb").read(), open(outside_agents, "rb").read()) == outside_before
+      and "outside project root" in e and not os.path.exists(os.path.join(outside_dir, "seats.json.lock")), e.strip())
+neighbor_dir = tempfile.mkdtemp(prefix=os.path.basename(TARGET) + "-neighbor-")
+neighbor_agents = os.path.join(neighbor_dir, "AGENTS.md")
+with open(neighbor_agents, "wb") as fh:
+    fh.write(b"neighbor sentinel\n")
+rc, o, e = run("render", env={
+    "AGENT_SEATS_PROJECT_ROOT": TARGET,
+    "AGENT_SEATS_FILE": os.path.join(TARGET, "docs", "agent-configs", "seats.json"),
+    "AGENT_SEATS_AGENTS_MD": neighbor_agents,
+})
+check("R9c prefix-neighbor AGENTS.md -> rc 1, neighbor untouched",
+      rc == 1 and open(neighbor_agents, "rb").read() == b"neighbor sentinel\n" and "outside project root" in e, e.strip())
+shutil.rmtree(outside_dir, ignore_errors=True)
+shutil.rmtree(neighbor_dir, ignore_errors=True)
+
+# Every mutating command performs the same two-destination preflight before it
+# can read, create a lock, or write.  Keep the matrix compact but explicit:
+# each destination role is exercised through regular, dangling, directory,
+# FIFO, escaped-parent, and equal-root paths, and all five mutators must leave
+# bytes, modes, link identity, and parent inventories untouched on refusal.
+def fs_entry(path):
+    path = os.path.abspath(path)
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return ("missing",)
+    kind = "link" if os.path.islink(path) else "dir" if os.path.isdir(path) else "file" if os.path.isfile(path) else "special"
+    content = open(path, "rb").read() if kind == "file" else os.readlink(path) if kind == "link" else None
+    return (kind, st.st_mode & 0o7777, st.st_ino, content)
+
+
+def fs_snapshot(paths):
+    state = {}
+    for path in paths:
+        path = os.path.abspath(path)
+        state[path] = fs_entry(path)
+        parent = os.path.dirname(path)
+        try:
+            state[parent + "/<entries>"] = sorted(os.listdir(parent))
+        except FileNotFoundError:
+            state[parent + "/<entries>"] = None
+    return state
+
+
+run("reset")
+mutation_matrix = [
+    ("render", ["render"]),
+    ("set", ["set", "build", "--effort", "high"]),
+    ("wizard", ["wizard", "--yes"]),
+    ("reset", ["reset"]),
+    ("init", ["init"]),
+]
+for role in ("seats", "agents"):
+    for kind in ("regular", "dangling", "directory", "fifo", "escaped-parent", "equal-root"):
+        outside = tempfile.mkdtemp(prefix="seats-qa-preflight-")
+        external = os.path.join(outside, role + ".json" if role == "seats" else "AGENTS.md")
+        with open(external, "wb") as fh:
+            fh.write(b"external destination sentinel\n")
+        if kind == "dangling":
+            os.unlink(external)
+            os.symlink(os.path.join(outside, "missing-target"), external)
+        elif kind == "directory":
+            os.unlink(external)
+            os.mkdir(external)
+        elif kind == "fifo":
+            os.unlink(external)
+            os.mkfifo(external, 0o640)
+        elif kind == "escaped-parent":
+            link_parent = os.path.join(TARGET, "preflight-escape")
+            if os.path.lexists(link_parent):
+                os.unlink(link_parent)
+            os.symlink(outside, link_parent)
+            external = os.path.join(link_parent, "new", os.path.basename(external))
+        elif kind == "equal-root":
+            # Keep the root and its parent inventory private even if the caller
+            # supplied TARGET directly below a shared system temp directory.
+            external = os.path.join(outside, "project")
+            os.makedirs(os.path.join(external, "docs", "agent-configs"))
+            shutil.copy2(SEATS, os.path.join(external, "docs", "agent-configs", "seats.json"))
+            shutil.copy2(AGENTS, os.path.join(external, "AGENTS.md"))
+        destinations = {
+            "AGENT_SEATS_PROJECT_ROOT": TARGET,
+            "AGENT_SEATS_FILE": SEATS,
+            "AGENT_SEATS_AGENTS_MD": AGENTS,
+        }
+        if kind == "equal-root":
+            destinations.update({
+                "AGENT_SEATS_PROJECT_ROOT": external,
+                "AGENT_SEATS_FILE": os.path.join(external, "docs", "agent-configs", "seats.json"),
+                "AGENT_SEATS_AGENTS_MD": os.path.join(external, "AGENTS.md"),
+            })
+        paths = [destinations["AGENT_SEATS_FILE"], destinations["AGENT_SEATS_AGENTS_MD"], external, os.path.join(os.path.dirname(external), os.path.basename(external) + ".lock")]
+        destinations["AGENT_SEATS_FILE" if role == "seats" else "AGENT_SEATS_AGENTS_MD"] = external
+        if kind == "escaped-parent":
+            paths.extend([os.path.join(TARGET, "preflight-escape"), os.path.dirname(external)])
+        for label, argv in mutation_matrix:
+            if label != "init":
+                run("reset")
+            before = fs_snapshot(paths)
+            rc, out, err = run(*argv, env=destinations)
+            after = fs_snapshot(paths)
+            check(
+                f"R9d {role} {kind} {label}: preflight rc 1 before lock/read/write",
+                rc == 1 and "outside project root" in err and before == after,
+                (err.strip().splitlines() or [out.strip()])[-1],
+            )
+        if kind == "escaped-parent":
+            link_parent = os.path.join(TARGET, "preflight-escape")
+            if os.path.lexists(link_parent):
+                os.unlink(link_parent)
+        shutil.rmtree(outside, ignore_errors=True)
+
+# Invalid roots and simultaneous invalid destinations are rejected before the
+# first destination can influence the second one.
+invalid_root = tempfile.mkdtemp(prefix="seats-qa-invalid-root-") + "-missing"
+for label, argv in mutation_matrix:
+    if label != "init":
+        run("reset")
+    before = fs_snapshot([SEATS, AGENTS])
+    rc, out, err = run(*argv, env={
+        "AGENT_SEATS_PROJECT_ROOT": invalid_root,
+        "AGENT_SEATS_FILE": SEATS,
+        "AGENT_SEATS_AGENTS_MD": AGENTS,
+    })
+    check(f"R9f invalid project root {label}: rc 1 before either destination", rc == 1 and before == fs_snapshot([SEATS, AGENTS]), err.strip())
+
+both_outside = tempfile.mkdtemp(prefix="seats-qa-both-outside-")
+both_seats = os.path.join(both_outside, "seats.json")
+both_agents = os.path.join(both_outside, "AGENTS.md")
+open(both_seats, "wb").write(b"both seats sentinel\n")
+open(both_agents, "wb").write(b"both agents sentinel\n")
+for label, argv in mutation_matrix:
+    if label != "init":
+        run("reset")
+    before = fs_snapshot([both_seats, both_agents])
+    rc, out, err = run(*argv, env={
+        "AGENT_SEATS_PROJECT_ROOT": TARGET,
+        "AGENT_SEATS_FILE": both_seats,
+        "AGENT_SEATS_AGENTS_MD": both_agents,
+    })
+    check(f"R9g both destinations external {label}: seats preflight precedes AGENTS", rc == 1 and before == fs_snapshot([both_seats, both_agents]), err.strip())
+shutil.rmtree(both_outside, ignore_errors=True)
+
+# Preserve the documented save-then-render contract: an eligible seats write
+# followed by an unrenderable AGENTS file returns rc2 and leaves the roster
+# bytes untouched.  Exercise every save-and-render mutator, including wizard.
+for label, argv in mutation_matrix[1:4]:
+    run("reset")
+    orphan = base + b"\n<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->\nstale\n"
+    write_agents(orphan)
+    seats_before_doc = read_seats()
+    agents_before = open(AGENTS, "rb").read()
+    rc, out, err = run(*argv)
+    expected_doc = json.loads(json.dumps(seats_before_doc))
+    if label == "set":
+        expected_doc["seats"]["build"]["occupant"]["effort"] = "high"
+    seats_after_doc = read_seats()
+    check(
+        f"R9h {label}: partial save returns rc2 with effective seats and AGENTS bytes preserved",
+        rc == 2 and "was NOT rendered" in err and open(AGENTS, "rb").read() == agents_before
+        and seats_after_doc == expected_doc,
+        err.strip(),
+    )
+write_agents(base)
+
+# Observe a real failed flock attempt before replacing a path. The hook is
+# injected only into disposable test children; the production writer is intact.
+lock_probe_dir = tempfile.mkdtemp(prefix="seats-lock-probe-")
+lock_probe_marker = os.path.join(lock_probe_dir, "waiting")
+with open(os.path.join(lock_probe_dir, "sitecustomize.py"), "w", encoding="utf-8") as fh:
+    fh.write("import fcntl, os\n"
+             "original_flock = fcntl.flock\n"
+             "def observed_flock(fd, operation):\n"
+             "    try:\n"
+             "        return original_flock(fd, operation)\n"
+             "    except BlockingIOError:\n"
+             "        with open(os.environ['SEATS_LOCK_PROBE'], 'w') as marker:\n"
+             "            marker.write('waiting')\n"
+             "        raise\n"
+             "fcntl.flock = observed_flock\n")
+
+
+def begin_blocked_write(argv):
+    if os.path.exists(lock_probe_marker):
+        os.unlink(lock_probe_marker)
+    fd = os.open(CFG, os.O_RDONLY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    env = dict(os.environ, SEATS_LOCK_PROBE=lock_probe_marker,
+               PYTHONPATH=lock_probe_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    proc = None
+    try:
+        proc = subprocess.Popen([BASH, SCRIPT, *argv], cwd=TARGET, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.monotonic() + 10
+        while not os.path.exists(lock_probe_marker):
+            if proc.poll() is not None:
+                raise AssertionError("writer exited before blocked-lock handshake: " + str(proc.communicate()))
+            if time.monotonic() >= deadline:
+                raise AssertionError("writer never reached blocked-lock handshake")
+            time.sleep(0.01)
+        return proc, fd
+    except BaseException:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+        if proc is not None:
+            proc.kill()
+            proc.communicate()
+        raise
+
+
+# Recheck the destination identities after lock acquisition.  A blocked writer
+# must refuse if AGENTS.md becomes an external link while it waits, before any
+# command-specific read or write.  Init removes seats.json so it takes the
+# locked creation path; the other mutators start from a valid document.
+recheck_outside = tempfile.mkdtemp(prefix="seats-qa-recheck-")
+recheck_external = os.path.join(recheck_outside, "AGENTS.md")
+with open(recheck_external, "wb") as fh:
+    fh.write(b"post-lock external sentinel\n")
+for label, argv in mutation_matrix:
+    run("reset")
+    if label == "init":
+        os.remove(SEATS)
+    agents_before = open(AGENTS, "rb").read()
+    outside_before = fs_snapshot([recheck_external])
+    proc, lock_fd = begin_blocked_write(argv)
+    os.remove(AGENTS)
+    os.symlink(recheck_external, AGENTS)
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+    out, err = proc.communicate(timeout=15)
+    check(
+        f"R9e {label}: post-lock external AGENTS replacement -> rc 1 before write",
+        proc.returncode == 1 and "outside project root" in err
+        and fs_snapshot([recheck_external]) == outside_before,
+        (err.strip().splitlines() or [out.strip()])[-1],
+    )
+    os.remove(AGENTS)
+    with open(AGENTS, "wb") as fh:
+        fh.write(agents_before)
+shutil.rmtree(recheck_outside, ignore_errors=True)
+
+recheck_seats_outside = tempfile.mkdtemp(prefix="seats-qa-recheck-seats-")
+recheck_seats_external = os.path.join(recheck_seats_outside, "seats.json")
+with open(recheck_seats_external, "wb") as fh:
+    fh.write(b"post-lock external seats sentinel\n")
+for label, argv in mutation_matrix:
+    run("reset")
+    seats_before = open(SEATS, "rb").read()
+    if label == "init":
+        os.remove(SEATS)
+    outside_before = fs_snapshot([recheck_seats_external])
+    proc, lock_fd = begin_blocked_write(argv)
+    if os.path.lexists(SEATS):
+        os.remove(SEATS)
+    os.symlink(recheck_seats_external, SEATS)
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+    out, err = proc.communicate(timeout=15)
+    check(
+        f"R9i {label}: post-lock external seats replacement -> rc 1 before write",
+        proc.returncode == 1 and "outside project root" in err
+        and fs_snapshot([recheck_seats_external]) == outside_before,
+        (err.strip().splitlines() or [out.strip()])[-1],
+    )
+    os.remove(SEATS)
+    with open(SEATS, "wb") as fh:
+        fh.write(seats_before)
+shutil.rmtree(recheck_seats_outside, ignore_errors=True)
+shutil.rmtree(lock_probe_dir)
 if IS_ROOT:
     skip("R10 read-only AGENTS.md -> rc 2 with message", "running as root (permissions are not enforced)")
 else:
+    setup_rc, _, setup_err = run("set", "build", "--effort", "high")
+    check("R10 setup requires a different config and rendered roster",
+          setup_rc == 0 and read_seats()["seats"]["build"]["occupant"]["effort"] == "high", setup_err)
+    assert setup_rc == 0 and read_seats()["seats"]["build"]["occupant"]["effort"] != "xhigh"
+    agents_before = open(AGENTS, "rb").read()
+    original_mode = os.stat(AGENTS).st_mode & 0o7777
     os.chmod(AGENTS, 0o444)
-    rc, o, e = run("set", "build", "--effort", "xhigh")
-    os.chmod(AGENTS, 0o644)
-    check("R10 read-only AGENTS.md -> rc 2 with message, config changed", rc == 2 and "NOT rendered" in e and no_traceback(e) and read_seats()["seats"]["build"]["occupant"]["effort"] == "xhigh")
+    try:
+        rc, o, e = run("set", "build", "--effort", "xhigh")
+        check("R10 read-only AGENTS.md -> rc 2 with message, config changed, roster preserved",
+              rc == 2 and "NOT rendered" in e and no_traceback(e)
+              and read_seats()["seats"]["build"]["occupant"]["effort"] == "xhigh"
+              and open(AGENTS, "rb").read() == agents_before)
+    finally:
+        os.chmod(AGENTS, original_mode)
 run("reset")
 
 # ---------- K: locking (F2) ----------

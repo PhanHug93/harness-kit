@@ -18,7 +18,8 @@ Inventory and drift rules: see `MANIFEST.md`.
 - `lib/` — sourced libraries (`core`, `detect`, `render`, `writers-runtime`,
   `writers-docs`, `onboarding`) that the entrypoint sources at runtime. The
   entrypoint REQUIRES this directory beside it — copy the whole bundle, never
-  the entrypoint script alone.
+  the entrypoint script alone. `lib/retirement.py` is the bundled retired-file
+  engine the entrypoint calls; it is never copied into targets.
 - `install-agent-bootstrap-home.sh` — exports this bundle to a canonical
   `$AGENT_BOOTSTRAP_HOME` directory such as `$HOME/dev/agent-bootstrap`.
 - `agent-tech-stack-lib.sh` — shared stack detector library used by the
@@ -30,9 +31,11 @@ Inventory and drift rules: see `MANIFEST.md`.
 - `model-profiles/` — retained legacy defaults used to recognize older
   configurations during migration; fresh targets do not receive this file.
 - `policies/` — Agent Guard Lite context policy copied into generated target
-  projects as `docs/agent-configs/context-policy.json`.
-- `schemas/` — JSON Schema artifacts for generated lock/status/verifier report
-  contracts, agent seats, legacy model profiles, project tech-stack, and context policy.
+  projects as `docs/agent-configs/context-policy.json`, and the closed
+  `retired-artifacts-v1.json` inventory read only by `lib/retirement.py`.
+- `schemas/` — JSON Schema artifacts for generated lock/status (v1 and opt-in
+  v2)/retirement/verifier report contracts, agent seats, legacy model profiles,
+  project tech-stack, and context policy.
 - `templates/` — base, stack overlay, and workflow templates copied into
   generated target projects.
 - `provenance/` — pinned third-party runtime checksums, currently rtk release
@@ -143,16 +146,18 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --diff
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --upgrade-plan
 bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --apply-candidates
+bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD" --retirement-plan
 ```
 
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
-target Git repo onto `codex/upgrade-harness-kit`, runs the full generator without
+target Git repo onto `feature/upgrade-harness-kit`, runs the generator with the
+project's installed workflow (`full` when no harness lock exists) without
 `--force`, and keeps harness-generated files local-only through the generated
 `.gitignore` block and `scripts/agent-local-only-check.sh` pre-push gate.
 
@@ -176,6 +181,11 @@ Lifecycle commands are explicit: `--status --json` reports generated-file drift,
 latest reviewed bootstrap candidate for each generated path while removing older
 candidates for that same path. Candidate promotion is scoped to the generated-file
 allowlist, so unrelated project files matching `*.generated.*` are not touched.
+`--apply-candidates --only <path>` (repeatable) promotes only the named files.
+A local-only baseline of the last kit output lets upgrades update unedited
+files in place and merge kit changes into edited ones (candidates only for
+overlapping edits); `--upgrade-plan --json` previews this per file and
+`--rollback <upgrade-id>` undoes a run.
 Harness files are local-only by policy; if a previous run already tracked them,
 run `scripts/agent-local-only-check.sh status`, remove reported paths with
 `git rm --cached -- <path>`, and commit the removal before pushing.
@@ -183,6 +193,45 @@ The Git-backed updater adds the upstream step: `agent-update --check` compares
 the canonical home with the latest published `vYYYY.MM.DD.N` tag,
 `agent-update --self-update` refreshes the canonical home from that tag, and
 `agent-upgrade --plan` runs the target upgrade plan with the refreshed bundle.
+
+Retired generated files follow a separate explicit lifecycle (HK-07). The closed
+inventory is two paths from `v2026.08.10.1`, `.github/workflows/agent-guard.yml`
+and `docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml`,
+each matched only by its exact 605-byte SHA-256; there is no inventory, path or
+digest override.
+
+- `--retirement-plan [--json]` and `--retirement-status [--json]` are read-only.
+  Generation (including `--dry-run`, `--force`, `--skip-existing`), `--diff`,
+  `--upgrade-plan`, human `--status`, `--apply-candidates` and
+  `--cleanup-backups` append the same read-only section and never delete;
+  neither do `agent-update --apply` and the one-shot defaults.
+- `--apply-retirements [--json]` rebuilds the plan, rechecks each file before
+  backup and again before unlink, writes a verified backup
+  `<path>.bak.retirement.<run-id>` (mode and mtime kept), and removes only the
+  exact checked file. `--apply-retirements --dry-run` reports the plan only.
+- `--retirement-scope local-only` (default) retires untracked, Git-ignored
+  copies; `all-matching` also retires tracked, unignored or non-Git copies.
+  Modified bytes, symlinks (leaf or parent), special files, multi-link files and
+  every `*.generated.*` candidate of a retired path are preserved and reported;
+  retired paths never enter candidate promotion or `--cleanup-backups`.
+- Exits: 0 complete (plan/status, or apply with nothing left to retire), 1
+  inspection/backup/delete error (later entries are not attempted, completed
+  backups are kept), 2 invalid arguments before any write (including
+  `--force`, `--skip-existing`, `--no-backup` or another action alongside a
+  retirement action), 3 apply finished but preserved a file for review,
+  130/143 interrupted. Ordinary observers keep their own failure; otherwise they
+  return 1 only for a retirement inspection error.
+- `--status --json` remains `agent-bootstrap-status/v1` and retirement-blind.
+  `--status --json --status-version 2` adds the `retirement` report
+  (`schemas/agent-bootstrap-status-v2.schema.json`); dedicated `--json`
+  reports follow `schemas/agent-bootstrap-retirement-v1.schema.json`.
+- Restore with the exclusive-create recipe in the generated
+  `docs/agent-configs/RECOVERY.md`; it never overwrites an existing file.
+- The one-shot upgrader always shows the plan and deletes only with
+  `--apply-retirements` (after generation and any `--apply-candidates`), with
+  optional `--retirement-scope`. Its `--dry-run` plans offline from
+  `--source-dir` or a cache already at the requested ref; with neither it exits
+  1 and asks for `--source-dir` instead of fetching.
 
 Generated full-workflow projects keep startup context progressive: agents load
 `AGENTS.md`, `project-agent-context.md`, a filled `project-brief.md` when

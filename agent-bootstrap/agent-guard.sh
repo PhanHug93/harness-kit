@@ -4,6 +4,162 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# Host/session metadata must be captured where the user starts the session.
+# Never derive it from this script location, the agent's current directory, a
+# packet, or repository instructions; a host adapter or the kit launcher may
+# record the start directory. The result is advisory: verified, unattested (no
+# metadata, e.g. a human without AI) or mismatch (exit 3 from workspace-check).
+workspace_check() {
+  python3 - "$PROJECT_ROOT" "${1:-}" <<'PY'
+import base64
+import binascii
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+class Unverified(ValueError):
+    def __init__(self, message, kind='repository'):
+        super().__init__(message)
+        self.kind = kind
+
+def mismatch(message, left_common, right_common):
+    # Two checkouts of one repository (shared Git common directory) are a
+    # worktree mismatch; anything else is a different repository.
+    raise Unverified(message, 'worktree' if left_common == right_common else 'repository')
+
+def directory(value):
+    if not isinstance(value, str) or not value or not Path(value).is_absolute():
+        raise Unverified('repository/workspace paths must be absolute')
+    path = Path(value).resolve(strict=True)
+    if not path.is_dir():
+        raise Unverified('repository/workspace path is not a directory')
+    return path
+
+# Ignore inherited Git routing/config overrides: they must not turn an Android
+# filesystem path into the iOS Git repository during identity checks.
+git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+git_env.update(GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_OPTIONAL_LOCKS='0')
+def git(path, option):
+    result = subprocess.run(['git', '-C', str(path), 'rev-parse', option],
+                            env=git_env, text=True, capture_output=True, timeout=10)
+    if result.returncode:
+        raise Unverified('cannot establish Git repository identity for ' + str(path))
+    return result.stdout.strip()
+
+def identity(value):
+    path = directory(value)
+    root = Path(git(path, '--show-toplevel')).resolve(strict=True)
+    common = Path(git(path, '--git-common-dir'))
+    if not common.is_absolute():
+        common = path / common
+    return root, common.resolve(strict=True)
+
+def decode(raw):
+    if raw.startswith('base64:'):
+        try:
+            raw = base64.b64decode(raw[len('base64:'):], validate=True).decode('utf-8')
+        except (binascii.Error, UnicodeDecodeError):
+            raise Unverified('workspace metadata is not valid base64 JSON')
+    return json.loads(raw)
+
+# Output mode: '' (workspace-check) reports every status; 'entry' (preflight)
+# reports unattested and mismatch; 'quiet' (other entrypoints) only mismatch.
+mode = sys.argv[2]
+raw_context = os.environ.get('AGENT_WORKSPACE_CONTEXT', '')
+raw_session = os.environ.get('AGENT_HOST_SESSION_ID', '')
+context = {}
+try:
+    if not raw_context and not raw_session:
+        # No host metadata: a human or an unanchored host. Only a guard invoked
+        # from another checkout is positive evidence of a wrong repository.
+        try:
+            installed, installed_common = identity(sys.argv[1])
+            actual, actual_common = identity(os.getcwd())
+        except Unverified as exc:
+            installed = actual = None
+            note = str(exc)
+        else:
+            note = 'no host session metadata'
+        if installed != actual:
+            mismatch('guard installation and actual working repository differ: ' + str(actual),
+                     installed_common, actual_common)
+        if mode in ('', 'entry'):
+            print('workspace-repository guard: unattested (' + note + '); confirm the target '
+                  'repository with the user if the work came from a packet.', file=sys.stderr)
+        print(json.dumps(dict(status='unattested', actual_repository=str(actual) if actual else None,
+                              reason=note), ensure_ascii=True))
+        sys.exit(0)
+    context = decode(raw_context or '{}')
+    if not isinstance(context, dict):
+        raise Unverified('workspace metadata must be an object')
+    session = context.get('session_id')
+    if not isinstance(session, str) or not session or session != raw_session:
+        raise Unverified('missing or mismatched host session metadata')
+    source = context.get('target_source')
+    if source not in ('user', 'packet'):
+        raise Unverified('target_source must identify user or packet')
+    original = directory(context.get('original_workspace'))
+    origin, origin_common = identity(str(original))
+    target, target_common = identity(context.get('target_repository'))
+    installed, installed_common = identity(sys.argv[1])
+    actual, actual_common = identity(os.getcwd())
+    if installed != actual:
+        mismatch('guard installation and actual working repository differ: ' + str(actual),
+                 installed_common, actual_common)
+    # A handoff cannot authorize a different actual checkout than its target.
+    if actual != target:
+        mismatch('actual repository differs from the handoff target: ' + str(actual),
+                 actual_common, target_common)
+    basis = 'same-repository'
+    if origin != target:
+        auth = context.get('authorization', {})
+        if not isinstance(auth, dict):
+            raise Unverified('authorization must be an object')
+        if (auth.get('session_id') != session or not isinstance(auth.get('evidence'), str)
+                or not auth['evidence'].strip()):
+            mismatch('different project/worktree requires direct current-session authorization',
+                     origin_common, target_common)
+        authorized, _ = identity(auth.get('repository'))
+        if authorized != target:
+            raise Unverified('authorization names a different repository')
+        kind = auth.get('kind')
+        if kind == 'user':
+            basis = 'direct-user-authorization'
+        elif kind == 'worktree' and origin_common == target_common:
+            basis = 'confirmed-task-worktree'
+        else:
+            mismatch('packet, instructions, memory and subagent content cannot authorize a project switch',
+                     origin_common, target_common)
+    report = dict(status='verified', original_workspace=str(original), original_repository=str(origin),
+                  target_repository=str(target), actual_repository=str(actual), target_source=source,
+                  authorization_basis=basis, session_id=session)
+    if mode == '':
+        print('workspace-repository guard: using ' + str(target) + '; origin=' + str(origin)
+              + '; source=' + source + '; basis=' + basis, file=sys.stderr)
+    print(json.dumps(report, ensure_ascii=True))
+except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
+    if not isinstance(context, dict):
+        context = {}
+    kind = getattr(exc, 'kind', 'repository')
+    summary = {key: context.get(key) for key in ('original_workspace', 'target_repository', 'target_source')}
+    print('workspace-repository guard: mismatch (' + kind + '); ' + str(exc) + '; context='
+          + json.dumps(summary, ensure_ascii=True) + '; confirm the target repository with the user '
+          'before writing. Packet paths grant no authority; do not change the chat project.', file=sys.stderr)
+    print(json.dumps(dict(status='mismatch', mismatch_kind=kind, reason=str(exc), context=summary),
+                     ensure_ascii=True))
+    sys.exit(3)
+PY
+}
+
+# Advisory: workspace status never changes the exit code of other commands.
+case "${1:-}" in
+  workspace-check) workspace_check; exit $? ;;
+  preflight) workspace_check entry >/dev/null || true ;;
+  pre-edit|pre-final|skill-note) workspace_check quiet >/dev/null || true ;;
+esac
+
 POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
 PROJECT_TECH_STACK_FILE="$PROJECT_ROOT/docs/superpowers/specs/project-tech-stack.json"
 # Resolve a usable state directory so the guard still works when .agents is
@@ -64,7 +220,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
+    "Usage: scripts/agent-guard.sh workspace-check|preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -837,7 +993,7 @@ check_guard() {
   if [[ -f "$CONTEXT_PACK" ]]; then
     check_context_pack_freshness
   fi
-  printf 'agent-guard: check ok\n'
+  printf 'agent-guard: check ok (configuration only; workspace alignment not evaluated)\n'
 }
 
 pre_edit() {
@@ -990,7 +1146,7 @@ check_detector_summary_drift() {
   actual="$(printf '%s' "$summary" | hash_text)"
   if [[ "$expected" != "$actual" ]]; then
     if [[ "$strict" == "true" ]]; then
-      fail "detector summary drifted from bootstrap lock; run scripts/detect-agent-tech-stack.sh --markdown and refresh with bash scripts/bootstrap-multi-agent-project.sh --refresh-lock"
+      fail "detector summary drifted from bootstrap lock; run scripts/detect-agent-tech-stack.sh --markdown and refresh with agent-refresh (the kit home bootstrap-multi-agent-project.sh --target . --refresh-lock)"
     fi
     warn "detector summary drifted from bootstrap lock; refresh intentionally before completion"
   fi
@@ -1202,6 +1358,28 @@ placeholder_token = re.compile(r"<[A-Za-z0-9_.:-]+>")
 deadline = time.time() + total_timeout if total_timeout > 0 else None
 
 
+def diagnostic_escape(value):
+    """Escape only characters that could break the one-line diagnostic."""
+    escaped = []
+    for char in str(value):
+        code = ord(char)
+        if char == "\\":
+            escaped.append("\\\\")
+        elif char == "\r":
+            escaped.append("\\r")
+        elif char == "\n":
+            escaped.append("\\n")
+        elif char == "\t":
+            escaped.append("\\t")
+        elif code < 0x20 or 0x7f <= code <= 0x9f:
+            escaped.append(f"\\u{code:04x}")
+        elif code in (0x2028, 0x2029):
+            escaped.append(f"\\u{code:04x}")
+        else:
+            escaped.append(char)
+    return "".join(escaped)
+
+
 def write_report(verification_status, extra=None):
     report = {
         "schema": "agent-guard-verification/v1",
@@ -1249,6 +1427,7 @@ def command_class(command):
         or lowered.endswith(" build")
         or " flutter build" in f" {lowered}"
         or "xcodebuild" in lowered
+        or "./android/gradlew -p android" in lowered
         or " compile" in lowered
         or ":compile" in lowered
     ):
@@ -1354,6 +1533,19 @@ for index, command in enumerate(commands, 1):
         item["reason"] = "failed_to_start"
         item["error"] = start_error
     results.append(item)
+    if status in ("fail", "error", "timeout"):
+        executable = pathlib.Path(argv[0]).name
+        timeout_value = "yes" if status == "timeout" else "no"
+        print(
+            "agent-guard: verify[{}] {} · exit {} · timeout {} · log {}".format(
+                index,
+                diagnostic_escape(executable),
+                exit_code,
+                timeout_value,
+                diagnostic_escape(path_for_report(log_path)),
+            ),
+            file=sys.stderr,
+        )
 
 executed = summary["pass"] + summary["fail"] + summary["error"]
 budget_exhausted = any(item.get("reason") == "budget_exhausted" for item in results)

@@ -10,16 +10,19 @@ UPDATE_SCRIPT="$ROOT_DIR/agent-bootstrap/agent-bootstrap-update.sh"
 ONBOARDING_EVAL="$ROOT_DIR/scripts/test-onboarding-fixtures.sh"
 BOOTSTRAP_BUNDLE="$ROOT_DIR/agent-bootstrap"
 SHARED_LIB="$ROOT_DIR/agent-bootstrap/agent-tech-stack-lib.sh"
-TMP_DIR="$(mktemp -d)"
-FIXTURE_DIR="$(mktemp -d)"
+CAMPAIGN_DIR="$(mktemp -d)"
+# Match the generator canonical-root contract, including macOS /var aliases.
+CAMPAIGN_DIR="$(cd "$CAMPAIGN_DIR" && pwd -P)"
+TMP_DIR="$CAMPAIGN_DIR/target"
+FIXTURE_DIR="$CAMPAIGN_DIR/fixtures"
+mkdir -p "$TMP_DIR" "$FIXTURE_DIR"
 EXTRA_CLEANUP_FILES=()
 
 cleanup() {
   if [[ ${#EXTRA_CLEANUP_FILES[@]} -gt 0 ]]; then
     rm -f "${EXTRA_CLEANUP_FILES[@]}"
   fi
-  rm -rf "$TMP_DIR"
-  rm -rf "$FIXTURE_DIR"
+  rm -rf "$CAMPAIGN_DIR"
 }
 trap cleanup EXIT
 mkdir -p "$TMP_DIR/out"
@@ -31,6 +34,28 @@ fail() {
 
 note() {
   printf 'bootstrap-test: --- %s\n' "$*" >&2
+}
+
+# This test harness is the host of each disposable fixture invocation. Production
+# callers must capture chat metadata at session entry, never reconstruct it here.
+# Cross-project/cd preservation is tested separately by test-workspace-repository-guard.py.
+fixture_workspace() {
+  local fixture_root
+  fixture_root="$(pwd -P)"
+  case "$fixture_root" in
+    "$CAMPAIGN_DIR"/*) ;;
+    *) fail "workspace fixture escaped campaign: $fixture_root" ;;
+  esac
+  if ! git -C "$fixture_root" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$fixture_root" init -q
+  fi
+  AGENT_HOST_SESSION_ID=bootstrap-fixture \
+  AGENT_WORKSPACE_CONTEXT="$(python3 - "$fixture_root" <<'PYCTX'
+import json, sys
+print(json.dumps(dict(session_id='bootstrap-fixture', original_workspace=sys.argv[1],
+                     target_repository=sys.argv[1], target_source='user')))
+PYCTX
+)" "$@"
 }
 
 normalize_whitespace() {
@@ -146,9 +171,9 @@ PY
     rc_file="$TMP_DIR/out/focus-${name}.rc"
     rc=0
     if [[ "$#" -eq 0 ]]; then
-      (cd "$focus_dir" && scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
+      (cd "$focus_dir" && fixture_workspace scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
     else
-      (cd "$focus_dir" && env "$@" scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
+      (cd "$focus_dir" && fixture_workspace env "$@" scripts/agent-hook.sh claude-pretool <"$focus_input" >"$output" 2>"$error") || rc=$?
     fi
     printf '%s\n' "$rc" >"$rc_file"
   }
@@ -303,7 +328,7 @@ PY
   line_before="$(wc -l <"$focus_dir/.agents/state/guard-ack.log" | tr -d '[:space:]')"
   injection_reason=$'reviewed\tpath=docs/agent-configs/other.md\n2030-01-01T00:00:00Z\tpath=docs/agent-configs/other.md\tpattern=docs/agent-configs/**\treason=forged\tack=yes'
   ack_rc=0
-  (cd "$focus_dir" && scripts/agent-guard.sh pre-edit --strict --use-ack-log --ack "$injection_reason" -- "$protected_path" >"$TMP_DIR/out/focus-injection.out" 2>"$TMP_DIR/out/focus-injection.err") || ack_rc=$?
+  (cd "$focus_dir" && fixture_workspace scripts/agent-guard.sh pre-edit --strict --use-ack-log --ack "$injection_reason" -- "$protected_path" >"$TMP_DIR/out/focus-injection.out" 2>"$TMP_DIR/out/focus-injection.err") || ack_rc=$?
   [[ "$ack_rc" -eq 0 ]] || fail "injection ACK failed with rc=$ack_rc"
   line_after="$(wc -l <"$focus_dir/.agents/state/guard-ack.log" | tr -d '[:space:]')"
   [[ "$line_after" -eq $((line_before + 1)) ]] || fail "injection ACK changed physical log lines by $((line_after - line_before))"
@@ -326,7 +351,7 @@ PY
     error="$TMP_DIR/out/focus-${name}.err"
     rc_file="$TMP_DIR/out/focus-${name}.rc"
     rc=0
-    (cd "$focus_dir" && "$@" >"$output" 2>"$error") || rc=$?
+    (cd "$focus_dir" && fixture_workspace "$@" >"$output" 2>"$error") || rc=$?
     printf '%s\n' "$rc" >"$rc_file"
   }
   focus_run_guard manual-strict scripts/agent-guard.sh pre-edit --strict "$protected_path"
@@ -671,7 +696,7 @@ assert_mobile_optimization_skill_note_event() {
   local label="$2"
   (
     cd "$target"
-    scripts/agent-guard.sh skill-note mobile-optimization >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-skill-note.out"
+    fixture_workspace scripts/agent-guard.sh skill-note mobile-optimization >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-skill-note.out"
   )
   need_contains \
     "$(cat "$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-skill-note.out")" \
@@ -695,7 +720,7 @@ event = matches[-1]
 if event.get("telemetry") != "self-report" or event.get("measurement") != "convention":
     raise SystemExit(f"{label} skill_note event did not record telemetry limits: {event}")
 PY
-  if (cd "$target" && scripts/agent-guard.sh skill-note '../bad' >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-bad-skill-note.out" 2>&1); then
+  if (cd "$target" && fixture_workspace scripts/agent-guard.sh skill-note '../bad' >"$TMP_DIR/out/${label//[^A-Za-z0-9_.-]/_}-bad-skill-note.out" 2>&1); then
     fail "$label accepted invalid skill-note name"
   fi
 }
@@ -756,6 +781,750 @@ struct MobileView: View {
     var body: some View { Text("Mobile") }
 }
 EOF_SWIFT_VIEW
+}
+
+make_native_verification_stub_bin() {
+  local target="$1"
+  local bin="$target/native-stubs"
+  mkdir -p "$bin"
+  cat > "$bin/flutter" <<'EOF_NATIVE_FLUTTER'
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+
+pathlib.Path(os.environ["NATIVE_VERIFICATION_LOG"]).open("a", encoding="utf-8").write(
+    json.dumps({"tool": "flutter", "argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n"
+)
+if os.environ.get("NATIVE_VERIFICATION_FAIL") == "flutter-test" and sys.argv[1:] == ["test"]:
+    raise SystemExit(17)
+EOF_NATIVE_FLUTTER
+  cat > "$bin/xcodebuild" <<'EOF_NATIVE_XCODEBUILD'
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+
+pathlib.Path(os.environ["NATIVE_VERIFICATION_LOG"]).open("a", encoding="utf-8").write(
+    json.dumps({"tool": "xcodebuild", "argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n"
+)
+EOF_NATIVE_XCODEBUILD
+  if [[ -d "$target/android" ]]; then
+    cat > "$target/android/gradlew" <<'EOF_NATIVE_GRADLEW'
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import sys
+
+pathlib.Path(os.environ["NATIVE_VERIFICATION_LOG"]).open("a", encoding="utf-8").write(
+    json.dumps({"tool": "gradlew", "argv": sys.argv[1:], "cwd": os.getcwd()}) + "\n"
+)
+EOF_NATIVE_GRADLEW
+    chmod +x "$target/android/gradlew"
+  fi
+  chmod +x "$bin/flutter" "$bin/xcodebuild"
+}
+
+run_native_verification_fixture_suite() {
+  note "native verification detector and generated guard fixtures"
+  local fixture_root="$FIXTURE_DIR/native-verification"
+  local flutter_android="$fixture_root/Flutter Native o'clock"
+  local flutter_ios="$fixture_root/flutter-ios"
+  local pubspec_only="$fixture_root/pubspec-only"
+  local flutter_no_android="$fixture_root/flutter-no-android"
+  local unsafe_android="$fixture_root/flutter-unsafe-android"
+  local broken_android="$fixture_root/flutter-broken-android"
+  local excluded_android="$fixture_root/flutter-excluded-android"
+  local unsafe_nested_module="$fixture_root/flutter-unsafe-nested-module"
+  local excluded_nested_module="$fixture_root/flutter-excluded-nested-module"
+  local linked_module="$fixture_root/flutter-linked-module"
+  local native_android="$fixture_root/native-android"
+  local generic_xcode="$fixture_root/Generic Native o'clock"
+  local excluded_xcode="$fixture_root/excluded-xcode"
+  local generated_flutter generated_ios generated_generic detector_json summary
+  local native_log fast_report wrapper_report failures=()
+  local external_platform="$fixture_root/external-android"
+  local mutation_backup mutation_evidence_dir
+  mutation_evidence_dir="${P2_EVIDENCE_DIR:-}"
+  if [[ -n "$mutation_evidence_dir" ]]; then
+    mkdir -p "$mutation_evidence_dir"
+  fi
+
+  mkdir -p "$flutter_android/android/app/src/main" \
+    "$flutter_android/android/feature/shared/src/main" \
+    "$flutter_ios/ios/Runner.xcodeproj" "$flutter_ios/ios/Runner.xcworkspace" \
+    "$flutter_ios/ios/Auxiliary.xcworkspace" \
+    "$pubspec_only" "$flutter_no_android" "$unsafe_android" "$broken_android" \
+    "$excluded_android/android/.gradle" \
+    "$unsafe_nested_module/android/app/src/main" \
+    "$excluded_nested_module/android/build/app" \
+    "$linked_module/android/shared-app/src/main/kotlin" \
+    "$native_android/app/src/main" \
+    "$generic_xcode/Main O'clock Workspace.xcworkspace" "$generic_xcode/First O'clock.xcodeproj" \
+    "$generic_xcode/Second.xcodeproj/project.xcworkspace" \
+    "$excluded_xcode/out/Foo.xcodeproj" "$excluded_xcode/.next/Next.xcworkspace" \
+    "$excluded_xcode/.agents/state/Hidden.xcodeproj"
+  printf '%s\n' "name: fixture" > "$flutter_android/pubspec.yaml"
+  cat > "$flutter_android/android/settings.gradle" <<'EOF_NATIVE_ANDROID_SETTINGS'
+rootProject.name = "flutter-native"
+include ":app", ":feature:shared"
+EOF_NATIVE_ANDROID_SETTINGS
+  cat > "$flutter_android/android/app/build.gradle" <<'EOF_NATIVE_ANDROID_APP_BUILD'
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.jvm"
+}
+EOF_NATIVE_ANDROID_APP_BUILD
+  cat > "$flutter_android/android/feature/shared/build.gradle.kts" <<'EOF_NATIVE_ANDROID_FEATURE_BUILD'
+plugins {
+    id("org.jetbrains.kotlin.jvm")
+}
+EOF_NATIVE_ANDROID_FEATURE_BUILD
+  cat > "$flutter_android/android/app/src/main/AndroidManifest.xml" <<'EOF_NATIVE_ANDROID_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_NATIVE_ANDROID_MANIFEST
+
+  printf '%s\n' "name: fixture" > "$flutter_ios/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$pubspec_only/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$flutter_no_android/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$unsafe_android/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$broken_android/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$excluded_android/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$unsafe_nested_module/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$excluded_nested_module/pubspec.yaml"
+  printf '%s\n' "name: fixture" > "$native_android/README.md"
+  cat > "$native_android/settings.gradle.kts" <<'EOF_NATIVE_ROOT_SETTINGS'
+rootProject.name = "native-android"
+include(":app")
+EOF_NATIVE_ROOT_SETTINGS
+  cat > "$native_android/build.gradle.kts" <<'EOF_NATIVE_ROOT_BUILD'
+plugins {
+    id("com.android.application") version "8.5.0" apply false
+}
+EOF_NATIVE_ROOT_BUILD
+  cat > "$native_android/app/build.gradle.kts" <<'EOF_NATIVE_ROOT_APP_BUILD'
+plugins {
+    id("com.android.application")
+}
+EOF_NATIVE_ROOT_APP_BUILD
+  cat > "$native_android/app/src/main/AndroidManifest.xml" <<'EOF_NATIVE_ROOT_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_NATIVE_ROOT_MANIFEST
+  cat > "$unsafe_nested_module/android/settings.gradle" <<'EOF_NATIVE_UNSAFE_NESTED_SETTINGS'
+rootProject.name = "unsafe-nested"
+include ":app", ":feature:shared", ":feature:..:shared"
+EOF_NATIVE_UNSAFE_NESTED_SETTINGS
+  cat > "$unsafe_nested_module/android/app/build.gradle" <<'EOF_NATIVE_UNSAFE_NESTED_APP_BUILD'
+plugins {
+    id "com.android.application"
+}
+EOF_NATIVE_UNSAFE_NESTED_APP_BUILD
+  cat > "$unsafe_nested_module/android/app/src/main/AndroidManifest.xml" <<'EOF_NATIVE_UNSAFE_NESTED_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_NATIVE_UNSAFE_NESTED_MANIFEST
+  cat > "$excluded_nested_module/android/settings.gradle" <<'EOF_NATIVE_EXCLUDED_NESTED_SETTINGS'
+rootProject.name = "excluded-nested"
+include ":build:app"
+EOF_NATIVE_EXCLUDED_NESTED_SETTINGS
+  cat > "$excluded_nested_module/android/build/app/build.gradle" <<'EOF_NATIVE_EXCLUDED_NESTED_BUILD'
+plugins {
+    id "com.android.application"
+}
+EOF_NATIVE_EXCLUDED_NESTED_BUILD
+  ln -s "$external_platform" "$unsafe_android/android"
+  mkdir -p "$external_platform/feature/shared" "$external_platform/shared"
+  ln -s "$external_platform/feature" "$unsafe_nested_module/android/feature"
+  ln -s "$fixture_root/missing-android" "$broken_android/android"
+  # In-root symlinked module without a module build file: evidence must come
+  # from walking the link target, which stays inside the project root.
+  printf '%s\n' "name: fixture" > "$linked_module/pubspec.yaml"
+  printf '%s\n' 'rootProject.name = "linked-module"' 'include ":app"' > "$linked_module/android/settings.gradle"
+  printf '%s\n' '<manifest />' > "$linked_module/android/shared-app/src/main/AndroidManifest.xml"
+  printf '%s\n' 'class Linked' > "$linked_module/android/shared-app/src/main/kotlin/Linked.kt"
+  ln -s shared-app "$linked_module/android/app"
+  printf '%s\n' "settings" > "$excluded_android/android/.gradle/settings.gradle"
+  ln -s "$fixture_root/missing-container.xcworkspace" "$generic_xcode/broken.xcworkspace"
+  ln -s "$fixture_root" "$generic_xcode/external.xcodeproj"
+
+  mkdir -p "$external_platform/app/src/main"
+  printf '%s\n' "rootProject.name = \"external\"" > "$external_platform/settings.gradle"
+  printf '%s\n' 'plugins { id "com.android.application" }' > "$external_platform/app/build.gradle"
+  printf '%s\n' '<manifest />' > "$external_platform/app/src/main/AndroidManifest.xml"
+  printf '%s\n' 'plugins { id "org.jetbrains.kotlin.jvm" }' > "$external_platform/feature/shared/build.gradle"
+  printf '%s\n' 'plugins { id "com.android.application" }' > "$external_platform/shared/build.gradle"
+  printf '%s\n' 'name: fixture' > "$generic_xcode/README.md"
+
+  make_native_verification_stub_bin "$flutter_android"
+  make_native_verification_stub_bin "$flutter_ios"
+  make_native_verification_stub_bin "$generic_xcode"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$flutter_android" --workflow full >"$TMP_DIR/out/native-flutter-android-bootstrap.out"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$flutter_ios" --workflow full >"$TMP_DIR/out/native-flutter-ios-bootstrap.out"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$generic_xcode" --workflow full >"$TMP_DIR/out/native-generic-xcode-bootstrap.out"
+
+  native_log="$TMP_DIR/out/native-verification-argv.jsonl"
+  : > "$native_log"
+  generated_flutter="$flutter_android"
+  generated_ios="$flutter_ios"
+  generated_generic="$generic_xcode"
+  for target in "$generated_flutter" "$generated_ios" "$generated_generic"; do
+    (
+      cd "$target"
+      git init -q
+      git config user.email "bootstrap-test@example.invalid"
+      git config user.name "Bootstrap Test"
+      git add -A
+      git commit -qm baseline
+      fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+    )
+  done
+
+  detector_json="$(cd "$generated_flutter" && NATIVE_VERIFICATION_LOG="$native_log" scripts/detect-agent-tech-stack.sh --json)"
+  summary="$(cd "$generated_flutter" && NATIVE_VERIFICATION_LOG="$native_log" scripts/detect-agent-tech-stack.sh --summary)"
+  native_json_expect() {
+    local payload="$1"
+    local expression="$2"
+    local label="$3"
+    if ! python3 - "$payload" "$expression" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+expression = sys.argv[2]
+if expression == "flutter_android":
+    commands = document["verification_commands"]
+    assert commands.index("flutter test") < commands.index("flutter analyze") < commands.index("flutter build appbundle --release"), document
+    assert "./android/gradlew -p android testDebugUnitTest" in commands, document
+    assert "android_kotlin" in document["tech_stacks"], document
+    assert ":app" in document["modules"] and ":feature:shared" in document["modules"], document
+    assert any("relative to android/" in warning for warning in document["warnings"]), document
+elif expression == "flutter_ios":
+    commands = document["verification_commands"]
+    assert "flutter build ios --release --no-codesign" in commands, document
+    assert not any("xcodebuild test" in command for command in commands), document
+elif expression == "generic_workspace":
+    commands = document["verification_commands"]
+    assert any(command.startswith("xcodebuild -list -workspace '") for command in commands), document
+    assert any("-scheme <scheme>" in command and "-workspace '" in command for command in commands), document
+    assert any("multiple eligible Xcode containers" in warning for warning in document["warnings"]), document
+else:
+    raise AssertionError(expression)
+PY
+    then
+      failures+=("$label")
+    fi
+  }
+  native_summary_expect() {
+    local payload="$1"
+    local needle="$2"
+    local label="$3"
+    if ! grep -Fq -- "$needle" <<<"$payload"; then
+      failures+=("$label")
+    fi
+  }
+  native_json_expect "$detector_json" flutter_android "Flutter Android nested commands/modules"
+  native_summary_expect "$summary" "./android/gradlew -p android testDebugUnitTest" "Flutter Android nested wrapper command in summary"
+
+  for negative in "$pubspec_only" "$flutter_no_android" "$unsafe_android" "$broken_android" "$excluded_android" "$excluded_nested_module"; do
+    negative_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --root "$negative" --json)"
+    if ! python3 - "$negative_json" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert not any(command.startswith("flutter build appbundle") or command.startswith("./android/gradlew") for command in document["verification_commands"]), document
+PY
+    then
+      failures+=("unsafe or absent Flutter Android platform emitted a command: $negative")
+    fi
+  done
+
+  linked_module_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --root "$linked_module" --json)"
+  if ! python3 - "$linked_module_json" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert "flutter build appbundle --release" in document["verification_commands"], document
+PY
+  then
+    failures+=("in-root symlinked Flutter Android module was not detected")
+  fi
+
+  native_android_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --root "$native_android" --json)"
+  if ! python3 - "$native_android_json" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert "android_java" in document["tech_stacks"], document
+assert "./gradlew :app:testDebugUnitTest" in document["verification_commands"], document
+assert not any(command.startswith("flutter ") for command in document["verification_commands"]), document
+PY
+  then
+    failures+=("standalone root Android semantics changed")
+  fi
+
+  unsafe_nested_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --root "$unsafe_nested_module" --json)"
+  if ! python3 - "$unsafe_nested_json" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert ":app" in document["modules"], document
+assert ":feature:shared" not in document["modules"], document
+assert ":feature:..:shared" not in document["modules"], document
+assert "flutter build appbundle --release" in document["verification_commands"], document
+assert not any(command.startswith("./android/gradlew") for command in document["verification_commands"]), document
+PY
+  then
+    failures+=("outside nested Android module was accepted")
+  fi
+
+  excluded_xcode_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --root "$excluded_xcode" --json)"
+  if ! python3 - "$excluded_xcode_json" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert "ios_swift" not in document["tech_stacks"], document
+assert not any(command.startswith("xcodebuild ") for command in document["verification_commands"]), document
+PY
+  then
+    failures+=("excluded Xcode containers were accepted")
+  fi
+
+  ios_json="$(cd "$generated_ios" && NATIVE_VERIFICATION_LOG="$native_log" scripts/detect-agent-tech-stack.sh --json)"
+  native_json_expect "$ios_json" flutter_ios "Flutter iOS Runner container/build behavior"
+  generic_json="$(cd "$generated_generic" && NATIVE_VERIFICATION_LOG="$native_log" scripts/detect-agent-tech-stack.sh --json)"
+  native_json_expect "$generic_json" generic_workspace "generic Xcode workspace selection/quoting"
+
+  (
+    cd "$generated_flutter"
+    PATH="$generated_flutter/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+      fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope fast >"$TMP_DIR/out/native-flutter-fast.out" 2>"$TMP_DIR/out/native-flutter-fast.err"
+  ) || failures+=("Flutter fast guard execution")
+  fast_report="$TMP_DIR/out/native-flutter-fast-report.json"
+  cp "$generated_flutter/.agents/state/last-verify-report.json" "$fast_report"
+  if ! python3 - "$fast_report" <<'PY'
+import json
+import sys
+
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+assert document["scope"] == "fast", document
+assert any(item["command"] == "flutter build appbundle --release" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
+assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
+PY
+  then
+    failures+=("nested Flutter commands are full-scope in fast guard report")
+  fi
+
+  (
+    cd "$generated_flutter"
+    PATH="$generated_flutter/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+      fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR/out/native-flutter-full.out" 2>"$TMP_DIR/out/native-flutter-full.err"
+  ) || failures+=("Flutter full guard execution")
+  wrapper_report="$generated_flutter/.agents/state/last-verify-report.json"
+  if ! python3 - "$wrapper_report" "$native_log" "$generated_flutter" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+assert report["scope"] == "full", report
+for command in ("flutter test", "flutter analyze", "flutter build appbundle --release", "./android/gradlew -p android testDebugUnitTest"):
+    assert any(item["command"] == command and item["status"] == "pass" for item in report["commands"]), report
+root = pathlib.Path(sys.argv[3]).resolve()
+records = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
+expected = [
+    ("flutter", ["test"]),
+    ("flutter", ["analyze"]),
+    ("flutter", ["build", "appbundle", "--release"]),
+    ("gradlew", ["-p", "android", "testDebugUnitTest"]),
+]
+assert [(record["tool"], record["argv"]) for record in records[-4:]] == expected, records
+assert all(pathlib.Path(record["cwd"]).resolve() == root for record in records[-4:]), records
+PY
+  then
+    failures+=("Flutter full guard argv/cwd/order")
+  fi
+
+  (
+    cd "$generated_ios"
+    PATH="$generated_ios/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+      fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR/out/native-flutter-ios-full.out" 2>"$TMP_DIR/out/native-flutter-ios-full.err"
+  ) || failures+=("Flutter iOS full guard execution")
+  if ! grep -Fq '"tool": "flutter", "argv": ["build", "ios", "--release", "--no-codesign"]' "$native_log"; then
+    failures+=("Flutter iOS unsigned release argv")
+  fi
+
+  (
+    cd "$generated_generic"
+    PATH="$generated_generic/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+      fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR/out/native-generic-full.out" 2>"$TMP_DIR/out/native-generic-full.err"
+  ) || failures+=("generic Xcode full guard execution")
+  cp "$generated_generic/.agents/state/last-verify-report.json" "$TMP_DIR/out/native-generic-report.json" ||
+    failures+=("generic Xcode verification report")
+  if ! python3 - "$TMP_DIR/out/native-generic-report.json" <<'PY'
+import json
+import sys
+
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+assert any(item["command"].startswith("xcodebuild -list") and item["status"] == "pass" for item in document["commands"]), document
+PY
+  then
+    failures+=("generic Xcode list command was not executed")
+  fi
+  if ! python3 - "$native_log" "$generated_generic" <<'PY'
+import json
+import pathlib
+import sys
+
+log_path = pathlib.Path(sys.argv[1])
+expected_root = pathlib.Path(sys.argv[2]).resolve()
+records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+assert any(
+    record["tool"] == "xcodebuild"
+    and record["argv"] == ["-list", "-workspace", "Main O'clock Workspace.xcworkspace"]
+    and pathlib.Path(record["cwd"]).resolve() == expected_root
+    for record in records
+), records
+PY
+  then
+    failures+=("generic Xcode workspace argv/cwd")
+  fi
+
+  native_failure_err="$TMP_DIR/out/native-guard-failure.err"
+  native_failure_out="$TMP_DIR/out/native-guard-failure.out"
+  native_failure_rc=0
+  (
+    cd "$generated_flutter"
+    NATIVE_VERIFICATION_FAIL=flutter-test PATH="$generated_flutter/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+      fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope fast >"$native_failure_out" 2>"$native_failure_err"
+  ) || native_failure_rc=$?
+  [[ "$native_failure_rc" -eq 1 ]] || failures+=("guard failure fixture exit code")
+  diagnostic_count="$(grep -c '^agent-guard: verify\[[0-9][0-9]*\] flutter · exit 17 · timeout no · log ' "$native_failure_err" || true)"
+  [[ "$diagnostic_count" -eq 1 ]] || failures+=("guard failure diagnostic count/shape")
+  if grep -Fq 'flutter test' "$native_failure_err" || grep -Fq 'NATIVE_VERIFICATION_FAIL' "$native_failure_err"; then
+    failures+=("guard failure diagnostic leaked command details")
+  fi
+  if ! python3 - "$generated_flutter/.agents/state/last-verify-report.json" <<'PY'
+import json
+import sys
+
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+assert document["verification_status"] == "fail", document
+assert any(item["command"] == "flutter test" and item["status"] == "fail" and item["exit_code"] == 17 for item in document["commands"]), document
+PY
+  then
+    failures+=("guard failure report status/accounting")
+  fi
+
+  mutation_backup="$TMP_DIR/out/native-mutation-lib.backup"
+  cp "$generated_generic/scripts/agent-tech-stack-lib.sh" "$mutation_backup"
+  python3 - "$generated_generic/scripts/agent-tech-stack-lib.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+text = text.replace("xcodebuild -list -workspace", "xcodebuild -list", 1)
+path.write_text(text, encoding="utf-8")
+PY
+  mutated_generic_json="$(cd "$generated_generic" && scripts/detect-agent-tech-stack.sh --json)"
+  printf '%s\n' "$mutated_generic_json" >"$TMP_DIR/out/native-mutation-container-report.json"
+  if python3 - "$mutated_generic_json" >"$TMP_DIR/out/native-mutation-container-assertion.out" 2>"$TMP_DIR/out/native-mutation-container-assertion.err" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert any(command.startswith("xcodebuild -list -workspace '") for command in document["verification_commands"]), document
+PY
+  then
+    mutation_container_rc=0
+    failures+=("Xcode container mutation did not trip public assertion")
+  else
+    mutation_container_rc=$?
+  fi
+  printf 'expected_rc=1 observed_rc=%s\n' "$mutation_container_rc" >"$TMP_DIR/out/native-mutation-container-assertion.rc"
+  cp "$mutation_backup" "$generated_generic/scripts/agent-tech-stack-lib.sh"
+
+  mutation_backup="$TMP_DIR/out/native-mutation-wrapper.backup"
+  cp "$generated_flutter/scripts/agent-tech-stack-lib.sh" "$mutation_backup"
+  python3 - "$generated_flutter/scripts/agent-tech-stack-lib.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+text = text.replace("./android/gradlew -p android testDebugUnitTest", "./android/gradlew testDebugUnitTest", 1)
+path.write_text(text, encoding="utf-8")
+PY
+  mutated_flutter_json="$(cd "$generated_flutter" && scripts/detect-agent-tech-stack.sh --json)"
+  printf '%s\n' "$mutated_flutter_json" >"$TMP_DIR/out/native-mutation-wrapper-report.json"
+  if python3 - "$mutated_flutter_json" >"$TMP_DIR/out/native-mutation-wrapper-assertion.out" 2>"$TMP_DIR/out/native-mutation-wrapper-assertion.err" <<'PY'
+import json
+import sys
+
+document = json.loads(sys.argv[1])
+assert "./android/gradlew -p android testDebugUnitTest" in document["verification_commands"], document
+PY
+  then
+    mutation_wrapper_rc=0
+    failures+=("nested Gradle -p mutation did not trip public assertion")
+  else
+    mutation_wrapper_rc=$?
+  fi
+  printf 'expected_rc=1 observed_rc=%s\n' "$mutation_wrapper_rc" >"$TMP_DIR/out/native-mutation-wrapper-assertion.rc"
+  cp "$mutation_backup" "$generated_flutter/scripts/agent-tech-stack-lib.sh"
+
+  mutation_backup="$TMP_DIR/out/native-mutation-class.backup"
+  cp "$generated_flutter/scripts/agent-guard.sh" "$mutation_backup"
+  if grep -Fq 'or "./android/gradlew -p android" in lowered' "$generated_flutter/scripts/agent-guard.sh"; then
+    python3 - "$generated_flutter/scripts/agent-guard.sh" <<'PY'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+needle = 'or "./android/gradlew -p android" in lowered'
+assert needle in text, "guard classification mutation anchor missing"
+path.write_text(text.replace(needle, "or False", 1), encoding="utf-8")
+PY
+    if (
+      cd "$generated_flutter"
+      PATH="$generated_flutter/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
+        fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope fast >"$TMP_DIR/out/native-mutated-class.out" 2>"$TMP_DIR/out/native-mutated-class.err"
+    ); then
+      mutation_class_guard_rc=0
+      mutated_class_report="$generated_flutter/.agents/state/last-verify-report.json"
+      if python3 - "$mutated_class_report" >"$TMP_DIR/out/native-mutation-class-assertion.out" 2>"$TMP_DIR/out/native-mutation-class-assertion.err" <<'PY'
+import json
+import sys
+
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
+PY
+      then
+        mutation_class_assertion_rc=0
+        failures+=("nested wrapper classification mutation did not trip public assertion")
+      else
+        mutation_class_assertion_rc=$?
+      fi
+      printf 'expected_rc=1 observed_rc=%s guard_rc=%s\n' "$mutation_class_assertion_rc" "$mutation_class_guard_rc" >"$TMP_DIR/out/native-mutation-class-assertion.rc"
+    else
+      mutation_class_guard_rc=$?
+      mutation_class_assertion_rc=missing_report
+      printf 'expected_rc=1 observed_rc=missing_report guard_rc=%s\n' "$mutation_class_guard_rc" >"$TMP_DIR/out/native-mutation-class-assertion.rc"
+      failures+=("mutated classification guard invocation")
+    fi
+  else
+    printf 'expected_rc=1 observed_rc=missing_anchor\n' >"$TMP_DIR/out/native-mutation-class-assertion.rc"
+    failures+=("nested wrapper classification mutation anchor missing")
+  fi
+  cp "$mutation_backup" "$generated_flutter/scripts/agent-guard.sh"
+
+  if [[ -n "$mutation_evidence_dir" ]]; then
+    cp "$TMP_DIR/out/native-mutation-container-report.json" "$mutation_evidence_dir/xcode-container-mutated-report.json"
+    cp "$TMP_DIR/out/native-mutation-container-assertion.out" "$mutation_evidence_dir/xcode-container-assertion.out"
+    cp "$TMP_DIR/out/native-mutation-container-assertion.err" "$mutation_evidence_dir/xcode-container-assertion.err"
+    cp "$TMP_DIR/out/native-mutation-container-assertion.rc" "$mutation_evidence_dir/xcode-container-assertion.rc"
+    cp "$TMP_DIR/out/native-mutation-wrapper-report.json" "$mutation_evidence_dir/nested-wrapper-mutated-report.json"
+    cp "$TMP_DIR/out/native-mutation-wrapper-assertion.out" "$mutation_evidence_dir/nested-wrapper-assertion.out"
+    cp "$TMP_DIR/out/native-mutation-wrapper-assertion.err" "$mutation_evidence_dir/nested-wrapper-assertion.err"
+    cp "$TMP_DIR/out/native-mutation-wrapper-assertion.rc" "$mutation_evidence_dir/nested-wrapper-assertion.rc"
+    cp "$TMP_DIR/out/native-mutation-class-assertion.out" "$mutation_evidence_dir/nested-wrapper-class-assertion.out" 2>/dev/null || true
+    cp "$TMP_DIR/out/native-mutation-class-assertion.err" "$mutation_evidence_dir/nested-wrapper-class-assertion.err" 2>/dev/null || true
+    cp "$TMP_DIR/out/native-mutation-class-assertion.rc" "$mutation_evidence_dir/nested-wrapper-class-assertion.rc"
+  fi
+
+  if [[ ${#failures[@]} -gt 0 ]]; then
+    printf 'native-verification fixture failures:\n' >&2
+    printf ' - %s\n' "${failures[@]}" >&2
+    return 1
+  fi
+}
+run_linked_ancestor_snapshot_focus() {
+  note "linked ancestor snapshot preserves required configuration"
+  local target="$FIXTURE_DIR/linked-ancestor"
+  local shared_docs="$target/shared-docs"
+  local docs_link="$target/docs"
+  local seats="$target/docs/agent-configs/seats.json"
+  local seats_before seats_mode_before docs_link_before diff_out status_out apply_out
+
+  mkdir -p "$target"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force --no-backup >"$TMP_DIR/out/linked-ancestor-bootstrap.out"
+  mv "$target/docs" "$shared_docs"
+  ln -s shared-docs "$docs_link"
+  python3 - "$shared_docs/agent-configs/seats.json" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+document = json.loads(path.read_text(encoding="utf-8"))
+document["seats"]["build"]["occupant"]["effort"] = "high"
+path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+PY
+  seats_before="$(sha256_file "$seats")"
+  seats_mode_before="$(file_mode_inode "$seats")"
+  docs_link_before="$(readlink "$docs_link")"
+
+  diff_out="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --diff)" ||
+    fail "linked ancestor diff unexpectedly failed"
+  need_contains "$diff_out" "@build" "linked ancestor diff retained custom seats"
+  status_out="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --status --json)" ||
+    fail "linked ancestor status unexpectedly failed"
+  need_contains "$status_out" '"generated_file_drift"' "linked ancestor status schema"
+  apply_out="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --apply-candidates)" ||
+    fail "linked ancestor candidate allowlist unexpectedly failed"
+  need_contains "$apply_out" "No generated candidates" "linked ancestor candidate allowlist"
+
+  [[ "$(sha256_file "$seats")" == "$seats_before" ]] || fail "linked ancestor seats bytes changed"
+  [[ "$(file_mode_inode "$seats")" == "$seats_mode_before" ]] || fail "linked ancestor seats mode/inode changed"
+  [[ -L "$docs_link" && "$(readlink "$docs_link")" == "$docs_link_before" ]] || fail "linked ancestor docs symlink changed"
+}
+
+run_core_boundary_focus() {
+  note "core path boundary and public-action mutation oracles"
+  local target="$FIXTURE_DIR/core-boundary"
+  local outside="$FIXTURE_DIR/core-boundary-outside"
+  local outside_file="$outside/sentinel.txt"
+  local outside_hash outside_meta link_target status_json diff_err rc
+  mkdir -p "$target" "$outside"
+  printf 'outside sentinel bytes\n' > "$outside_file"
+  chmod 640 "$outside_file"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force --no-backup >"$TMP_DIR/out/core-boundary-bootstrap.out"
+
+  # Each referent is an in-root lexical path whose resolved bytes live outside.
+  # Public status remains machine-readable; preview refuses required unsafe
+  # inputs without dereferencing or mutating the outside sentinel.
+  for relpath in \
+    package.json \
+    docs/agent-configs/agent-bootstrap.lock.json \
+    docs/agent-configs/project-brief.md; do
+    local link="$target/$relpath"
+    mkdir -p "$(dirname "$link")"
+    [[ -e "$link" || -L "$link" ]] && rm -f "$link"
+    ln -s "$outside_file" "$link"
+    outside_hash="$(sha256_file "$outside_file")"
+    outside_meta="$(file_mode_inode "$outside_file")"
+    status_json="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --status --json 2>"$TMP_DIR/out/core-boundary-status.err")" ||
+      fail "status failed for unsafe linked referent $relpath"
+    python3 - "$status_json" <<'PY'
+import json
+import sys
+document = json.loads(sys.argv[1])
+assert document["schema"] == "agent-bootstrap-status/v1", document
+PY
+    diff_err="$TMP_DIR/out/core-boundary-${relpath//\//-}.err"
+    rc=0
+    bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --diff >"$TMP_DIR/out/core-boundary-diff.out" 2>"$diff_err" || rc=$?
+    if [[ "$relpath" == package.json ]]; then
+      [[ "$rc" -eq 0 ]] || fail "optional unsafe package link made diff fail"
+    else
+      [[ "$rc" -eq 1 ]] || fail "required unsafe link $relpath did not refuse preview (rc=$rc)"
+      need_contains "$(cat "$diff_err")" "required preview configuration was unsafe or unavailable" "unsafe required preview diagnostic $relpath"
+    fi
+    [[ "$(sha256_file "$outside_file")" == "$outside_hash" ]] || fail "unsafe link $relpath changed outside bytes"
+    [[ "$(file_mode_inode "$outside_file")" == "$outside_meta" ]] || fail "unsafe link $relpath changed outside mode/inode"
+    [[ -L "$link" && "$(readlink "$link")" == "$outside_file" ]] || fail "unsafe link $relpath identity changed"
+    rm -f "$link"
+  done
+
+  # Excluded lexical components must remain excluded even when they resolve to
+  # an otherwise safe in-root file.  This exercises the two-pass lexical and
+  # resolved policy through the public preview path.
+  mkdir -p "$target/.git"
+  printf 'safe package bytes\n' > "$target/safe-package.json"
+  ln -s ../safe-package.json "$target/.git/linked-package.json"
+  ln -s safe-package.json "$target/.env-linked-package.json"
+  diff_err="$TMP_DIR/out/core-boundary-excluded-link.err"
+  rc=0
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --diff >"$TMP_DIR/out/core-boundary-excluded-link.out" 2>"$diff_err" || rc=$?
+  [[ "$rc" -eq 0 ]] || fail "excluded lexical link made public diff fail"
+  [[ "$(cat "$target/safe-package.json")" == "safe package bytes" ]] || fail "excluded lexical link changed safe target"
+  [[ -L "$target/.git/linked-package.json" ]] || fail "excluded lexical link identity changed"
+  [[ -L "$target/.env-linked-package.json" ]] || fail "excluded .env lexical link identity changed"
+
+  # A user-owned leaf symlink is never followed for force/backup writes; an
+  # unsafe .gitignore is a hard refusal.  Capture bytes, mode, inode, and link
+  # targets to catch a dereference as well as a replacement.
+  local external_agents="$outside/external-AGENTS.md"
+  local external_ignore="$outside/external-gitignore"
+  local agents_link_target agents_link_backup
+  printf 'external AGENTS sentinel\n' > "$external_agents"
+  printf 'external gitignore sentinel\n' > "$external_ignore"
+  rm -f "$target/AGENTS.md"
+  ln -s "$external_agents" "$target/AGENTS.md"
+  agents_link_target="$(readlink "$target/AGENTS.md")"
+  outside_hash="$(sha256_file "$external_agents")"; outside_meta="$(file_mode_inode "$external_agents")"
+  rc=0
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force >"$TMP_DIR/out/core-boundary-force-link.out" 2>"$TMP_DIR/out/core-boundary-force-link.err" || rc=$?
+  [[ "$rc" -eq 0 ]] || fail "force failed to replace ordinary AGENTS leaf link (rc=$rc)"
+  [[ "$(sha256_file "$external_agents")" == "$outside_hash" && "$(file_mode_inode "$external_agents")" == "$outside_meta" ]] || fail "force changed external AGENTS target"
+  [[ -f "$target/AGENTS.md" && ! -L "$target/AGENTS.md" ]] || fail "force did not replace AGENTS leaf link with a regular file"
+  agents_link_backup="$(find "$target" -maxdepth 1 -type l -name 'AGENTS.md.bak.*' -print | sort | tail -n1)"
+  [[ -n "$agents_link_backup" && "$(readlink "$agents_link_backup")" == "$agents_link_target" ]] || fail "force backup did not preserve AGENTS leaf link"
+  rm -f "$target/AGENTS.md"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force --no-backup >/dev/null
+
+  rm -f "$target/.gitignore"
+  ln -s "$external_ignore" "$target/.gitignore"
+  outside_hash="$(sha256_file "$external_ignore")"; outside_meta="$(file_mode_inode "$external_ignore")"
+  rc=0
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force >"$TMP_DIR/out/core-boundary-gitignore.out" 2>"$TMP_DIR/out/core-boundary-gitignore.err" || rc=$?
+  [[ "$rc" -eq 1 ]] || fail "unsafe .gitignore link did not refuse (rc=$rc)"
+  need_contains "$(cat "$TMP_DIR/out/core-boundary-gitignore.out")" "unsafe .gitignore" "unsafe .gitignore diagnostic"
+  [[ "$(sha256_file "$external_ignore")" == "$outside_hash" && "$(file_mode_inode "$external_ignore")" == "$outside_meta" ]] || fail "unsafe .gitignore changed external target"
+  [[ -L "$target/.gitignore" && "$(readlink "$target/.gitignore")" == "$external_ignore" ]] || fail "unsafe .gitignore link identity changed"
+  rm -f "$target/.gitignore"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force --no-backup >/dev/null
+
+  # Default generation creates a reviewable candidate, --force takes a backup,
+  # and the allowlist promotes only the generated harness file.  A symlink
+  # candidate is ignored and cannot write through to an outside target.
+  printf '\nuser drift\n' >> "$target/AGENTS.md"
+  # Without a harness baseline (pre-baseline targets) local drift stays a candidate.
+  rm -f "$target/.tools/agent-state/harness-baseline/files/AGENTS.md"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full >"$TMP_DIR/out/core-boundary-candidate.out"
+  local candidate
+  candidate="$(find "$target" -maxdepth 1 -type f -name 'AGENTS.md.generated.*' -print | sort | tail -n1)"
+  [[ -n "$candidate" && -f "$candidate" ]] || fail "generation did not create AGENTS candidate"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --workflow full --force >"$TMP_DIR/out/core-boundary-force.out"
+  [[ -n "$(find "$target" -maxdepth 1 -type f -name 'AGENTS.md.bak.*' -print -quit)" ]] || fail "force generation did not retain a backup"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --apply-candidates >"$TMP_DIR/out/core-boundary-apply.out"
+  [[ -z "$(find "$target" -maxdepth 1 -type f -name 'AGENTS.md.generated.*' -print -quit)" ]] || fail "apply-candidates left a reviewed candidate"
+  # --only promotes just the named candidates and reports names with none.
+  printf 'only agents candidate\n' > "$target/AGENTS.md.generated.20990101-000001"
+  printf 'only claude candidate\n' > "$target/CLAUDE.md.generated.20990101-000001"
+  local only_out
+  only_out="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --apply-candidates --only AGENTS.md --only docs/absent.md)"
+  [[ "$(cat "$target/AGENTS.md")" == "only agents candidate" ]] || fail "--only did not promote the named candidate"
+  [[ -f "$target/CLAUDE.md.generated.20990101-000001" ]] || fail "--only promoted a candidate that was not named"
+  need_contains "$only_out" "No generated candidate applied for docs/absent.md" "--only reports names without a candidate"
+  rm -f "$target/CLAUDE.md.generated.20990101-000001"
+  if bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --only AGENTS.md >/dev/null 2>&1; then
+    fail "--only without --apply-candidates must be refused"
+  fi
+  printf 'candidate external sentinel\n' > "$outside_file"
+  ln -s "$outside_file" "$target/AGENTS.md.generated.20990101-000000"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$target" --apply-candidates >"$TMP_DIR/out/core-boundary-symlink-candidate.out"
+  [[ -L "$target/AGENTS.md.generated.20990101-000000" && "$(cat "$outside_file")" == "candidate external sentinel" ]] || fail "symlink candidate was dereferenced"
+}
+
+file_mode_inode() {
+  python3 - "$1" <<'PY'
+import os
+import stat
+import sys
+
+metadata = os.stat(sys.argv[1])
+print(f"{metadata.st_mode & 0o7777:04o} {metadata.st_ino}")
+PY
 }
 
 sha256_file() {
@@ -922,8 +1691,17 @@ PY
 
   apply_out="$(bash "$old_home/agent-bootstrap-update.sh" --home "$old_home" --repo "$update_repo" --target "$target_dir" --apply)"
   need_contains "$apply_out" "Generated multi-agent files." "project upgrade delegated apply"
-  [[ -n "$(find "$target_dir" -name '*.generated.*' -print -quit)" ]] ||
-    fail "project upgrade apply should leave visible generated candidates for review"
+  need_contains "$apply_out" "Applying installed workflow: full" "project upgrade keeps the installed full workflow"
+  # Files without local edits follow the new kit in place, and the run can be undone.
+  need_contains "$apply_out" "Updated unmodified file:" "project upgrade updates unmodified files in place"
+  need_contains "$apply_out" "Upgrade id:" "project upgrade prints its rollback id"
+  # User-owned templates keep the candidate flow; managed files never need one here.
+  local stray_candidates
+  stray_candidates="$(find "$target_dir" -path "$target_dir/.tools" -prune -o -name '*.generated.*' -print |
+    sed "s|^$target_dir/||" |
+    grep -vE '^(docs/agent-configs/project-agent-context\.md|docs/agent-configs/project-brief\.md|docs/superpowers/specs/project-tech-stack\.(md|json))\.generated\.' || true)"
+  [[ -z "$stray_candidates" ]] ||
+    fail "project upgrade apply left candidates for unedited managed files: $stray_candidates"
 }
 
 write_fake_curl() {
@@ -1124,7 +1902,7 @@ bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
 need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
 need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
 need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-[[ "$bundle_version" == "2026.09.10.1" ]] || fail "VERSION not bumped to 2026.09.10.1"
+bash "$ROOT_DIR/scripts/release.sh" --check >/dev/null || fail "release pins drift from VERSION; see scripts/release.sh --check"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
 need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
@@ -1164,6 +1942,7 @@ for canonical_file in \
   verify-ai-deps.sh \
   model-profiles/codex-model-profiles.json \
   policies/agent-context-policy.json \
+  policies/retired-artifacts-v1.json \
   provenance/rtk-v0.37.2.sha256 \
   schemas/agent-context-policy-v1.schema.json \
   schemas/agent-model-profiles-v1.schema.json \
@@ -1171,6 +1950,8 @@ for canonical_file in \
   schemas/agent-project-tech-stack-v1.schema.json \
   schemas/agent-bootstrap-lock-v1.schema.json \
   schemas/agent-bootstrap-status-v1.schema.json \
+  schemas/agent-bootstrap-status-v2.schema.json \
+  schemas/agent-bootstrap-retirement-v1.schema.json \
   schemas/agent-bootstrap-verify-report-v1.schema.json \
   schemas/agent-guard-event-v2.schema.json \
   templates/base/README.md \
@@ -1201,7 +1982,8 @@ for canonical_file in \
   lib/writers-runtime.sh \
   lib/writers-docs.sh \
   lib/onboarding.sh \
-  lib/overlays.sh; do
+  lib/overlays.sh \
+  lib/retirement.py; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \
@@ -1217,6 +1999,12 @@ need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-upgrade(
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
 test_pinned_rtk_installer_fixture
 test_git_driven_harness_update_lifecycle
+run_native_verification_fixture_suite
+run_linked_ancestor_snapshot_focus
+run_core_boundary_focus
+if [[ "${P2_NATIVE_ONLY:-false}" == "true" ]]; then
+  exit 0
+fi
 
 # --- Bundle inventory cross-check (guard the three independent file enumerations) ---
 # installer copy_file dest names MUST equal the canonical_file loop list; the MANIFEST
@@ -1302,7 +2090,7 @@ EOF_FEATURE_MANIFEST
 (
   cd "$TMP_DIR"
   bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-smoke.out
-  if ! scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
+  if ! fixture_workspace scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
     fail "fresh checkout Claude hook failed before rtk install: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
   fi
   need_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "pinned rtk binary is not installed" "fresh checkout Claude hook warning"
@@ -1700,6 +2488,14 @@ need_contains "$(cat "$TMP_DIR/AGENTS.md")" "excludes tool-specific wrappers" "A
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
 need_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read on demand" "CLAUDE lazy context disclosure"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"
+need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "## First run" "CLAUDE must not repeat AGENTS startup text"
+agents_text="$(cat "$TMP_DIR/AGENTS.md")"
+need_contains "$agents_text" "## Working Economy" "AGENTS working economy rules"
+need_contains "$agents_text" "trust the summary" "AGENTS resume rule"
+need_contains "$agents_text" "record each decision once" "AGENTS decision-once rule"
+need_contains "$agents_text" "only new evidence" "AGENTS report evidence rule"
+need_contains "$agents_text" "report progress only when state changes" "AGENTS coordination rule"
+need_not_contains "$agents_text" "Workspace–Repository Guard contract in" "AGENTS must not require the full guard contract at startup"
 
 # Task 6: shared tool-entrypoint contract rendered identically into every surface.
 extract_tool_contract() {
@@ -1716,6 +2512,14 @@ cursor_contract="$(extract_tool_contract "$TMP_DIR/.cursor/rules/agent-conventio
 [[ "$claude_contract" == "$windsurf_contract" ]] || fail "Windsurf tool contract drifted from CLAUDE.md"
 [[ "$claude_contract" == "$cursor_contract" ]] || fail "Cursor tool contract drifted from CLAUDE.md"
 need_contains "$claude_contract" "scripts/agent-guard.sh pre-final --run-verify" "tool contract close-out command"
+need_contains "$claude_contract" "templates/base/README.md" "tool contract points to the full guard contract"
+need_not_contains "$claude_contract" "Required fields:" "tool contract keeps the full guard contract out of host files"
+for refresh_doc in "$TMP_DIR/AGENTS.md" "$ROOT_DIRECT_DIR/AGENTS.md"; do
+  need_contains "$(cat "$refresh_doc")" "agent-refresh" "AGENTS names the installed refresh command"
+  need_not_contains "$(cat "$refresh_doc")" "bash scripts/bootstrap-multi-agent-project.sh --refresh-lock" "AGENTS must not point to a script absent from targets"
+done
+need_not_contains "$(cat "$TMP_DIR/.claude/README.md")" '\`' "Claude README has no escaped backticks"
+need_contains "$(cat "$TMP_DIR/.codex/README.md")" "only if the roster assigns @spec to Codex" "Codex README qualifies Claude-default seats"
 
 infra_claude_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/CLAUDE.md")"
 infra_gemini_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/GEMINI.md")"
@@ -1796,13 +2600,13 @@ android_candidate_count_after="$(find "$ANDROID_MOBILE_SKILL_DIR" -type f -name 
   fail "idempotent --add-skill mobile-optimization created generated candidates without content changes"
 make_swift_mobile_skill_fixture "$ANDROID_MOBILE_SKILL_DIR"
 bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --workflow full --add-skill mobile-optimization >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition.out
-android_transition_windsurf_candidate="$(find "$ANDROID_MOBILE_SKILL_DIR/.windsurf/rules" -name 'mobile-optimization.md.generated.*' -print | sort | tail -n1)"
-[[ -f "$android_transition_windsurf_candidate" ]] ||
-  fail "android-to-dual mobile optimization upgrade did not create pointer candidate"
+# The unedited pointer follows the stack change in place (harness baseline).
+[[ -z "$(find "$ANDROID_MOBILE_SKILL_DIR/.windsurf/rules" -name 'mobile-optimization.md.generated.*' -print -quit)" ]] ||
+  fail "android-to-dual mobile optimization upgrade must update the unedited pointer in place"
 need_contains \
-  "$(cat "$android_transition_windsurf_candidate")" \
+  "$(cat "$ANDROID_MOBILE_SKILL_DIR/.windsurf/rules/mobile-optimization.md")" \
   "**/*.kt,**/*.kts,**/*.swift" \
-  "android-to-dual mobile optimization candidate globs"
+  "android-to-dual mobile optimization pointer globs"
 bash "$BOOTSTRAP" --target "$ANDROID_MOBILE_SKILL_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-android-mobile-stack-transition-apply.out
 assert_mobile_optimization_stack_selection \
   "$ANDROID_MOBILE_SKILL_DIR" \
@@ -1892,7 +2696,7 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/context-policy.json")" '"schem
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "save_decision" "task journal memory save triage field"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "recall_verified" "task journal high-risk memory recall verification field"
 
-handoff_contract="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md")"
+handoff_contract="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" "$TMP_DIR/docs/agent-configs/agent-handoff-reference.md")"
 mode_contracts="$(cat "$TMP_DIR/docs/agent-configs/agent-mode-contracts.md")"
 
 need_contains "$handoff_contract" '"source_task": null' "handoff optional source task"
@@ -1921,13 +2725,19 @@ need_contains "$handoff_contract" 'The fields are prose, not enums, and do not d
 need_contains "$handoff_contract" 'manually mirror its Summary, Evidence, and Effect on source into the optional task journal' "handoff closure outcome journal mirror guidance"
 need_contains "$task_journal" 'Manually mirror `task.md` Summary, Evidence, and Effect on source' "task journal closure outcome copy guidance"
 need_contains "$task_journal" 'Mirroring is optional, not a closure gate.' "task journal optional outcome mirror"
+handoff_core="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md")"
+need_contains "$handoff_core" "docs/agent-configs/agent-handoff-reference.md" "handoff core points to the per-seat reference"
+need_not_contains "$handoff_core" "Packet mapping examples" "handoff core keeps per-seat examples out"
+need_not_contains "$handoff_core" "### \`codex-review.md\`" "handoff core keeps review formats out"
+need_contains "$mode_contracts" "Every acceptance criterion names its test" "gate requires named acceptance tests"
+need_contains "$mode_contracts" "a real HTTP 401" "gate requires production-boundary fixtures"
 
-python3 - "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" <<'PY_HANDOFF_ARTIFACTS'
+python3 - "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" "$TMP_DIR/docs/agent-configs/agent-handoff-reference.md" <<'PY_HANDOFF_ARTIFACTS'
 import pathlib
 import re
 import sys
 
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+text = "\n".join(pathlib.Path(path).read_text(encoding="utf-8") for path in sys.argv[1:])
 marker = "## Canonical artifact set"
 if marker not in text:
     raise SystemExit("handoff contract missing Canonical artifact set")
@@ -2101,7 +2911,8 @@ capture_task3_codex_launch() {
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
     unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
-    env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$@" "$TASK3_CODEX_MODE" "$mode"
+    cd "$TMP_DIR"
+    fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$@" "$TASK3_CODEX_MODE" "$mode"
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$label failed to launch fake Codex: $(cat "$TASK3_OUTPUT")"
   fi
@@ -2175,7 +2986,8 @@ assert_task3_profile_failure() {
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
     unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
-    CODEX_USE_FALLBACK="$fallback_requested" PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" "$cmd"
+    cd "$TMP_DIR"
+    CODEX_USE_FALLBACK="$fallback_requested" PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" fixture_workspace "$TASK3_CODEX_MODE" "$cmd"
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$label unexpectedly succeeded"
   fi
@@ -2316,6 +3128,36 @@ need_not_contains "$node_tooling_summary" "node_js" "tooling-only package.json"
 need_not_contains "$node_tooling_summary" "npm test" "tooling-only package.json verification"
 need_contains "$node_tooling_summary" "lacks production Node/Web signals" "tooling-only package.json warning"
 
+mkdir -p "$FIXTURE_DIR/composer-laravel" "$FIXTURE_DIR/composer-misleading-package"
+cat > "$FIXTURE_DIR/composer-laravel/composer.json" <<'EOF_COMPOSER_LARAVEL'
+{
+  "require": {
+    "laravel/framework": "^11.0"
+  }
+}
+EOF_COMPOSER_LARAVEL
+composer_laravel_summary="$(cd "$TMP_DIR" && scripts/detect-agent-tech-stack.sh --root "$FIXTURE_DIR/composer-laravel" --summary)"
+need_contains "$composer_laravel_summary" "tech_stacks=php_laravel" "Composer Laravel detector"
+need_contains "$composer_laravel_summary" "composer test" "Composer Laravel verification"
+
+cat > "$FIXTURE_DIR/composer-misleading-package/composer.json" <<'EOF_COMPOSER_PHP'
+{
+  "require": {
+    "symfony/console": "^7.0"
+  }
+}
+EOF_COMPOSER_PHP
+cat > "$FIXTURE_DIR/composer-misleading-package/package.json" <<'EOF_MISLEADING_PACKAGE'
+{
+  "devDependencies": {
+    "laravel/framework": "^11.0"
+  }
+}
+EOF_MISLEADING_PACKAGE
+composer_misleading_summary="$(cd "$TMP_DIR" && scripts/detect-agent-tech-stack.sh --root "$FIXTURE_DIR/composer-misleading-package" --summary)"
+need_contains "$composer_misleading_summary" "tech_stacks=php" "Composer package boundary detector"
+need_not_contains "$composer_misleading_summary" "tech_stacks=php_laravel" "misleading package.json Laravel signal"
+
 mkdir -p "$FIXTURE_DIR/ios-app/App.xcodeproj" "$FIXTURE_DIR/ios-app/WatchApp"
 cat > "$FIXTURE_DIR/ios-app/Package.swift" <<'EOF_SWIFT_PACKAGE'
 // swift-tools-version: 5.9
@@ -2339,9 +3181,9 @@ need_contains "$ios_summary" "watch_os" "watchOS detector"
 need_contains "$ios_summary" "xcodebuild test -scheme <scheme>" "iOS build/test candidate"
 need_contains "$ios_summary" "swift test" "Swift package test candidate"
 
-(cd "$TMP_DIR" && scripts/agent-hook.sh codex-preflight reviewing full_flow >"$TMP_DIR"/out/bootstrap-preflight.out)
-(cd "$TMP_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-agent-guard-preflight.out)
-(cd "$TMP_DIR" && scripts/agent-guard.sh pre-edit --advisory agent-bootstrap/lib/render.sh >"$TMP_DIR"/out/bootstrap-agent-guard-pre-edit.out)
+(cd "$TMP_DIR" && fixture_workspace scripts/agent-hook.sh codex-preflight reviewing full_flow >"$TMP_DIR"/out/bootstrap-preflight.out)
+(cd "$TMP_DIR" && fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-agent-guard-preflight.out)
+(cd "$TMP_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit --advisory agent-bootstrap/lib/render.sh >"$TMP_DIR"/out/bootstrap-agent-guard-pre-edit.out)
 (cd "$TMP_DIR" && scripts/agent-onboarding.sh status >"$TMP_DIR"/out/bootstrap-onboarding-status.out)
 (cd "$TMP_DIR" && scripts/agent-onboarding.sh next >"$TMP_DIR"/out/bootstrap-onboarding-next.out)
 if (cd "$TMP_DIR" && scripts/agent-onboarding.sh check >"$TMP_DIR"/out/bootstrap-onboarding-check.out 2>"$TMP_DIR"/out/bootstrap-onboarding-check.err); then
@@ -2360,7 +3202,7 @@ chmod +x "$TMP_DIR/scripts/test-bootstrap-multi-agent-project.sh"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify-noninteractive.out")" "portable bootstrap integration smoke test skipped in non-interactive shell" "generated verifier non-interactive smoke skip"
 (cd "$TMP_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-verify.out)
 (cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json >"$TMP_DIR"/out/bootstrap-verify.json)
-(cd "$TMP_DIR" && scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-claude-hook.err)
+(cd "$TMP_DIR" && fixture_workspace scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-claude-hook.err)
 
 if ! grep -Fq "Pass:" "$TMP_DIR"/out/bootstrap-verify.out; then
   fail "generated verifier did not print summary"
@@ -2404,28 +3246,28 @@ fi
 GUARD_DIR="$FIXTURE_DIR/guard-regressions"
 mkdir -p "$GUARD_DIR"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$GUARD_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-guard-regressions.out
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-regressions-preflight.out)
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-regressions-preflight.out)
 	rm -f "$GUARD_DIR/.agents/state/context-pack.json"
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.err); then
+	if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.err); then
 	  fail "agent guard pre-final passed without context pack"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-prefinal-missing.err")" "missing context pack" "pre-final missing context pack error"
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null)
 
 	printf '\nQA drift marker\n' >> "$GUARD_DIR/AGENTS.md"
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.err); then
+	if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-drift.err); then
 	  fail "agent guard pre-final passed after required context drift"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-prefinal-drift.err")" "stale" "pre-final required context drift error"
-(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
+(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null)
 
-dotdot_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit docs/../AGENTS.md) 2>&1 || true)"
+dotdot_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit docs/../AGENTS.md) 2>&1 || true)"
 need_contains "$dotdot_guard_out" "path=AGENTS.md" "pre-edit normalizes dotdot path"
 need_contains "$dotdot_guard_out" "protected_path=true" "pre-edit protects dotdot-normalized path"
-abs_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit "$GUARD_DIR/AGENTS.md") 2>&1 || true)"
+abs_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit "$GUARD_DIR/AGENTS.md") 2>&1 || true)"
 need_contains "$abs_guard_out" "path=AGENTS.md" "pre-edit normalizes project absolute path"
 need_contains "$abs_guard_out" "protected_path=true" "pre-edit protects absolute project path"
-if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit ../outside.txt >"$TMP_DIR"/out/bootstrap-guard-path-escape.out 2>"$TMP_DIR"/out/bootstrap-guard-path-escape.err); then
+if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit ../outside.txt >"$TMP_DIR"/out/bootstrap-guard-path-escape.out 2>"$TMP_DIR"/out/bootstrap-guard-path-escape.err); then
   fail "agent guard pre-edit allowed path escaping project root"
 fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-path-escape.err")" "outside project root" "pre-edit path escape error"
@@ -2439,7 +3281,7 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["protected_paths"][0]["pattern"] = "./AGENTS.md"
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-dot-pattern.out 2>"$TMP_DIR"/out/bootstrap-guard-dot-pattern.err); then
+	if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-dot-pattern.out 2>"$TMP_DIR"/out/bootstrap-guard-dot-pattern.err); then
 	  fail "agent guard accepted dot-segment protected path pattern"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-dot-pattern.err")" "unsafe" "dot-segment protected path pattern error"
@@ -2453,24 +3295,24 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["protected_paths"][0]["pattern"] = "AGENTS.md"
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null)
 
-	foo_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/foo.sh) 2>&1 || true)"
+	foo_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit scripts/foo.sh) 2>&1 || true)"
 	need_contains "$foo_guard_out" "protected_path=false" "pre-edit does not overmatch scripts/agent-*.sh"
-	hook_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit scripts/agent-hook.sh) 2>&1 || true)"
+	hook_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit scripts/agent-hook.sh) 2>&1 || true)"
 need_contains "$hook_guard_out" "protected_path=true" "pre-edit matches scripts/agent-*.sh"
-codex_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .codex/codex-mode.sh) 2>&1 || true)"
+codex_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit .codex/codex-mode.sh) 2>&1 || true)"
 need_contains "$codex_guard_out" "protected_path=true" "pre-edit protects Codex adapter"
-claude_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit .claude/settings.json) 2>&1 || true)"
+claude_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit .claude/settings.json) 2>&1 || true)"
 need_contains "$claude_guard_out" "protected_path=true" "pre-edit protects Claude adapter"
-gemini_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit GEMINI.md) 2>&1 || true)"
+gemini_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit GEMINI.md) 2>&1 || true)"
 need_contains "$gemini_guard_out" "protected_path=true" "pre-edit protects Gemini adapter"
 
-if (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict.out 2>"$TMP_DIR"/out/bootstrap-guard-strict.err); then
+if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit --strict AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict.out 2>"$TMP_DIR"/out/bootstrap-guard-strict.err); then
   fail "agent guard strict pre-edit allowed protected path without acknowledgement"
 fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-strict.err")" "ack" "strict pre-edit ack guidance"
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit --strict --ack reviewed AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict-ack.out)
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit --strict --ack reviewed AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict-ack.out)
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-strict-ack.out")" "protected_path=true" "strict pre-edit ack still classifies protected path"
 	need_contains "$(cat "$GUARD_DIR/.agents/state/guard-ack.log")" "path=AGENTS.md" "strict pre-edit ack audit log"
 
@@ -2485,31 +3327,31 @@ doc["protected_paths"] = ["src/secret/**"]
 doc["generated_files"] = ["generated/openapi/**"]
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
-	project_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret/config.yml) 2>&1 || true)"
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null)
+	project_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit src/secret/config.yml) 2>&1 || true)"
 	need_contains "$project_guard_out" "protected_path=true" "pre-edit consumes project-specific protected paths"
-	project_exact_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secret) 2>&1 || true)"
+	project_exact_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit src/secret) 2>&1 || true)"
 	need_contains "$project_exact_guard_out" "protected_path=true" "pre-edit matches project-specific recursive path root"
-	project_neighbor_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit src/secrecy/config.yml) 2>&1 || true)"
+	project_neighbor_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit src/secrecy/config.yml) 2>&1 || true)"
 	need_contains "$project_neighbor_guard_out" "protected_path=false" "pre-edit does not overmatch project-specific protected path neighbor"
-	generated_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi/client.ts) 2>&1 || true)"
+	generated_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit generated/openapi/client.ts) 2>&1 || true)"
 	need_contains "$generated_guard_out" "protected_path=true" "pre-edit consumes project-specific generated files"
-	generated_neighbor_guard_out="$( (cd "$GUARD_DIR" && scripts/agent-guard.sh pre-edit generated/openapi2/client.ts) 2>&1 || true)"
+	generated_neighbor_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit generated/openapi2/client.ts) 2>&1 || true)"
 	need_contains "$generated_neighbor_guard_out" "protected_path=false" "pre-edit does not overmatch project-specific generated file neighbor"
 
 	: > "$GUARD_DIR/.agents/state/guard-ack.log"
 	printf '{"tool_name":"Edit","tool_input":{"file_path":"AGENTS.md"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-protected.json"
 	claude_hook_rc=0
-	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-protected.out 2>"$TMP_DIR"/out/bootstrap-claude-edit-protected.err) || claude_hook_rc=$?
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-protected.out 2>"$TMP_DIR"/out/bootstrap-claude-edit-protected.err) || claude_hook_rc=$?
 	[[ "$claude_hook_rc" -eq 2 ]] || fail "Claude edit hook expected rc=2 without acknowledgement, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-protected.err")" "ack" "Claude edit hook protected ack guidance"
 	claude_hook_rc=0
-	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-ack.out) || claude_hook_rc=$?
+	(cd "$GUARD_DIR" && AGENT_GUARD_EDIT_ACK=reviewed fixture_workspace scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-protected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-ack.out) || claude_hook_rc=$?
 	[[ "$claude_hook_rc" -eq 0 ]] || fail "Claude edit hook explicit ACK expected rc=0, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-ack.out")" "protected_path=true" "Claude edit hook ack still classifies protected path"
 	printf '{"tool_name":"Write","tool_input":{"file_path":"src/main.txt"}}\n' > "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json"
 	claude_hook_rc=0
-	(cd "$GUARD_DIR" && scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-unprotected.out) || claude_hook_rc=$?
+	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-hook.sh claude-pretool < "$TMP_DIR/out/bootstrap-claude-edit-unprotected.json" >"$TMP_DIR"/out/bootstrap-claude-edit-unprotected.out) || claude_hook_rc=$?
 	[[ "$claude_hook_rc" -eq 0 ]] || fail "Claude edit hook unprotected path expected rc=0, got rc=$claude_hook_rc"
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-claude-edit-unprotected.out")" "protected_path=false" "Claude edit hook allows unprotected path"
 
@@ -2570,9 +3412,9 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$JRN_GUARD_DIR"
   git add -A
   git add -f scripts/agent-hook.sh
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
 )
-(cd "$JRN_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-journal-none.out 2>"$TMP_DIR"/out/bootstrap-journal-none.err) ||
+(cd "$JRN_GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-journal-none.out 2>"$TMP_DIR"/out/bootstrap-journal-none.err) ||
   fail "pre-final failed with no task journal present"
 need_not_contains "$(cat "$TMP_DIR/out/bootstrap-journal-none.err")" "no task journal found" "pre-final no longer reports a missing journal"
 mkdir -p "$JRN_GUARD_DIR/docs/superpowers/plans/unrelated-old-task"
@@ -2582,8 +3424,8 @@ cat > "$JRN_GUARD_DIR/docs/superpowers/plans/unrelated-old-task/journal.md" <<'E
 - context: unrelated historical entry with incomplete memory fields
 - next-action: none
 EOF_JOURNAL_INCOMPLETE
-(cd "$JRN_GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null)
-(cd "$JRN_GUARD_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-journal-stale.out 2>"$TMP_DIR"/out/bootstrap-journal-stale.err) ||
+(cd "$JRN_GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null)
+(cd "$JRN_GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-journal-stale.out 2>"$TMP_DIR"/out/bootstrap-journal-stale.err) ||
   fail "an unrelated incomplete journal must not fail pre-final"
 need_not_contains "$(cat "$TMP_DIR/out/bootstrap-journal-stale.err")" "task journal" "pre-final does not warn about an unrelated journal"
 
@@ -2624,8 +3466,8 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_OK_DIR"
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
-  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.err
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+  PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-ok.err
 )
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-verify-ok.out")" "pre-final ok" "pre-final verify ok output"
 [[ -f "$VERIFY_OK_DIR/.agents/state/last-verify-report.json" ]] || fail "pre-final did not write verification report"
@@ -2643,7 +3485,7 @@ PY
 [[ ! -e "$VERIFY_OK_DIR/.agents/state/build-ran.marker" ]] || fail "default pre-final --run-verify should not run full-scope build commands"
 (
   cd "$VERIFY_OK_DIR"
-  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR"/out/bootstrap-prefinal-verify-full.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-full.err
+  PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR"/out/bootstrap-prefinal-verify-full.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-full.err
 )
 [[ -f "$VERIFY_OK_DIR/.agents/state/build-ran.marker" ]] || fail "pre-final --verify-scope full did not run build command"
 python3 - "$VERIFY_OK_DIR/.agents/state/last-verify-report.json" <<'PY'
@@ -2660,8 +3502,8 @@ EXTERNAL_STATE_DIR="$TMP_DIR/external-agent-state"
 mkdir -p "$EXTERNAL_STATE_DIR"
 if ! (
   cd "$VERIFY_OK_DIR"
-  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh preflight >/dev/null
-  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-external-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-external-state.err
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+  PATH="$FAKE_NPM_DIR:$PATH" AGENT_STATE_DIR="$EXTERNAL_STATE_DIR" fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-external-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-external-state.err
 ); then
   fail "pre-final --run-verify must accept external AGENT_STATE_DIR (see $TMP_DIR/out/bootstrap-prefinal-external-state.err)"
 fi
@@ -2683,11 +3525,11 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_TMPDIR_
   git add -A
   git commit -qm baseline
   chmod -R a-w .agents
-  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.err; then
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-preflight.err; then
     chmod -R u+w .agents
     fail "preflight failed with TMPDIR fallback state dir"
   fi
-  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.err; then
+  if ! PATH="$FAKE_NPM_DIR:$PATH" TMPDIR="$TMPDIR_FALLBACK_ROOT" fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.out 2>"$TMP_DIR"/out/bootstrap-prefinal-tmpdir-state.err; then
     chmod -R u+w .agents
     fail "pre-final --run-verify failed with TMPDIR fallback state dir"
   fi
@@ -2722,9 +3564,9 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_FAIL_DI
   git add -A
   git rm --cached -- .gitignore >/dev/null 2>&1 || true
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
 )
-if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.err); then
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail.err); then
   fail "pre-final --run-verify passed with a failing verification command"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-verify-fail.err")" "verification failed" "pre-final verification failure message"
@@ -2750,7 +3592,7 @@ assert last["verification"]["status"] == "fail" and last["gate_status"] != "pass
 PY
 (
   cd "$VERIFY_FAIL_DIR"
-  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.err || true
+  PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.out 2>"$TMP_DIR"/out/bootstrap-prefinal-verify-fail-advisory.err || true
 )
 python3 - "$VERIFY_FAIL_DIR/.agents/state/session-events.jsonl" <<'PY'
 import json
@@ -2761,14 +3603,14 @@ assert last["schema"] == "agent-guard-event/v2", last
 assert last["gate_status"] == "warn", last
 assert last["verification"]["status"] == "fail", last
 PY
-if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" AGENT_GUARD_PREPUSH_SCOPE=fast scripts/githooks/pre-push >"$TMP_DIR"/out/bootstrap-prepush-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prepush-verify-fail.err); then
+if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" AGENT_GUARD_PREPUSH_SCOPE=fast fixture_workspace scripts/githooks/pre-push >"$TMP_DIR"/out/bootstrap-prepush-verify-fail.out 2>"$TMP_DIR"/out/bootstrap-prepush-verify-fail.err); then
   fail "generated pre-push hook passed with a failing verification command"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prepush-verify-fail.err")" "verification failed" "generated pre-push blocks failing verification"
 (
   cd "$VERIFY_FAIL_DIR"
   printf '%s\n' "dirty close-out trigger" >> README.md
-  printf '%s' '{"stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
+  printf '%s' '{"stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
 ) && fail "close-out did not block stop (exit 2) on failing verification"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-closeout-fail.err")" "verification" "close-out reports the failure reason to the model"
 
@@ -2782,8 +3624,8 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_PLACEHO
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
-  scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-placeholder.out 2>"$TMP_DIR"/out/bootstrap-prefinal-placeholder.err
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh pre-final --run-verify --advisory >"$TMP_DIR"/out/bootstrap-prefinal-placeholder.out 2>"$TMP_DIR"/out/bootstrap-prefinal-placeholder.err
 )
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-placeholder.err")" "skipped verification command" "pre-final skips placeholder command"
 if grep -q "verification ok" "$TMP_DIR"/out/bootstrap-prefinal-placeholder.out; then
@@ -2819,7 +3661,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$INJECT_DIR" --
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
   cat > scripts/detect-agent-tech-stack.sh <<'EOF_FORGE_DETECTOR'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--json" ]]; then
@@ -2829,7 +3671,7 @@ fi
 printf '%s\n' "tech_stacks=node_js"
 EOF_FORGE_DETECTOR
   chmod +x scripts/detect-agent-tech-stack.sh
-  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
+  PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
 )
 [[ ! -e "$INJECT_DIR/PWNED" ]] || fail "verification runner executed an injected command (shell=True regression)"
 
@@ -2851,7 +3693,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_START_E
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
   start_error_summary="$(scripts/detect-agent-tech-stack.sh --summary)"
   cat > scripts/detect-agent-tech-stack.sh <<EOF_START_ERROR_DETECTOR
 #!/usr/bin/env bash
@@ -2867,7 +3709,7 @@ printf '%s\n' "tech_stacks=node_js"
 EOF_START_ERROR_DETECTOR
   chmod +x scripts/detect-agent-tech-stack.sh
 )
-if (cd "$VERIFY_START_ERROR_DIR" && scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-start-error.out 2>"$TMP_DIR"/out/bootstrap-prefinal-start-error.err); then
+if (cd "$VERIFY_START_ERROR_DIR" && fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR"/out/bootstrap-prefinal-start-error.out 2>"$TMP_DIR"/out/bootstrap-prefinal-start-error.err); then
   fail "pre-final --run-verify passed with a missing verification executable"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prefinal-start-error.err")" "failed to start" "pre-final reports verification command start errors distinctly"
@@ -2902,7 +3744,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$BUDGET_DIR" --
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
   budget_summary="$(scripts/detect-agent-tech-stack.sh --summary)"
   cat > scripts/detect-agent-tech-stack.sh <<'EOF_BUDGET_DETECTOR'
 #!/usr/bin/env bash
@@ -2927,7 +3769,7 @@ PY
 )
 if (
   cd "$BUDGET_DIR"
-  AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS=1 scripts/agent-guard.sh pre-final --run-verify >/dev/null 2>&1
+  AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS=1 fixture_workspace scripts/agent-guard.sh pre-final --run-verify >/dev/null 2>&1
 ); then
   fail "budget-exhausted run reported success in strict mode"
 fi
@@ -2944,6 +3786,129 @@ assert last["gate_status"] == "fail", last
 assert last["verification"]["status"] == "fail", last
 PY
 
+# Keep the guard's terse failure diagnostics covered as one ordered fixture:
+# pass and skipped entries must not emit rows, while fail/start-error/timeout
+# rows must retain their detector index and report/log identity.
+VERIFY_DIAGNOSTIC_DIR="$FIXTURE_DIR/verify-diagnostics"
+mkdir -p "$VERIFY_DIAGNOSTIC_DIR/scripts"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$VERIFY_DIAGNOSTIC_DIR/scripts/pass.sh"
+printf '#!/usr/bin/env bash\nexit 17\n' > "$VERIFY_DIAGNOSTIC_DIR/scripts/fail.sh"
+printf '#!/usr/bin/env bash\nsleep 5\n' > "$VERIFY_DIAGNOSTIC_DIR/scripts/slow.sh"
+chmod +x "$VERIFY_DIAGNOSTIC_DIR/scripts/pass.sh" "$VERIFY_DIAGNOSTIC_DIR/scripts/fail.sh" "$VERIFY_DIAGNOSTIC_DIR/scripts/slow.sh"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_DIAGNOSTIC_DIR" --workflow full >/dev/null
+VERIFY_DIAGNOSTIC_MISSING="$VERIFY_DIAGNOSTIC_DIR/missing"$'\t'"runner"
+VERIFY_DIAGNOSTIC_STATE="$VERIFY_DIAGNOSTIC_DIR/state"$'\t'"control"
+VERIFY_DIAGNOSTIC_SUMMARY="$(cd "$VERIFY_DIAGNOSTIC_DIR" && scripts/detect-agent-tech-stack.sh --summary)"
+python3 - "$VERIFY_DIAGNOSTIC_DIR/scripts/detect-agent-tech-stack.sh" "$VERIFY_DIAGNOSTIC_MISSING" "$VERIFY_DIAGNOSTIC_SUMMARY" <<'PY'
+import json
+import pathlib
+import shlex
+import sys
+
+detector = pathlib.Path(sys.argv[1])
+missing = sys.argv[2]
+summary = sys.argv[3]
+commands = [
+    "bash scripts/pass.sh",
+    "bash scripts/fail.sh SECRET\tARG",
+    shlex.join([missing, "SECRET\nARG"]),
+    "bash scripts/slow.sh SECRET\tARG",
+    "bash scripts/fail.sh REPEATED\nSECRET",
+    "Add project-specific skipped command",
+    "<scheme> skipped command",
+]
+payload = json.dumps({
+    "schema": "agent-tech-stack-detection/v1",
+    "tech_stacks": ["generic"],
+    "modules": [],
+    "verification_commands": commands,
+    "warnings": [],
+}, separators=(",", ":"))
+detector.write_text(
+    "#!/usr/bin/env bash\n"
+    "if [[ \"${1:-}\" == \"--json\" ]]; then\n"
+    f"  printf '%s\\n' {shlex.quote(payload)}\n"
+    "  exit 0\n"
+    "fi\n"
+    f"if [[ \"${{1:-}}\" == \"--summary\" ]]; then printf '%s\\n' {shlex.quote(summary)}; exit 0; fi\n"
+    "printf '%s\\n' 'tech_stacks=generic'\n",
+    encoding="utf-8",
+)
+PY
+chmod +x "$VERIFY_DIAGNOSTIC_DIR/scripts/detect-agent-tech-stack.sh"
+git -C "$VERIFY_DIAGNOSTIC_DIR" init -q
+git -C "$VERIFY_DIAGNOSTIC_DIR" config user.email "agent-bootstrap-test@example.invalid"
+git -C "$VERIFY_DIAGNOSTIC_DIR" config user.name "Agent Bootstrap Test"
+git -C "$VERIFY_DIAGNOSTIC_DIR" add -A
+git -C "$VERIFY_DIAGNOSTIC_DIR" commit -qm baseline
+(
+  cd "$VERIFY_DIAGNOSTIC_DIR"
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+  AGENT_STATE_DIR="$VERIFY_DIAGNOSTIC_STATE" fixture_workspace scripts/agent-guard.sh preflight >/dev/null
+)
+VERIFY_DIAGNOSTIC_ERR="$TMP_DIR/out/bootstrap-prefinal-diagnostics.err"
+if (
+  cd "$VERIFY_DIAGNOSTIC_DIR"
+  AGENT_STATE_DIR="$VERIFY_DIAGNOSTIC_STATE" \
+    AGENT_GUARD_VERIFY_TIMEOUT_SECONDS=1 \
+    AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS=20 \
+    fixture_workspace scripts/agent-guard.sh pre-final --run-verify >"$TMP_DIR/out/bootstrap-prefinal-diagnostics.out" 2>"$VERIFY_DIAGNOSTIC_ERR"
+); then
+  fail "mixed verification fixture reported success despite failures"
+fi
+python3 - "$VERIFY_DIAGNOSTIC_ERR" "$VERIFY_DIAGNOSTIC_DIR" "$VERIFY_DIAGNOSTIC_STATE" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+stderr = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+root = pathlib.Path(sys.argv[2])
+state = pathlib.Path(sys.argv[3])
+row_re = re.compile(r"^agent-guard: verify\[(\d+)\] ([^ ]+) · exit (-?\d+) · timeout (yes|no) · log (.+)$")
+rows = [row_re.match(line) for line in stderr.splitlines() if line.startswith("agent-guard: verify[")]
+assert all(rows), stderr
+actual = [(int(row.group(1)), row.group(2), int(row.group(3)), row.group(4), row.group(5)) for row in rows]
+assert [row[0] for row in actual] == [2, 3, 4, 5], actual
+assert [row[1:4] for row in actual] == [
+    ("bash", 17, "no"),
+    (r"missing\trunner", 127, "no"),
+    ("bash", 124, "yes"),
+    ("bash", 17, "no"),
+], actual
+assert len(rows) == 4, stderr
+# Reports may use absolute paths (for example /var versus /private/var on
+# macOS). Check the resolved destination and exact log identity in both forms.
+for index, _, _, _, escaped_log in actual:
+    log = root / escaped_log.replace(r"\t", "\t")
+    assert log.resolve().parent == (state / "verify-logs").resolve(), log
+    assert re.fullmatch(rf"verify-[0-9]+-{index}\.log", log.name), log
+assert "SECRET" not in stderr and "REPEATED" not in stderr and "ARG" not in stderr, stderr
+assert all("\t" not in line and "\r" not in line for line in stderr.splitlines()), stderr
+
+report = json.loads((state / "last-verify-report.json").read_text(encoding="utf-8"))
+assert report["verification_status"] == "error", report
+assert report["summary"] == {"pass": 1, "fail": 3, "skipped": 2, "error": 1}, report
+assert [item["status"] for item in report["commands"]] == [
+    "pass", "fail", "error", "timeout", "fail", "skipped", "skipped"
+], report
+for index, _, exit_code, timeout, escaped_log in actual:
+    item = report["commands"][index - 1]
+    decoded_log = escaped_log.replace(r"\t", "\t")
+    assert item["exit_code"] == exit_code, item
+    assert item["log_path"] == decoded_log, (item, decoded_log)
+    assert (root / item["log_path"]).is_file(), item
+    assert (item["status"] == "timeout") == (timeout == "yes"), item
+pass_item = report["commands"][0]
+assert pass_item["status"] == "pass", pass_item
+pass_log = root / pass_item["log_path"]
+assert pass_log.resolve().parent == (state / "verify-logs").resolve(), pass_item
+assert re.fullmatch(r"verify-[0-9]+-1\.log", pass_log.name), pass_item
+assert (root / pass_item["log_path"]).is_file(), pass_item
+assert "log_path" not in report["commands"][5]
+assert "log_path" not in report["commands"][6]
+PY
+
 VERIFY_ERROR_DIR="$FIXTURE_DIR/verify-error"
 mkdir -p "$VERIFY_ERROR_DIR/scripts"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_ERROR_DIR" --workflow full >/dev/null
@@ -2954,7 +3919,7 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_ERROR_D
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
   cat > scripts/detect-agent-tech-stack.sh <<'EOF_ERROR_DETECTOR'
 #!/usr/bin/env bash
 if [[ "${1:-}" == "--json" ]]; then
@@ -2964,7 +3929,7 @@ fi
 printf '%s\n' "tech_stacks=generic"
 EOF_ERROR_DETECTOR
   chmod +x scripts/detect-agent-tech-stack.sh
-  scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
+  fixture_workspace scripts/agent-guard.sh pre-final --run-verify --advisory >/dev/null 2>&1 || true
 )
 python3 - "$VERIFY_ERROR_DIR/.agents/state/last-verify-report.json" "$VERIFY_ERROR_DIR/.agents/state/session-events.jsonl" <<'PY'
 import json
@@ -3002,7 +3967,7 @@ PY
 
 (
   cd "$VERIFY_OK_DIR"
-  PATH="$FAKE_NPM_DIR:$PATH" scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-prefinal-noverify.out 2>"$TMP_DIR"/out/bootstrap-prefinal-noverify.err
+  PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-prefinal-noverify.out 2>"$TMP_DIR"/out/bootstrap-prefinal-noverify.err
 )
 python3 - "$VERIFY_OK_DIR/.agents/state/session-events.jsonl" <<'PY'
 import json
@@ -3042,11 +4007,11 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$STACK_DRIFT_DI
   git config user.name "Agent Bootstrap Test"
   git add -A
   git commit -qm baseline
-  scripts/agent-guard.sh preflight >/dev/null
+  fixture_workspace scripts/agent-guard.sh preflight >/dev/null
 )
 # Hardening (a): a fresh, unmodified target must NOT report drift (advisory so unrelated
 # strict checks cannot mask the assertion; only assert on the drift line).
-(cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-nodrift.out 2>"$TMP_DIR"/out/bootstrap-stack-nodrift.err) || true
+(cd "$STACK_DRIFT_DIR" && fixture_workspace scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-nodrift.out 2>"$TMP_DIR"/out/bootstrap-stack-nodrift.err) || true
 if grep -q "detector summary drifted" "$TMP_DIR"/out/bootstrap-stack-nodrift.err; then
   fail "fresh unmodified target wrongly reported detector drift"
 fi
@@ -3076,11 +4041,11 @@ cat > "$STACK_DRIFT_DIR/package.json" <<'EOF_STACK_DRIFT_PACKAGE'
   }
 }
 EOF_STACK_DRIFT_PACKAGE
-if (cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-stack-drift.out 2>"$TMP_DIR"/out/bootstrap-stack-drift.err); then
+if (cd "$STACK_DRIFT_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-stack-drift.out 2>"$TMP_DIR"/out/bootstrap-stack-drift.err); then
   fail "pre-final accepted detector stack drift"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-stack-drift.err")" "detector summary drifted" "pre-final stack drift error"
-(cd "$STACK_DRIFT_DIR" && scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-drift-advisory.out 2>"$TMP_DIR"/out/bootstrap-stack-drift-advisory.err)
+(cd "$STACK_DRIFT_DIR" && fixture_workspace scripts/agent-guard.sh pre-final --advisory >"$TMP_DIR"/out/bootstrap-stack-drift-advisory.out 2>"$TMP_DIR"/out/bootstrap-stack-drift-advisory.err)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-stack-drift-advisory.err")" "detector summary drifted" "pre-final advisory stack drift warning"
 
 # Read-only .agents must not break agent-guard: it falls back to a writable state dir.
@@ -3088,7 +4053,7 @@ RO_GUARD_DIR="$FIXTURE_DIR/guard-readonly"
 mkdir -p "$RO_GUARD_DIR"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$RO_GUARD_DIR" --workflow full >/dev/null
 chmod -R a-w "$RO_GUARD_DIR/.agents"
-if ! (cd "$RO_GUARD_DIR" && AGENT_STATE_DIR="$RO_GUARD_DIR/.tools/agent-state" scripts/agent-guard.sh preflight >"$TMP_DIR"/out/guard-ro.out 2>&1); then
+if ! (cd "$RO_GUARD_DIR" && AGENT_STATE_DIR="$RO_GUARD_DIR/.tools/agent-state" fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/guard-ro.out 2>&1); then
   chmod -R u+w "$RO_GUARD_DIR/.agents"
   fail "agent-guard preflight must not hard-fail under read-only .agents (see $TMP_DIR/out/guard-ro.out)"
 fi
@@ -3270,7 +4235,7 @@ path = pathlib.Path(sys.argv[1])
 doc = json.loads(path.read_text(encoding="utf-8"))
 path.write_text(json.dumps(doc, separators=(",", ":")) + "\n", encoding="utf-8")
 PY
-(cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >/dev/null) ||
+(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null) ||
   fail "agent guard rejected compact valid context-policy JSON"
 (cd "$GUARD_DIR" && scripts/verify-ai-deps.sh >/dev/null) ||
   fail "generated verifier rejected compact valid context-policy JSON"
@@ -3285,7 +4250,7 @@ doc = json.loads(path.read_text(encoding="utf-8"))
 doc["required_context"].append("../outside-secret")
 path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
 PY
-	if (cd "$GUARD_DIR" && scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-policy-traversal.out 2>"$TMP_DIR"/out/bootstrap-guard-policy-traversal.err); then
+	if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-policy-traversal.out 2>"$TMP_DIR"/out/bootstrap-guard-policy-traversal.err); then
 	  fail "agent guard accepted context policy path outside project root"
 	fi
 	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-policy-traversal.err")" "unsafe" "context policy traversal error"
@@ -3355,13 +4320,15 @@ PY
 	need_contains "$candidate_scope_status" '"pending_generated_candidates":0' "--status ignores non-bootstrap generated source"
 	(cd "$CANDIDATE_SCOPE_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-candidate-scope-verify.out)
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-verify.out")" "pending generated candidate requires review" "verifier ignores non-bootstrap generated source"
-	(cd "$CANDIDATE_SCOPE_DIR" && scripts/agent-guard.sh preflight >/dev/null && scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.out 2>"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.err)
+	(cd "$CANDIDATE_SCOPE_DIR" && fixture_workspace scripts/agent-guard.sh preflight >/dev/null && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.out 2>"$TMP_DIR"/out/bootstrap-candidate-scope-prefinal.err)
 	need_not_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-scope-prefinal.err")" "pending generated candidate requires review" "pre-final ignores non-bootstrap generated source"
 
 CANDIDATE_DIR="$FIXTURE_DIR/candidate-visibility"
 mkdir -p "$CANDIDATE_DIR"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-first.out
 printf '\n# local generated-file drift for candidate visibility test\n' >> "$CANDIDATE_DIR/scripts/agent-hook.sh"
+# Without a harness baseline (pre-baseline targets) local drift stays a candidate.
+rm -rf "$CANDIDATE_DIR/.tools/agent-state/harness-baseline"
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-candidate-second.out
 [[ -n "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "content drift re-run did not create generated candidates"
 need_not_contains "$(cat "$CANDIDATE_DIR/.gitignore")" "*.generated.*" "generated candidates must not be ignored"
@@ -3465,8 +4432,8 @@ EOF_INFRA_MANIFEST
   bash -n scripts/agent-hook.sh
   bash -n scripts/agent-guard.sh
   bash -n scripts/verify-ai-deps.sh
-  scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-infra-agent-guard.out
-  scripts/agent-hook.sh codex-preflight planning standard >"$TMP_DIR"/out/bootstrap-infra-preflight.out
+  fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-infra-agent-guard.out
+  fixture_workspace scripts/agent-hook.sh codex-preflight planning standard >"$TMP_DIR"/out/bootstrap-infra-preflight.out
   scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-infra-verify.out
 )
 
@@ -3527,5 +4494,11 @@ note "agent seats runtime and launcher regressions"
 SEATS_QA_BUNDLE_PROFILE="$BOOTSTRAP_BUNDLE/model-profiles/codex-model-profiles.json" \
   python3 "$ROOT_DIR/scripts/test-agent-seats.py" "$MP_DIR" "$BOOTSTRAP_BUNDLE/agent-seats.sh" "$TMP_DIR/out/seats-qa.json"
 python3 "$ROOT_DIR/scripts/test-agent-seats-launcher.py"
+
+note "upgrade baseline, merge, plan and rollback"
+bash "$ROOT_DIR/scripts/test-upgrade-merge.sh"
+
+note "HK-07 retirement lifecycle"
+python3 "$ROOT_DIR/scripts/test-agent-retirement.py"
 
 printf 'bootstrap-test: ok (%s)\n' "$TMP_DIR"

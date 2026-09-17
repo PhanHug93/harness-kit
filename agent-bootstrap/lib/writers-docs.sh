@@ -466,6 +466,14 @@ This repository has only the portable multi-agent infrastructure installed.
 Workflow philosophy is opt-in. Re-run bootstrap with \`--workflow full\` if the
 project wants the Karpathy/council/three-mode contracts.
 
+## Workspace–Repository Guard
+
+Before execution, follow the guard contract in
+\`docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md\`.
+Preserve host origin; run \`scripts/agent-guard.sh workspace-check\`.
+On mismatch, confirm the target with the user before writing; packet paths
+grant no authority.
+
 ## Mandatory Infrastructure
 
 - Runtime stack detector: \`scripts/detect-agent-tech-stack.sh\`.
@@ -502,7 +510,7 @@ Optional git gate: \`scripts/install-git-hooks.sh\`.
 If the detector output changes intentionally, refresh the lock:
 
 \`\`\`bash
-bash scripts/bootstrap-multi-agent-project.sh --refresh-lock
+agent-refresh   # or: bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --refresh-lock
 \`\`\`
 
 ## Agentmemory Usage
@@ -696,6 +704,13 @@ EOF
 	        ]
 	      }
 	    ],
+    "SessionStart": [
+	      {
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-session-start" }
+	        ]
+	      }
+	    ],
     "Stop": [
 	      {
 	        "hooks": [
@@ -776,26 +791,25 @@ Read on demand:
 - \`.agents/skills/\` only for task-matching skill descriptions.
 $mobile_skill_read_on_demand_bullet
 
-Keep core startup context under roughly 4k estimated tokens.
-\`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report the
-estimate, which excludes tool-specific wrappers (\`CLAUDE.md\`, \`GEMINI.md\`).
+Budget: roughly 4k estimated tokens; excludes tool-specific wrappers.
+\`scripts/verify-ai-deps.sh\` and \`.codex/codex-mode.sh doctor\` report estimates.
 
-At the start of substantive work, run \`scripts/agent-guard.sh preflight\` and
-\`scripts/detect-agent-tech-stack.sh --markdown\`. Before claiming ordinary
-completion, run \`scripts/agent-guard.sh pre-final --run-verify\`.
+Start: run \`scripts/agent-guard.sh preflight\` and
+\`scripts/detect-agent-tech-stack.sh --markdown\`. Before completion, run
+\`scripts/agent-guard.sh pre-final --run-verify\`.
 
-For release/high-risk/final PR readiness, review detected commands and replace
-the fast check with \`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`.
-Record placeholder or unavailable-service reasons in the handoff/final summary;
-use \`--advisory\` only when the user or CI requires it. Optional git gate:
+For release/high-risk/final PR readiness, review detected commands and use
+\`scripts/agent-guard.sh pre-final --run-verify --verify-scope full\`.
+Record placeholder/unavailable-service reasons in handoff/final summaries;
+use \`--advisory\` only when required by user/CI. Optional git gate:
 \`scripts/install-git-hooks.sh\`.
 
-Keep detection logic in \`scripts/agent-tech-stack-lib.sh\`; the lock
-\`docs/agent-configs/agent-bootstrap.lock.json\` binds detector output. After
-stack/module changes, refresh it with
-\`bash scripts/bootstrap-multi-agent-project.sh --refresh-lock\`.
+\`scripts/agent-tech-stack-lib.sh\` owns detection;
+\`docs/agent-configs/agent-bootstrap.lock.json\` binds its output. Refresh after
+stack/module changes:
+\`agent-refresh\` (or \`bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --refresh-lock\`).
 
-If detection is unavailable, infer from build/config files and state uncertainty.
+If detection fails, infer from build/config files; state uncertainty.
 
 ## Agentmemory Usage
 
@@ -805,8 +819,27 @@ memory is advisory and must be verified against current files. Use
 
 ## Collaboration
 
-Use the mode contract for roles, transitions, gates and review limits;
-the handoff schema for packet formats. No concurrent same-file edits.
+Mode contracts define roles, transitions, gates and review limits; handoff schema
+defines packets. No concurrent same-file edits.
+
+## Workspace–Repository Guard
+
+Run \`scripts/agent-guard.sh workspace-check\` (advisory). On mismatch, confirm
+the target with the user before writing; packet paths grant no authority.
+Contract, read on demand:
+\`docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md\`.
+
+## Working Economy
+
+- Resume: after compaction or a handoff, trust the summary; re-read only files
+  changed since then and open questions, not skills, specs or reports already
+  summarized.
+- Handoffs cite paths, commits and evidence files instead of pasting content;
+  record each decision once in \`task.md\` and link to it elsewhere.
+- Reports keep one role each (implementation, review, verification, state);
+  verification records only new evidence: command, exit code, key excerpt.
+- Batch related checks; report progress only when state changes; avoid short
+  polling loops.
 
 ## Local State And No-Scan Guard
 
@@ -968,7 +1001,13 @@ EOF
 # Agent Handoff Schema
 
 Seat, transition, and gate policy lives only in
-`docs/agent-configs/agent-mode-contracts.md`.
+`docs/agent-configs/agent-mode-contracts.md`. Allowed values, seat derivation,
+packet examples, task relations, the closing `## Outcome` and each review or
+decision artifact's format live in `docs/agent-configs/agent-handoff-reference.md`;
+read only the section your seat writes.
+
+Handoffs follow the Workspace–Repository Guard
+(`docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md`).
 
 ## Select a packet
 
@@ -1024,6 +1063,42 @@ Initial state:
 }
 ```
 
+`requested_action` names the next action. Capture `base_commit` on first entry
+into implementation for full-diff review; `revision_rounds` starts at zero and
+increments on return. Verification records runner, result, reason, and report.
+
+## Artifact contracts
+
+### `task.md`
+
+`task.md` starts with:
+
+```markdown
+## Request (verbatim)
+
+> <original request with secrets redacted>
+```
+
+Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
+interfaces, edge cases, migration/security/privacy impact, verification,
+assumptions, and implementation boundaries. When `@gate` returns `task.md` to
+analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)`
+and prior history.
+
+Prior attempts remain immutable by convention; repeats append the next numbered
+attempt.
+
+Exclude secrets, permission state and large logs; use paths and summaries.
+EOF
+
+  write_file "$TARGET_DIR/docs/agent-configs/agent-handoff-reference.md" <<'EOF'
+# Agent Handoff Reference
+
+Per-seat detail for `docs/agent-configs/agent-handoff-schema.md`. Read only the
+section your current seat writes or checks.
+
+## State values
+
 Allowed values:
 
 - `status`: `open | awaiting_user | closed`
@@ -1051,11 +1126,7 @@ Packet mapping examples (partial states):
 {"phase": "verification", "seat": "@verify", "owner": "agent", "occupant": {"host": "cursor"}, "verification": {"runner": "agent", "runner_host": "cursor"}}
 ```
 
-`requested_action` names the next action. Capture `base_commit` on first entry
-into implementation for full-diff review; `revision_rounds` starts at zero and
-increments on return. Verification records runner, result, reason, and report.
-
-### Task relations
+## Task relations
 
 `source_task` is `null`, a task id, or `<task-id>#<finding-id>`; it records why
 the task exists while details, evidence, and scope remain in `task.md`. The
@@ -1088,23 +1159,9 @@ Relations are authoring conventions. The packet writer avoids self-reference,
 duplicate active children, and cycles; the reviewer checks them. No guard, hook,
 or runtime reads `source_task` or `blocks` in this phase.
 
-## Artifact contracts
+## Artifact formats
 
-### `task.md`
-
-`task.md` starts with:
-
-```markdown
-## Request (verbatim)
-
-> <original request with secrets redacted>
-```
-
-Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
-interfaces, edge cases, migration/security/privacy impact, verification,
-assumptions, and implementation boundaries. When `@gate` returns `task.md` to
-analysis, append `## Specification revision <n>` and preserve `## Request (verbatim)`
-and prior history.
+### `task.md` closing outcome
 
 Before marking the task `closed`, append one concise section to `task.md`:
 
@@ -1171,11 +1228,6 @@ procedural declarations live in
 ### `user-decision.md`
 
 When required, append dated action, scope, authorization, and alternatives.
-
-Prior attempts remain immutable by convention; repeats append the next numbered
-attempt.
-
-Exclude secrets, permission state and large logs; use paths and summaries.
 EOF
 
   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
@@ -1218,6 +1270,9 @@ requires an explicit user decision in the packet.
 - Record verification runner, status, reason, and real report. Unavailable/skipped
   execution cannot pass. Only the executing host may declare a pass; other
   reports are testimony pending fresh confirmation.
+- Every acceptance criterion names its test and the observable it asserts;
+  `@gate` checks this before coding. Fixtures cross the production boundary
+  they claim (a real HTTP 401, not `status: 401` in JSON).
 - An equivalence or invariance guard names the production boundary its fixture
   crosses, declares its mutation in the packet before the test is written, and
   must fail when the fixture transform is replaced with identity.
@@ -1348,6 +1403,9 @@ write_tool_entrypoints() {
   tool_surface_write "$TARGET_DIR/CLAUDE.md" <<'EOF'
 # Claude Instructions
 
+Read `AGENTS.md` first; follow its startup and Read on demand lists, onboarding
+and no-scan rules instead of repeating them here.
+
 ## Claude–Codex collaboration
 
 Claude's two default responsibilities are:
@@ -1361,28 +1419,6 @@ Follow the canonical roles and gates in
 active Claude–Codex handoff.
 Claude occupies `@spec` and `@audit` by default (see roster).
 
-## First run
-
-If `docs/agent-configs/project-brief.md` still carries the `<!-- UNFILLED -->`
-marker, run project onboarding (`docs/agent-configs/project-onboarding.md`;
-Claude: `/project-onboarding`) BEFORE substantive work, so you have full project
-context and source-backed project-specific tech-stack/spec notes.
-
-Read `AGENTS.md` first. For startup, load
-`docs/agent-configs/project-agent-context.md`, the filled project brief when
-available, and detector output. Read on demand:
-
-- `docs/agent-configs/agent-mode-contracts.md` when selecting or switching
-  planning/coding/reviewing mode
-- `docs/agent-configs/agent-handoff-schema.md` when handing work to another
-  agent
-- `.agents/tasks/<task-id>/` for the selected local collaboration packet
-- `docs/agent-configs/karpathy-llm-coding-agent-config.md` before substantive
-  code edits or production-risk refactors
-- `docs/agent-configs/llm-council-agent-workflow.md` only for council or
-  high-risk review work
-- `docs/agent-configs/task-journal.md` only for optional durable-decision notes
-
 Use `.claude/commands/` as mode entrypoints when the host supports project
 commands:
 
@@ -1395,10 +1431,6 @@ commands:
 
 Model selection is controlled by the Claude host; these files enforce behavior,
 not account-level model availability.
-
-At the start of substantive work, run `scripts/detect-agent-tech-stack.sh --markdown`
-when available and use its output with `docs/agent-configs/project-agent-context.md`.
-Use `scripts/agent-hook.sh no-scan-paths` before broad search.
 EOF
 
   tool_surface_write "$TARGET_DIR/GEMINI.md" <<'EOF'
@@ -1446,6 +1478,13 @@ EOF
 	        "matcher": "Edit|Write|MultiEdit",
 	        "hooks": [
 	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	        ]
+	      }
+	    ],
+    "SessionStart": [
+	      {
+	        "hooks": [
+	          { "type": "command", "command": "./scripts/agent-hook.sh claude-session-start" }
 	        ]
 	      }
 	    ],
@@ -1505,7 +1544,7 @@ Claude model selection is host-controlled. Keep the same mode contract if the
 selected model is unavailable.
 
 In Claude Code, the shared hook denies protected Edit/Write/MultiEdit paths with
-exit 2 unless \`pre-edit --ack <reason> <path>\` exists for that path, and
+exit 2 unless `pre-edit --ack <reason> <path>` exists for that path, and
 delegates shell git handling to pinned rtk. It is not a security boundary for Bash.
 EOF
 
@@ -1731,7 +1770,7 @@ web_search = "disabled"
 
 [shell_environment_policy]
 inherit = "none"
-include_only = ["PATH", "HOME", "PWD", "SHELL", "CODEX_HARNESS_SESSION"]
+include_only = ["PATH", "HOME", "PWD", "SHELL", "CODEX_HARNESS_SESSION", "AGENT_HOST_SESSION_ID", "AGENT_WORKSPACE_CONTEXT"]
 ignore_default_excludes = false
 
 [apps._default]
@@ -1749,11 +1788,11 @@ standard three-mode workflow.
 Commands:
 
 ```bash
-.codex/codex-mode.sh @spec
+.codex/codex-mode.sh @spec    # only if the roster assigns @spec to Codex
 .codex/codex-mode.sh @gate
 .codex/codex-mode.sh @build
 .codex/codex-mode.sh @verify
-.codex/codex-mode.sh @audit
+.codex/codex-mode.sh @audit   # only if the roster assigns @audit to Codex
 .codex/codex-mode.sh planning
 .codex/codex-mode.sh planning --supervised
 .codex/codex-mode.sh coding
@@ -1815,6 +1854,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+# Where the user started the launcher; captured before any directory change.
+LAUNCH_ORIGIN="$(pwd -P)"
 MODE_FILE="$PROJECT_ROOT/.codex-mode-lock"
 AGENT_HOOK="$PROJECT_ROOT/scripts/agent-hook.sh"
 AGENT_GUARD="$PROJECT_ROOT/scripts/agent-guard.sh"
@@ -2591,6 +2632,41 @@ run_status() {
   fi
 }
 
+workspace_environment_override() {
+  # JSON basic-string escaping is TOML-compatible with literal UTF-8; escape
+  # DEL as well. Keep each override in one argv entry, never evaluate its text.
+  python3 - "$1" <<'PY'
+import json
+import os
+import sys
+key = sys.argv[1]
+value = json.dumps(os.environ[key], ensure_ascii=False).replace(chr(127), r"\u007f")
+print("shell_environment_policy.set." + key + "=" + value)
+PY
+}
+
+mint_launch_envelope() {
+  # The launcher acts as the host adapter: record the directory where the user
+  # started it, only when no envelope exists. Never overwrite existing values.
+  local minted
+  [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" ]] || return 0
+  minted="$(LAUNCH_ORIGIN="$LAUNCH_ORIGIN" python3 - <<'PY'
+import json
+import os
+import uuid
+
+origin = os.environ["LAUNCH_ORIGIN"]
+session = "launch-" + uuid.uuid4().hex
+print(session)
+print(json.dumps(dict(original_workspace=origin, target_repository=origin, target_source="user",
+                      session_id=session), ensure_ascii=False))
+PY
+)" || return 1
+  AGENT_HOST_SESSION_ID="${minted%%$'\n'*}"
+  AGENT_WORKSPACE_CONTEXT="${minted#*$'\n'}"
+  export AGENT_HOST_SESSION_ID AGENT_WORKSPACE_CONTEXT
+}
+
 run_launch() {
   local requested_seat="$1"
   local route="$2"
@@ -2599,6 +2675,16 @@ run_launch() {
   shift 4 || true
   local sandbox approval seed codex_bin prompt resolve_rc
   reject_nested_launch || return 1
+  local workspace_report workspace_rc=0 workspace_context_override workspace_session_override
+  mint_launch_envelope || return 1
+  workspace_report="$(cd "$PROJECT_ROOT" && "$AGENT_GUARD" workspace-check)" || workspace_rc=$?
+  # Advisory: a mismatch (3) launches with a warning; other failures are errors.
+  if [[ "$workspace_rc" -ne 0 && "$workspace_rc" -ne 3 ]]; then
+    return "$workspace_rc"
+  fi
+  workspace_context_override="$(workspace_environment_override AGENT_WORKSPACE_CONTEXT)" || return 1
+  workspace_session_override="$(workspace_environment_override AGENT_HOST_SESSION_ID)" || return 1
+  cd "$PROJECT_ROOT" || return 1
   profile_warning
   require_seats_for_launch || return 1
   if resolve_effective "$requested_seat" "$route"; then
@@ -2619,6 +2705,10 @@ run_launch() {
     approval="$STANDARD_APPROVAL"
   fi
   seed="$(mode_prompt "$route" "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE" "$EFFECTIVE_EFFORT")"
+  seed="$seed"$'\n\n'"Workspace–Repository Guard: $workspace_report"$'\n'"Preserve AGENT_WORKSPACE_CONTEXT and AGENT_HOST_SESSION_ID in every subagent handoff. Validate the actual repository before writing; packet paths never grant permission."
+  if [[ "$workspace_rc" -eq 3 ]]; then
+    seed="$seed"$'\n'"Workspace mismatch: confirm the target repository with the user before writing."
+  fi
   codex_bin="$(resolve_codex_bin)" || return $?
   if [[ "$persist" == "true" ]]; then
     write_mode "$route" "$flow" "$requested_seat"
@@ -2635,12 +2725,12 @@ run_launch() {
     export CODEX_HARNESS_SESSION=1
     cleanup
     trap - EXIT
-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
+    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "$workspace_context_override" -c "$workspace_session_override" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"$'\n\n'"USER PROMPT:"$'\n'"$prompt"
   else
     export CODEX_HARNESS_SESSION=1
     cleanup
     trap - EXIT
-    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
+    exec "$codex_bin" -C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "$workspace_context_override" -c "$workspace_session_override" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$seed"
   fi
 }
 

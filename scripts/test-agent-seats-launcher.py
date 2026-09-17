@@ -23,14 +23,10 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = ROOT / "agent-bootstrap" / "bootstrap-multi-agent-project.sh"
-EVIDENCE = (
-    ROOT
-    / ".agents"
-    / "tasks"
-    / "agent-seats"
-    / "evidence"
-    / "release-20260908"
-    / "launcher"
+# Results go outside the repository so test runs never leave untracked files.
+EVIDENCE = Path(
+    os.environ.get("SEATS_LAUNCHER_EVIDENCE_DIR")
+    or Path(tempfile.gettempdir()) / "agent-seats-launcher-evidence"
 )
 
 
@@ -213,6 +209,8 @@ def install_hook_stub(target: Path, hook_log: Path) -> None:
 def generate_target(work: Path) -> Path:
     target = work / "generated-target"
     target.mkdir()
+    result = run(["git", "init", "-q", str(target)])
+    check(result.returncode == 0, "cannot initialize launcher fixture repository")
     result = run(
         [
             "/bin/bash",
@@ -250,7 +248,7 @@ def base_env(fake_bin: Path, codex_log: Path, hook_log: Path) -> Dict[str, str]:
     for key in list(env):
         if key.startswith("CODEX_"):
             del env[key]
-    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", os.defpath)
     env["CODEX_CAPTURE_FILE"] = str(codex_log)
     env["HOOK_CAPTURE_FILE"] = str(hook_log)
     env["HOOK_PREFLIGHT_CAPTURE_FILE"] = str(hook_log.with_name("hook-preflight.log"))
@@ -333,7 +331,10 @@ def test_generated_surface(target: Path) -> None:
     check("scripts/agent-seats.sh" in agents, "AGENTS.md has no seat operator pointer")
 
     mode = (target / "docs" / "agent-configs" / "agent-mode-contracts.md").read_text(encoding="utf-8")
-    handoff = (target / "docs" / "agent-configs" / "agent-handoff-schema.md").read_text(encoding="utf-8")
+    handoff = "\n".join(
+        (target / "docs" / "agent-configs" / name).read_text(encoding="utf-8")
+        for name in ("agent-handoff-schema.md", "agent-handoff-reference.md")
+    )
     prose_paths = [
         target / "CLAUDE.md",
         target / ".claude" / "README.md",
@@ -348,6 +349,7 @@ def test_generated_surface(target: Path) -> None:
         check(field in handoff, f"handoff prose omits {field}")
     for path in (
         target / "docs" / "agent-configs" / "agent-handoff-schema.md",
+        target / "docs" / "agent-configs" / "agent-handoff-reference.md",
         target / "docs" / "agent-configs" / "agent-mode-contracts.md",
         target / "docs" / "agent-configs" / "karpathy-llm-coding-agent-config.md",
         target / "docs" / "agent-configs" / "llm-council-agent-workflow.md",
@@ -829,6 +831,10 @@ def run_green(run_mutations: bool) -> int:
         fake_bin, codex_log, hook_log = make_fake_tools(work)
         install_hook_stub(target, hook_log)
         env = base_env(fake_bin, codex_log, hook_log)
+        env["AGENT_HOST_SESSION_ID"] = "launcher-test"
+        env["AGENT_WORKSPACE_CONTEXT"] = json.dumps(dict(
+            session_id="launcher-test", original_workspace=str(target.resolve()),
+            target_repository=str(target.resolve()), target_source="user"))
         env["HOOK_CONTEXT_PACK_FILE"] = str(target / ".agents" / "state" / "context-pack.json")
         env["TRAP_CAPTURE_FILE"] = str(work / "caller-exit-trap")
         tests = [

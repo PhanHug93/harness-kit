@@ -3,7 +3,7 @@
 # Shared tech-stack detection library for agent bootstrap/runtime scripts.
 # Keep this file portable: bash 3.2 compatible, no repo-specific paths.
 
-AGENT_TECH_STACK_LIB_VERSION="2026.06.24.1"
+AGENT_TECH_STACK_LIB_VERSION="2026.09.12.1"
 
 agent_reset_detection() {
   AGENT_TECH_STACKS=()
@@ -15,25 +15,248 @@ agent_reset_detection() {
 agent_has_file() {
   local root="$1"
   local relative="$2"
-  [[ -f "$root/$relative" ]]
+  agent_is_real_regular_file "$root" "$root/$relative"
 }
 
 agent_find_name() {
   local root="$1"
   local maxdepth="$2"
   local name="$3"
-  find "$root" -maxdepth "$maxdepth" \
+  local search_root="${4:-$root}"
+  local candidate
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    agent_is_real_regular_file "$root" "$candidate" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done < <(find "$search_root" -maxdepth "$maxdepth" \
     \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
-    -name "$name" -print -quit 2>/dev/null
+    -name "$name" -print 2>/dev/null)
+  return 1
 }
 
 agent_find_name_pattern() {
   local root="$1"
   local maxdepth="$2"
   local pattern="$3"
-  find "$root" -maxdepth "$maxdepth" \
+  local search_root="${4:-$root}"
+  local candidate
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    [[ -f "$candidate" || -d "$candidate" ]] || continue
+    agent_path_is_eligible "$root" "$candidate" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done < <(find "$search_root" -maxdepth "$maxdepth" \
     \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
-    -name "$pattern" -print -quit 2>/dev/null
+    -name "$pattern" -print 2>/dev/null)
+  return 1
+}
+
+agent_find_file_pattern() {
+  local root="$1"
+  local maxdepth="$2"
+  local pattern="$3"
+  local search_root="${4:-$root}"
+  local candidate
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    agent_is_real_regular_file "$root" "$candidate" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done < <(find "$search_root" -maxdepth "$maxdepth" \
+    \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+    -name "$pattern" -print 2>/dev/null)
+  return 1
+}
+
+agent_path_is_eligible() {
+  local root="$1"
+  local path="$2"
+  AGENT_POLICY_ROOT="$root" AGENT_POLICY_PATH="$path" python3 - <<'PY'
+import os
+import pathlib
+import sys
+
+root = os.path.abspath(os.environ["AGENT_POLICY_ROOT"])
+path = os.path.abspath(os.environ["AGENT_POLICY_PATH"])
+resolved_root = os.path.realpath(root)
+resolved_path = os.path.realpath(path)
+
+
+def is_descendant(candidate, parent):
+    if candidate == parent:
+        return False
+    try:
+        return os.path.commonpath((candidate, parent)) == parent
+    except ValueError:
+        return False
+
+
+def has_excluded_component(candidate, parent):
+    relative = os.path.relpath(candidate, parent)
+    if relative == "." or relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return True
+    parts = pathlib.PurePath(relative).parts
+    excluded = {
+        ".git", ".tools", ".idea", ".next", "node_modules", "Pods", "vendor",
+        "build", "dist", "out", "local.properties", "keystore.properties",
+    }
+    for part in parts:
+        if part in excluded or part.startswith(".gradle") or part.startswith(".env"):
+            return True
+        if part.endswith((".jks", ".keystore", ".pem", ".p8", ".key")):
+            return True
+    for index, part in enumerate(parts[:-1]):
+        if part == ".agents" and parts[index + 1] in {"runtime", "state", "cache"}:
+            return True
+    return False
+
+
+if (
+    not is_descendant(path, root)
+    or not is_descendant(resolved_path, resolved_root)
+    or has_excluded_component(path, root)
+    or has_excluded_component(resolved_path, resolved_root)
+):
+    sys.exit(1)
+PY
+}
+
+agent_is_real_directory() {
+  local root="$1"
+  local path="$2"
+  [[ -d "$path" ]] && agent_path_is_eligible "$root" "$path"
+}
+
+agent_is_real_regular_file() {
+  local root="$1"
+  local path="$2"
+  [[ -f "$path" ]] && agent_path_is_eligible "$root" "$path"
+}
+
+agent_flutter_android_module_has_evidence() {
+  local root="$1"
+  local module_dir="$2"
+  local manifest
+  agent_is_real_directory "$root" "$module_dir" || return 1
+  if agent_is_real_regular_file "$root" "$module_dir/build.gradle" ||
+    agent_is_real_regular_file "$root" "$module_dir/build.gradle.kts"; then
+    return 0
+  fi
+  while IFS= read -r manifest; do
+    if [[ -n "$manifest" ]] && agent_is_real_regular_file "$root" "$manifest"; then
+      return 0
+    fi
+  done < <(
+    find -H "$module_dir" -maxdepth 6 \
+      \( -type d \( -name .git -o -name .tools -o -name .gradle -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+      -name AndroidManifest.xml -print 2>/dev/null
+  )
+  return 1
+}
+
+agent_flutter_android_module_is_kotlin() {
+  local root="$1"
+  local module_dir="$2"
+  local source_file
+  if agent_is_real_regular_file "$root" "$module_dir/build.gradle" &&
+    grep -Eq 'kotlin-android|org\.jetbrains\.kotlin\.|kotlin\("?(android|jvm|multiplatform)' "$module_dir/build.gradle" 2>/dev/null; then
+    return 0
+  fi
+  if agent_is_real_regular_file "$root" "$module_dir/build.gradle.kts" &&
+    grep -Eq 'kotlin-android|org\.jetbrains\.kotlin\.|kotlin\("?(android|jvm|multiplatform)' "$module_dir/build.gradle.kts" 2>/dev/null; then
+    return 0
+  fi
+  source_file="$(find -H "$module_dir" -maxdepth 6 \
+    \( -type d \( -name .git -o -name .tools -o -name .gradle -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+    -name '*.kt' -print 2>/dev/null | while IFS= read -r source_file; do
+      if agent_is_real_regular_file "$root" "$source_file"; then printf '%s\n' "$source_file"; break; fi
+    done)"
+  [[ -n "$source_file" ]] && agent_is_real_regular_file "$root" "$source_file"
+}
+
+agent_detect_flutter_android_verification() {
+  local root="$1"
+  local android="$root/android"
+  local settings_file=""
+  local module module_dir
+  local has_evidence=false
+  local has_kotlin=false
+  local nested_modules=()
+
+  agent_is_real_directory "$root" "$android" || return 1
+  if agent_is_real_regular_file "$root" "$android/settings.gradle.kts"; then
+    settings_file="$android/settings.gradle.kts"
+  elif agent_is_real_regular_file "$root" "$android/settings.gradle"; then
+    settings_file="$android/settings.gradle"
+  else
+    return 1
+  fi
+
+  while IFS= read -r module; do
+    [[ -n "$module" ]] || continue
+    agent_gradle_module_name_is_safe "$module" || continue
+    module_dir="$(agent_gradle_module_dir "$android" "$module")"
+    if agent_flutter_android_module_has_evidence "$root" "$module_dir"; then
+      agent_add_unique AGENT_MODULES "$module"
+      nested_modules+=("$module")
+      has_evidence=true
+      if agent_flutter_android_module_is_kotlin "$root" "$module_dir"; then
+        has_kotlin=true
+      fi
+    fi
+  done < <(
+    grep -E '^[[:space:]]*include[[:space:]]*(\(|[[:space:]])' "$settings_file" 2>/dev/null |
+      grep -Eo ':[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)*' |
+      sort -u
+  )
+
+  [[ "$has_evidence" == "true" ]] || {
+    agent_add_unique AGENT_WARNINGS "Flutter Android platform skipped: no eligible Gradle module build/manifest evidence under android/."
+    return 1
+  }
+
+  if [[ "$has_kotlin" == "true" ]]; then
+    agent_add_unique AGENT_TECH_STACKS "android_kotlin"
+  else
+    agent_add_unique AGENT_TECH_STACKS "android_java"
+  fi
+  agent_add_unique AGENT_WARNINGS "Flutter Android module paths are relative to android/: ${nested_modules[*]}"
+  agent_add_unique AGENT_VERIFY_COMMANDS "flutter build appbundle --release"
+  if agent_is_real_regular_file "$root" "$android/gradlew" && [[ -x "$android/gradlew" ]]; then
+    agent_add_unique AGENT_VERIFY_COMMANDS "./android/gradlew -p android testDebugUnitTest"
+  fi
+  return 0
+}
+
+agent_posix_shell_quote() {
+  AGENT_QUOTE_VALUE="$1" python3 - <<'PY'
+import os
+import shlex
+
+print(shlex.quote(os.environ["AGENT_QUOTE_VALUE"]), end="")
+PY
+}
+
+agent_find_eligible_xcode_containers() {
+  local root="$1"
+  local candidate relative
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" && "$candidate" == "$root/"* ]] || continue
+    [[ -d "$candidate" ]] || continue
+    agent_path_is_eligible "$root" "$candidate" || continue
+    relative="${candidate#"$root/"}"
+    case "$relative" in
+      *.xcodeproj/project.xcworkspace) continue ;;
+    esac
+    printf '%s\n' "$relative"
+  done < <(
+    find "$root" -maxdepth 3 \
+      \( -type d \( -name .git -o -name .tools -o -name .gradle -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+      \( -type d -o -type l \) \( -name '*.xcworkspace' -o -name '*.xcodeproj' \) -print 2>/dev/null |
+      sort
+  )
 }
 
 agent_any_named_file_contains() {
@@ -45,22 +268,36 @@ agent_any_named_file_contains() {
   local name file
   for name in "$@"; do
     while IFS= read -r file; do
-      if grep -Eq "$regex" "$file" 2>/dev/null; then
+      if agent_is_real_regular_file "$root" "$file" && grep -Eq "$regex" "$file" 2>/dev/null; then
         return 0
       fi
     done < <(
       find "$root" -maxdepth "$maxdepth" \
         \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
-        -type f -name "$name" -print 2>/dev/null
+        -name "$name" -print 2>/dev/null
     )
   done
   return 1
 }
 
+agent_manifest_file_has() {
+  local root="$1"
+  local relative="$2"
+  local regex="$3"
+  agent_is_real_regular_file "$root" "$root/$relative" || return 1
+  grep -Eq "$regex" "$root/$relative" 2>/dev/null
+}
+
 agent_package_json_has() {
   local root="$1"
   local regex="$2"
-  grep -Eq "$regex" "$root/package.json" 2>/dev/null
+  agent_manifest_file_has "$root" "package.json" "$regex"
+}
+
+agent_composer_json_has() {
+  local root="$1"
+  local regex="$2"
+  agent_manifest_file_has "$root" "composer.json" "$regex"
 }
 
 agent_package_json_has_script() {
@@ -127,13 +364,26 @@ agent_gradle_module_dir() {
   printf '%s/%s' "$root" "$rel"
 }
 
+agent_gradle_module_name_is_safe() {
+  local module="$1"
+  [[ ! "$module" =~ (^|:)(\.|\.\.)(:|$) ]]
+}
+
 agent_gradle_module_file_contains() {
   local root="$1"
   local module="$2"
   local regex="$3"
   local module_dir
   module_dir="$(agent_gradle_module_dir "$root" "$module")"
-  grep -Eq "$regex" "$module_dir/build.gradle" "$module_dir/build.gradle.kts" 2>/dev/null
+  if agent_is_real_regular_file "$root" "$module_dir/build.gradle" &&
+    grep -Eq "$regex" "$module_dir/build.gradle" 2>/dev/null; then
+    return 0
+  fi
+  if agent_is_real_regular_file "$root" "$module_dir/build.gradle.kts" &&
+    grep -Eq "$regex" "$module_dir/build.gradle.kts" 2>/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 agent_gradle_module_has_build_file() {
@@ -141,7 +391,8 @@ agent_gradle_module_has_build_file() {
   local module="$2"
   local module_dir
   module_dir="$(agent_gradle_module_dir "$root" "$module")"
-  [[ -f "$module_dir/build.gradle" || -f "$module_dir/build.gradle.kts" ]]
+  agent_is_real_regular_file "$root" "$module_dir/build.gradle" ||
+    agent_is_real_regular_file "$root" "$module_dir/build.gradle.kts"
 }
 
 agent_gradle_module_has_android_signal() {
@@ -153,7 +404,7 @@ agent_gradle_module_has_android_signal() {
   if agent_gradle_module_file_contains "$root" "$module" 'com\.android\.(application|library)'; then
     return 0
   fi
-  [[ -n "$(agent_find_name "$module_dir" 5 AndroidManifest.xml)" ]]
+  [[ -n "$(agent_find_name "$root" 6 AndroidManifest.xml "$module_dir")" ]]
 }
 
 agent_android_module_variant_prefix() {
@@ -224,6 +475,7 @@ agent_detect_gradle_modules() {
 
 agent_detect_tech_stack() {
   local root="$1"
+  local is_flutter=false
   agent_reset_detection
   agent_detect_gradle_modules "$root"
 
@@ -245,15 +497,15 @@ agent_detect_tech_stack() {
     agent_add_gradle_module_verification_commands "$root" false
   fi
 
-  if [[ -d "$root/wear" || -d "$root/wear-api" ]]; then
+  if agent_is_real_directory "$root" "$root/wear" || agent_is_real_directory "$root" "$root/wear-api"; then
     agent_add_unique AGENT_TECH_STACKS "wear_os"
     agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew :wear:compileDebugKotlin"
   fi
 
-  if [[ -d "$root/health-core" ]] || agent_has_detected_module ":health-core"; then
+  if agent_is_real_directory "$root" "$root/health-core" || agent_has_detected_module ":health-core"; then
     agent_add_unique AGENT_TECH_STACKS "kotlin_domain_module"
     agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew :health-core:test"
-  elif [[ -d "$root/hiit-core" ]] || agent_has_detected_module ":hiit-core"; then
+  elif agent_is_real_directory "$root" "$root/hiit-core" || agent_has_detected_module ":hiit-core"; then
     agent_add_unique AGENT_TECH_STACKS "kotlin_domain_module"
     agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew :hiit-core:test"
   fi
@@ -293,9 +545,11 @@ agent_detect_tech_stack() {
   fi
 
   if agent_has_file "$root" "pubspec.yaml"; then
+    is_flutter=true
     agent_add_unique AGENT_TECH_STACKS "flutter_dart"
     agent_add_unique AGENT_VERIFY_COMMANDS "flutter test"
     agent_add_unique AGENT_VERIFY_COMMANDS "flutter analyze"
+    agent_detect_flutter_android_verification "$root" || true
   fi
 
   if agent_has_file "$root" "pyproject.toml" || agent_has_file "$root" "requirements.txt" || agent_has_file "$root" "poetry.lock"; then
@@ -321,13 +575,61 @@ agent_detect_tech_stack() {
     agent_add_unique AGENT_VERIFY_COMMANDS "cargo clippy --all-targets --all-features"
   fi
 
-  local has_xcode_project=false
-  if [[ -n "$(agent_find_name_pattern "$root" 3 "*.xcodeproj")" || -n "$(agent_find_name_pattern "$root" 3 "*.xcworkspace")" ]]; then
-    has_xcode_project=true
+  local selected_xcode=""
+  local workspace_xcode=""
+  local project_xcode=""
+  local flutter_runner_ios=false
+  local xcode_container
+  local xcode_containers=()
+  if [[ "$is_flutter" == "true" ]]; then
+    if agent_is_real_directory "$root" "$root/ios/Runner.xcodeproj" ||
+      agent_is_real_directory "$root" "$root/ios/Runner.xcworkspace"; then
+      flutter_runner_ios=true
+    fi
+  fi
+  while IFS= read -r xcode_container; do
+    [[ -n "$xcode_container" ]] && xcode_containers+=("$xcode_container")
+  done < <(agent_find_eligible_xcode_containers "$root")
+  if [[ ${#xcode_containers[@]} -gt 0 ]]; then
+    for xcode_container in "${xcode_containers[@]}"; do
+      case "$xcode_container" in
+        *.xcworkspace)
+          [[ -n "$workspace_xcode" ]] || workspace_xcode="$xcode_container"
+          ;;
+        *.xcodeproj)
+          [[ -n "$project_xcode" ]] || project_xcode="$xcode_container"
+          ;;
+      esac
+    done
+  fi
+  if [[ -n "$workspace_xcode" ]]; then
+    selected_xcode="$workspace_xcode"
+  else
+    selected_xcode="$project_xcode"
+  fi
+  if [[ -n "$selected_xcode" ]]; then
     agent_add_unique AGENT_TECH_STACKS "ios_swift"
-    agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild -list"
-    agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild test -scheme <scheme> -destination 'platform=iOS Simulator,name=iPhone 15'"
-    agent_add_unique AGENT_WARNINGS "xcodebuild -list is discovery only; replace <scheme> with a real shared scheme before claiming iOS build/test verification."
+    local selected_xcode_arg
+    selected_xcode_arg="$(agent_posix_shell_quote "$selected_xcode")"
+    if [[ -n "$workspace_xcode" ]]; then
+      agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild -list -workspace $selected_xcode_arg"
+    else
+      agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild -list -project $selected_xcode_arg"
+    fi
+    if [[ "$flutter_runner_ios" == "true" ]]; then
+      agent_add_unique AGENT_VERIFY_COMMANDS "flutter build ios --release --no-codesign"
+      agent_add_unique AGENT_WARNINGS "Flutter iOS release build verifies native compilation; RunnerTests build/execution remains explicit in project docs."
+    else
+      if [[ -n "$workspace_xcode" ]]; then
+        agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild test -scheme <scheme> -destination 'platform=iOS Simulator,name=iPhone 15' -workspace $selected_xcode_arg"
+      else
+        agent_add_unique AGENT_VERIFY_COMMANDS "xcodebuild test -scheme <scheme> -destination 'platform=iOS Simulator,name=iPhone 15' -project $selected_xcode_arg"
+      fi
+      agent_add_unique AGENT_WARNINGS "xcodebuild -list is discovery only; replace <scheme> with a real shared scheme before claiming iOS build/test verification."
+    fi
+    if [[ ${#xcode_containers[@]} -gt 1 ]]; then
+      agent_add_unique AGENT_WARNINGS "multiple eligible Xcode containers found; selected $selected_xcode (workspace preferred over project)."
+    fi
   fi
 
   if agent_has_file "$root" "Package.swift"; then
@@ -340,18 +642,18 @@ agent_detect_tech_stack() {
     agent_add_unique AGENT_WARNINGS "Podfile detected; inspect CocoaPods workspace and do not assume xcodeproj-only verification."
   fi
 
-  if [[ -n "$(agent_find_name_pattern "$root" 5 "*Watch*.swift")" || -n "$(agent_find_name_pattern "$root" 5 "*WatchKit*")" ]]; then
+  if [[ -n "$(agent_find_file_pattern "$root" 5 "*Watch*.swift")" || -n "$(agent_find_name_pattern "$root" 5 "*WatchKit*")" ]]; then
     agent_add_unique AGENT_TECH_STACKS "watch_os"
     agent_add_unique AGENT_WARNINGS "watchOS signals detected; include watch target/scheme verification when relevant."
   fi
 
-  if [[ -n "$(agent_find_name_pattern "$root" 3 "*.csproj")" || -n "$(agent_find_name_pattern "$root" 3 "*.sln")" ]]; then
+  if [[ -n "$(agent_find_file_pattern "$root" 3 "*.csproj")" || -n "$(agent_find_file_pattern "$root" 3 "*.sln")" ]]; then
     agent_add_unique AGENT_TECH_STACKS "dotnet"
     agent_add_unique AGENT_VERIFY_COMMANDS "dotnet test"
   fi
 
   if agent_has_file "$root" "composer.json"; then
-    if grep -Eq '"laravel/framework"[[:space:]]*:' "$root/composer.json" 2>/dev/null; then
+    if agent_composer_json_has "$root" '"laravel/framework"[[:space:]]*:'; then
       agent_add_unique AGENT_TECH_STACKS "php_laravel"
     else
       agent_add_unique AGENT_TECH_STACKS "php"

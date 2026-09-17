@@ -1,7 +1,57 @@
 # Changelog
 
-## Unreleased
+## 2026.10.13.1 — Safer upgrades and releases, advisory workspace guard
 
+- Upgrades and detection stay inside the project: the generator and
+  tech-stack detector no longer read or copy through links that leave the
+  target, `agent-seats` checks its destination root before writing, and
+  onboarding status reports outside links instead of opening them.
+- Flutter projects: nested `android/` modules are detected (also through
+  in-project links) and get `flutter build appbundle --release` and
+  `./android/gradlew -p android testDebugUnitTest`; Xcode discovery passes an
+  explicit `-workspace`/`-project`, and Flutter iOS adds
+  `flutter build ios --release --no-codesign`.
+- `agent-guard verify` prints one escaped line per failed, errored or timed-out
+  command (index, executable, exit, timeout, log) without echoing arguments.
+- Historical upgrade tests run from packaged bundles
+  (`scripts/fixtures/historical-bundles/`) or release tags, and the test shims
+  work without `PATH`.
+- The workspace guard is advisory: workspace status never changes the exit
+  code of guard commands, git hooks, host hooks or the launcher, so people
+  editing without AI and `git push` are never blocked. Claude Code hooks anchor
+  the session's project and ask before acting in another repository; the Codex
+  launcher records where it started and warns on a mismatch.
+- Leaner startup context: host files keep a short guard summary, `CLAUDE.md`
+  drops text repeated from AGENTS.md, and reference material moves from the
+  handoff schema to `agent-handoff-reference.md` (20-35% less startup text).
+  AGENTS.md gains `## Working Economy`, and mode contracts require each
+  acceptance criterion to name its test and fixtures to cross the real
+  boundary (a real HTTP 401, not `status: 401` in JSON).
+- Generated docs: the lock refresh command works inside projects, Codex seat
+  examples say which seats belong to Claude by default, and a stray backslash
+  is gone.
+- One-command releases: `scripts/release.sh <version>` bumps every version pin
+  from `agent-bootstrap/VERSION`, releases the `## Unreleased` notes and syncs
+  mirrors; `--check` reports drift and `--check-tag` refuses a tag that differs
+  from `VERSION` (CI runs it on tag pushes).
+- Runtime snapshots are regenerated with `scripts/sync-runtime-snapshots.sh`
+  instead of copied by hand.
+- `agent-update --apply` keeps a project's installed workflow; it previously
+  read the preset from the wrong lock field and regenerated `full` projects as
+  `infra`.
+- The one-shot upgrader keeps the installed workflow (new `--workflow`
+  option) and defaults to the `feature/upgrade-harness-kit` branch.
+- Fast test tier: `scripts/test-fast.sh` runs the quick checks in about 4
+  minutes and reports every failure at once; the full suites run before a PR or
+  release. The launcher test no longer writes results into the repository.
+- `--apply-candidates --only <path>` promotes reviewed candidates one file at a
+  time.
+- Upgrades keep a local-only baseline of the kit output: unedited files update
+  in place, edited files get kit changes merged in (a candidate only when edits
+  overlap), `--upgrade-plan --json` previews each file, and
+  `--rollback <upgrade-id>` undoes a run.
+- Process: one task packet per downstream report, and apps upgrade only to
+  published kit releases.
 - Preserve branch naming in repository and generated instructions:
   `feature/<slug>` for features, `bugfix/<slug>` for fixes; no `codex/` or
   agent-name prefixes, regardless of host defaults.
@@ -11,6 +61,15 @@
 - Prohibit force-pushing main/dev/develop and bypassing PRs with direct target
   updates. Prefer one commit and ask before exceeding two instead of silently
   squashing or rewriting history. Existing hooks and release pins are unchanged.
+- Old projects can now clean up the retired agent-guard CI workflow and its
+  template copy on purpose: `--retirement-plan` shows them, and
+  `--apply-retirements` removes only untouched copies after saving a verified
+  backup next to each one. Upgrades, `--force` and candidate promotion still
+  never delete them; edited files, links and stale candidates are kept for review.
+- `--status --json` is unchanged; `--status --json --status-version 2` adds the
+  retirement report. The one-shot upgrader gains `--apply-retirements`, and its
+  `--dry-run` now prints the retirement plan from a local source without
+  downloading anything.
 
 ## 2026.09.10.1 — Correct default seat effort catalogs
 

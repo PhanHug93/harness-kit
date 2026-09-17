@@ -1,0 +1,34 @@
+{
+  "schema": "agent-bootstrap-retired-artifacts/v1",
+  "policy_id": "hk07-agent-guard/v1",
+  "artifacts": [
+    {
+      "id": "agent-guard-workflow",
+      "path": ".github/workflows/agent-guard.yml",
+      "reason": "generated-remote-ci-retired",
+      "fingerprints": [
+        {
+          "source_ref": "v2026.08.10.1",
+          "source_commit": "b1907f5fe7caf9d9e401606a93fa0815739b6df0",
+          "source_path": "agent-bootstrap/templates/ci/agent-guard.yml",
+          "size_bytes": 605,
+          "sha256": "751c8c3f88fd1fc3bcc5c1ddff940e1280b1a5149c787d3110a4408a39810ebb"
+        }
+      ]
+    },
+    {
+      "id": "agent-guard-template",
+      "path": "docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml",
+      "reason": "generated-remote-ci-retired",
+      "fingerprints": [
+        {
+          "source_ref": "v2026.08.10.1",
+          "source_commit": "b1907f5fe7caf9d9e401606a93fa0815739b6df0",
+          "source_path": "agent-bootstrap/templates/ci/agent-guard.yml",
+          "size_bytes": 605,
+          "sha256": "751c8c3f88fd1fc3bcc5c1ddff940e1280b1a5149c787d3110a4408a39810ebb"
+        }
+      ]
+    }
+  ]
+}

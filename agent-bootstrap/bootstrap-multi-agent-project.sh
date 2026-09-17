@@ -5,11 +5,13 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.09.10.1"
+AGENT_BOOTSTRAP_VERSION="2026.10.13.1"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
 WORKFLOW_EXPLICIT=false
+APPLY_ONLY=""
+ROLLBACK_ID=""
 DRY_RUN=false
 BACKUP=true
 FORCE=false
@@ -17,6 +19,9 @@ CANDIDATE_ON_CONFLICT=true
 REFRESH_LOCK=false
 ACTION="generate"
 JSON_OUTPUT=false
+RETIREMENT_SCOPE="local-only"
+RETIREMENT_SCOPE_SET=false
+STATUS_VERSION=""
 LAST_WRITTEN_FILE=""
 OPTIONAL_SKILLS=()
 INSTALLED_SKILLS=()
@@ -39,6 +44,10 @@ source "$LIB_DIR/writers-docs.sh"
 # shellcheck source=agent-bootstrap/lib/onboarding.sh
 source "$LIB_DIR/onboarding.sh"
 
+warn() {
+  printf 'warn: %s\n' "$*" >&2
+}
+
 usage() {
   printf '%s\n' \
     "Usage: bootstrap-multi-agent-project.sh [options]" \
@@ -54,13 +63,20 @@ usage() {
     "  --skip-existing      Skip existing files instead of writing .generated candidates." \
     "  --refresh-lock       Refresh only docs/agent-configs/agent-bootstrap.lock.json." \
     "  --apply-candidates   Promote latest *.generated.* candidates into place." \
+    "  --only PATH          With --apply-candidates, promote only PATH (repeatable)." \
+    "  --rollback ID        Undo the generation or candidate apply recorded as upgrade ID." \
     "  --cleanup-backups    Remove harness-stamped .bak/.generated leftovers." \
     "  --status             Report installed harness state for the target." \
     "  --first-10           Print the first 10 minutes operator/onboarding path." \
     "  --next               Alias for --first-10." \
     "  --diff               Show generated-file diff for a non-destructive upgrade preview." \
     "  --upgrade-plan       Print an operator upgrade plan for the target." \
-    "  --json               Machine-readable output for --status." \
+    "  --retirement-plan    Report retired harness files and proposed actions (read-only)." \
+    "  --retirement-status  Report the current state of retired harness files (read-only)." \
+    "  --apply-retirements  Remove exact retired harness files after verified backups." \
+    "  --retirement-scope S local-only (default) or all-matching (also tracked/non-Git files)." \
+    "  --status-version N   With --status --json: 1 (default) or 2 (adds the retirement report)." \
+    "  --json               Machine-readable output for --status, --upgrade-plan and retirement actions." \
     "  --workflow PRESET    Optional workflow philosophy: infra or full." \
     "  --add-skill NAME     Add optional skill template to the target (mobile-optimization)." \
     "  --no-backup          Overwrite existing generated files without .bak copy." \
@@ -68,6 +84,13 @@ usage() {
     "  -h, --help           Show help."
 }
 
+retirement_usage_error() {
+  echo "ERROR: $*" >&2
+  usage >&2
+  exit 2
+}
+
+ORIGINAL_ARGS=("$@")
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-name)
@@ -104,6 +127,15 @@ while [[ $# -gt 0 ]]; do
       ACTION="apply-candidates"
       shift
       ;;
+    --only)
+      APPLY_ONLY+="${2:?missing value for --only}"$'\n'
+      shift 2
+      ;;
+    --rollback)
+      ACTION="rollback"
+      ROLLBACK_ID="${2:?missing value for --rollback}"
+      shift 2
+      ;;
     --cleanup-backups)
       ACTION="cleanup-backups"
       shift
@@ -123,6 +155,27 @@ while [[ $# -gt 0 ]]; do
     --upgrade-plan)
       ACTION="upgrade-plan"
       shift
+      ;;
+    --retirement-plan|--retirement-status|--apply-retirements)
+      ACTION="${1#--}"
+      shift
+      ;;
+    --retirement-scope)
+      [[ $# -ge 2 ]] || retirement_usage_error "missing value for --retirement-scope"
+      case "$2" in
+        local-only|all-matching) RETIREMENT_SCOPE="$2" ;;
+        *) retirement_usage_error "invalid --retirement-scope: $2 (expected local-only or all-matching)" ;;
+      esac
+      RETIREMENT_SCOPE_SET=true
+      shift 2
+      ;;
+    --status-version)
+      [[ $# -ge 2 ]] || retirement_usage_error "missing value for --status-version"
+      case "$2" in
+        1|2) STATUS_VERSION="$2" ;;
+        *) retirement_usage_error "invalid --status-version: $2 (expected 1 or 2)" ;;
+      esac
+      shift 2
       ;;
     --json)
       JSON_OUTPUT=true
@@ -166,10 +219,79 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# HK-07: reject malformed retirement combinations in any argument order before
+# dispatch or writes. Unrelated existing combinations keep last-action-wins.
+validate_retirement_arguments() {
+  local arg skip=false dedicated=false first="" mixed="" overrides=""
+  for arg in "$@"; do
+    if [[ "$skip" == true ]]; then
+      skip=false
+      continue
+    fi
+    case "$arg" in
+      --project-name|--target|--only|--workflow|--add-skill|--retirement-scope|--status-version) skip=true ;;
+      --rollback)
+        # An action that takes a value (the upgrade id).
+        skip=true
+        if [[ -z "$first" ]]; then
+          first="$arg"
+        elif [[ "$arg" != "$first" ]]; then
+          mixed="$first $arg"
+        fi
+        ;;
+      --retirement-plan|--retirement-status|--apply-retirements|--refresh-lock|--apply-candidates|\
+      --cleanup-backups|--status|--first-10|--next|--diff|--upgrade-plan)
+        case "$arg" in --retirement-plan|--retirement-status|--apply-retirements) dedicated=true ;; esac
+        if [[ -z "$first" ]]; then
+          first="$arg"
+        elif [[ "$arg" != "$first" ]]; then
+          mixed="$first $arg"
+        fi
+        ;;
+      --force|--skip-existing|--no-backup) overrides+=" $arg" ;;
+    esac
+  done
+  if [[ "$dedicated" == true ]]; then
+    [[ -z "$mixed" ]] || retirement_usage_error "retirement actions cannot be combined with other actions: $mixed"
+    [[ -z "$overrides" ]] || retirement_usage_error "retirement actions reject${overrides}; backups are mandatory and preserved files cannot be forced"
+    [[ -z "$APPLY_ONLY" ]] || retirement_usage_error "--only requires --apply-candidates"
+  fi
+  if [[ -n "$STATUS_VERSION" ]] && [[ "$ACTION" != "status" || "$JSON_OUTPUT" != "true" ]]; then
+    retirement_usage_error "--status-version requires --status --json"
+  fi
+  if [[ "$RETIREMENT_SCOPE_SET" == true ]]; then
+    case "$ACTION" in
+      refresh-lock|first-10|apply-candidates|cleanup-backups)
+        retirement_usage_error "--retirement-scope is not valid with --$ACTION"
+        ;;
+      status)
+        [[ "$JSON_OUTPUT" != "true" || "$STATUS_VERSION" == "2" ]] ||
+          retirement_usage_error "--retirement-scope needs --status-version 2; status v1 JSON cannot represent it"
+        ;;
+    esac
+  fi
+}
+
+validate_retirement_arguments ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}
+case "$ACTION" in
+  retirement-plan|retirement-status|apply-retirements)
+    retirement_mode="${ACTION#retirement-}"
+    [[ "$ACTION" != "apply-retirements" ]] || retirement_mode="apply"
+    retirement_args=(--target "$TARGET_DIR" --scope "$RETIREMENT_SCOPE" --bootstrap "$BOOTSTRAP_SCRIPT_PATH")
+    [[ "$JSON_OUTPUT" != "true" ]] || retirement_args+=(--json)
+    [[ "$DRY_RUN" != "true" ]] || retirement_args+=(--dry-run)
+    exec python3 "$LIB_DIR/retirement.py" "$retirement_mode" "${retirement_args[@]}"
+    ;;
+esac
+
 read_lock_value() {
   local key="$1"
   local file="${2:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
   [[ -f "$file" ]] || return 0
+  bootstrap_existing_file_is_eligible "$file" || {
+    warn "omitting unsafe lock metadata read: $(bootstrap_path_diagnostic "$file")"
+    return 0
+  }
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$file" "$key" <<'PY' 2>/dev/null || true
 import json
@@ -218,6 +340,10 @@ PY
 read_lock_skills() {
   local file="${1:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
   [[ -f "$file" ]] || return 0
+  bootstrap_existing_file_is_eligible "$file" || {
+    warn "omitting unsafe lock skills read: $(bootstrap_path_diagnostic "$file")"
+    return 0
+  }
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$file" <<'PY' 2>/dev/null || true
 import json
@@ -247,6 +373,10 @@ read_lock_skill_metadata_value() {
   local key="$2"
   local file="${3:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
   [[ -f "$file" ]] || return 0
+  bootstrap_existing_file_is_eligible "$file" || {
+    warn "omitting unsafe lock skill metadata read: $(bootstrap_path_diagnostic "$file")"
+    return 0
+  }
   command -v python3 >/dev/null 2>&1 || return 0
   python3 - "$file" "$skill" "$key" <<'PY' 2>/dev/null || true
 import json
@@ -274,6 +404,11 @@ PY
 read_lock_skill_metadata_json() {
   local file="${1:-$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json}"
   [[ -f "$file" ]] || { printf '{}'; return 0; }
+  bootstrap_existing_file_is_eligible "$file" || {
+    warn "omitting unsafe lock skill metadata read: $(bootstrap_path_diagnostic "$file")"
+    printf '{}'
+    return 0
+  }
   command -v python3 >/dev/null 2>&1 || { printf '{}'; return 0; }
   python3 - "$file" <<'PY' 2>/dev/null || printf '{}'
 import json
@@ -518,8 +653,11 @@ resolve_workflow_from_lock() {
     existing_workflow="$(
       read_lock_value workflow_preset "$existing_lock"
     )"
-    [[ -n "$existing_workflow" ]] && WORKFLOW_PRESET="$existing_workflow"
+    if [[ -n "$existing_workflow" ]]; then
+      WORKFLOW_PRESET="$existing_workflow"
+    fi
   fi
+  return 0
 }
 
 resolve_project_name_from_lock() {
@@ -529,12 +667,20 @@ resolve_project_name_from_lock() {
     existing_project="$(
       read_lock_value project_name "$existing_lock"
     )"
-    [[ -n "$existing_project" ]] && PROJECT_NAME="$existing_project"
+    if [[ -n "$existing_project" ]]; then
+      PROJECT_NAME="$existing_project"
+    fi
   fi
+  return 0
 }
 
 if [[ "$PROJECT_NAME_EXPLICIT" == "false" ]]; then
   resolve_project_name_from_lock
+fi
+
+if [[ -n "$APPLY_ONLY" && "$ACTION" != "apply-candidates" ]]; then
+  echo "ERROR: --only requires --apply-candidates" >&2
+  exit 2
 fi
 
 if [[ "$WORKFLOW_EXPLICIT" == "false" ]]; then
@@ -701,29 +847,138 @@ print_status() {
   fi
 }
 
+snapshot_required_path() {
+  case "$1" in
+    docs|docs/agent-configs|docs/agent-configs/*|docs/superpowers|docs/superpowers/specs|\
+    docs/superpowers/specs/project-brief.md|\
+    docs/superpowers/specs/project-tech-stack.md|docs/superpowers/specs/project-tech-stack.json)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+snapshot_resolved_path() {
+  AGENT_SNAPSHOT_PATH="$1" python3 - <<'PY'
+import os
+print(os.path.realpath(os.environ["AGENT_SNAPSHOT_PATH"]))
+PY
+}
+
+copy_snapshot_regular_children() {
+  local source="$1"
+  local dest="$2"
+  local relpath="$3"
+  local resolved child child_rel
+  bootstrap_existing_directory_is_eligible "$source" || return 1
+  resolved="$(snapshot_resolved_path "$source")"
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    child_rel="$relpath/$(basename "$child")"
+    if ! bootstrap_existing_file_is_eligible "$child"; then
+      snapshot_required_path "$child_rel" && return 1
+      continue
+    fi
+    mkdir -p "$dest/$(dirname "$child_rel")"
+    cp -p "$child" "$dest/$child_rel"
+  done < <(find "$resolved" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -print 2>/dev/null)
+}
+
+copy_snapshot_directory_link_contents() {
+  local source="$1"
+  local dest="$2"
+  local relpath="$3"
+  local resolved nested nested_source
+  case "$relpath" in
+    docs/agent-configs|docs/superpowers/specs)
+      copy_snapshot_regular_children "$source" "$dest" "$relpath"
+      ;;
+    docs|docs/superpowers)
+      bootstrap_existing_directory_is_eligible "$source" || return 1
+      resolved="$(snapshot_resolved_path "$source")"
+      if [[ "$relpath" == "docs" ]]; then
+        for nested in agent-configs superpowers/specs; do
+          nested_source="$resolved/$nested"
+          if [[ -d "$nested_source" ]]; then
+            copy_snapshot_regular_children "$nested_source" "$dest" "$relpath/$nested" || return 1
+          elif [[ -e "$nested_source" || -L "$nested_source" ]]; then
+            return 1
+          fi
+        done
+      else
+        nested_source="$resolved/specs"
+        if [[ -d "$nested_source" ]]; then
+          copy_snapshot_regular_children "$nested_source" "$dest" "$relpath/specs"
+        elif [[ -e "$nested_source" || -L "$nested_source" ]]; then
+          return 1
+        fi
+      fi
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 copy_target_for_diff() {
   local dest="$1"
+  local relpath source target required=false
   mkdir -p "$dest"
 
   (
     cd "$TARGET_DIR"
     find . \
-      \( -type d \( -name .git -o -name .tools -o -name .gradle -o -name build -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
-      \( -type f -o -type l \) -print
+      \( -path './.git' -o -path './.tools' -o -path './.gradle' -o -path './build' -o -path './out' -o -path './node_modules' -o -path './Pods' -o -path './vendor' \) -prune -o \
+      -type d -print
   ) | while IFS= read -r relpath; do
     relpath="${relpath#./}"
-    mkdir -p "$dest/$(dirname "$relpath")"
-    if [[ -L "$TARGET_DIR/$relpath" ]]; then
-      cp -Pp "$TARGET_DIR/$relpath" "$dest/$relpath"
-    else
-      cp -p "$TARGET_DIR/$relpath" "$dest/$relpath"
-    fi
+    [[ -n "$relpath" && "$relpath" != "." ]] || continue
+    mkdir -p "$dest/$relpath"
   done
+
+  while IFS= read -r relpath; do
+    [[ -n "$relpath" ]] || continue
+    relpath="${relpath#./}"
+    source="$TARGET_DIR/$relpath"
+    target="$dest/$relpath"
+    if [[ -L "$source" && -d "$source" ]]; then
+      if bootstrap_existing_directory_is_eligible "$source"; then
+        mkdir -p "$target"
+        if ! copy_snapshot_directory_link_contents "$source" "$dest" "$relpath"; then
+          required=true
+        fi
+      else
+        printf 'warn: omitted unsafe directory link from preview: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
+        snapshot_required_path "$relpath" && required=true
+      fi
+    elif bootstrap_existing_file_is_eligible "$source"; then
+      mkdir -p "$dest/$(dirname "$relpath")"
+      cp -p "$source" "$target"
+    else
+      printf 'warn: omitted unsafe preview entry: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
+      snapshot_required_path "$relpath" && required=true
+    fi
+  done < <(
+    cd "$TARGET_DIR" && find . \
+      \( -path './.git' -o -path './.tools' -o -path './.gradle' -o -path './build' -o -path './out' -o -path './node_modules' -o -path './Pods' -o -path './vendor' \) -prune -o \
+      \( -type f -o -type l \) -print
+  )
+
+  if [[ "$required" == "true" ]]; then
+    printf 'ERROR: required preview configuration was unsafe or unavailable\n' >&2
+    return 1
+  fi
 }
 
 sanitize_for_diff() {
   local relpath="$1"
   local file="$2"
+  if [[ "$file" == "$TARGET_DIR"/* ]] && bootstrap_entry_exists "$file" && ! bootstrap_existing_file_is_eligible "$file"; then
+    printf 'warn: omitted unsafe old content from diff: %s\n' "$(bootstrap_path_diagnostic "$file")" >&2
+    return 0
+  fi
   if [[ "$relpath" == "docs/agent-configs/agent-bootstrap.lock.json" ]]; then
     sed -e 's/"generated_at": "[^"]*"/"generated_at": "<generated_at>"/' \
         -e 's/"apply_state": "[^"]*"/"apply_state": "<apply_state>"/' "$file"
@@ -755,7 +1010,7 @@ sanitize_for_diff() {
 }
 
 print_generated_diff() (
-  local tmp_root tmp_target write_log relpath diff_found old_sanitized new_sanitized arg
+  local tmp_root tmp_target write_log relpath diff_found old_sanitized new_sanitized arg old_unsafe
   tmp_root="$(mktemp -d)"
   trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
   tmp_target="$tmp_root/target"
@@ -781,13 +1036,21 @@ print_generated_diff() (
     fi
     old_sanitized="$tmp_root/old.$$"
     new_sanitized="$tmp_root/new.$$"
-    if [[ -f "$TARGET_DIR/$relpath" ]]; then
+    old_unsafe=false
+    if bootstrap_entry_exists "$TARGET_DIR/$relpath" && ! bootstrap_existing_file_is_eligible "$TARGET_DIR/$relpath"; then
+      old_unsafe=true
+    fi
+    if [[ "$old_unsafe" == "true" ]] && is_bootstrap_user_owned_relpath "$relpath"; then
+      printf 'warn: preserving unsafe user-owned file in diff: %s\n' "$(bootstrap_path_diagnostic "$TARGET_DIR/$relpath")" >&2
+      continue
+    fi
+    if [[ "$old_unsafe" != "true" && -f "$TARGET_DIR/$relpath" ]]; then
       sanitize_for_diff "$relpath" "$TARGET_DIR/$relpath" > "$old_sanitized"
     else
       : > "$old_sanitized"
     fi
     sanitize_for_diff "$relpath" "$tmp_target/$relpath" > "$new_sanitized"
-    if ! cmp -s "$old_sanitized" "$new_sanitized"; then
+    if [[ "$old_unsafe" == "true" ]] || ! cmp -s "$old_sanitized" "$new_sanitized"; then
       printf '%s\n' "--- $relpath"
       printf '%s\n' "+++ $relpath (generated)"
       diff -u "$old_sanitized" "$new_sanitized" | sed '1,2d' || true
@@ -807,7 +1070,13 @@ print_generated_diff() (
 
 generated_file_drift_status() {
   local diff_output
-  diff_output="$(print_generated_diff)"
+  if ! diff_output="$(print_generated_diff)"; then
+    # Status is a read-only health report.  An unsafe required snapshot is
+    # still drift from the installed state, while --diff must retain the
+    # refusal and diagnostic from print_generated_diff itself.
+    printf 'stale'
+    return 0
+  fi
   if [[ "$diff_output" == "No generated-file differences." ]]; then
     printf 'clean'
   else
@@ -836,8 +1105,29 @@ generated_file_allowlist() (
   {
     cat "$write_log"
     optional_skill_allowlist_paths
-  } | sort -u
+  } | sort -u | exclude_retired_artifact_paths
 )
+
+# HK-07: retired paths never enter the promotion/cleanup allowlist, so an old
+# candidate can never restore retired CI. Fails closed without the inventory.
+exclude_retired_artifact_paths() {
+  local retired
+  retired="$(python3 "$LIB_DIR/retirement.py" paths)" && [[ -n "$retired" ]] || {
+    echo "ERROR: retired artifact inventory is unavailable" >&2
+    return 1
+  }
+  grep -Fvx -f <(printf '%s\n' "$retired") || true
+}
+
+# HK-07: append the read-only retirement plan to ordinary actions. It never
+# applies a retirement and returns 1 only for an inspection/enumeration error.
+# Internal preview/allowlist generations (AGENT_BOOTSTRAP_WRITE_LOG) skip it.
+print_retirement_section() {
+  [[ -z "${AGENT_BOOTSTRAP_WRITE_LOG:-}" ]] || return 0
+  printf '\n'
+  python3 "$LIB_DIR/retirement.py" section --target "$TARGET_DIR" --scope "$RETIREMENT_SCOPE" \
+    --context "$1" --bootstrap "$BOOTSTRAP_SCRIPT_PATH"
+}
 
 apply_generated_candidates() (
   local candidate_list applied_list allowed_list candidate base rel_candidate rel_base applied_any skipped target_parent
@@ -867,11 +1157,19 @@ apply_generated_candidates() (
     if ! grep -Fxq "$rel_base" "$allowed_list"; then
       continue
     fi
+    if [[ -n "$APPLY_ONLY" ]] && ! printf '%s' "$APPLY_ONLY" | grep -Fxq "$rel_base"; then
+      continue
+    fi
     if bootstrap_user_owned_file_is_filled "$base"; then
       printf 'Skipped user-owned generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
       continue
     fi
     target_parent="$(dirname "$base")"
+    bootstrap_write_parent_is_eligible "$base" || {
+      printf 'ERROR: refusing candidate promotion outside eligible parent: %s\n' "$(bootstrap_path_diagnostic "$target_parent")" >&2
+      skipped=$((skipped + 1))
+      continue
+    }
     if [[ ! -w "$target_parent" ]]; then
       printf '  skipped (read-only): %s -> %s\n' "$rel_candidate" "$rel_base"
       skipped=$((skipped + 1))
@@ -890,9 +1188,19 @@ apply_generated_candidates() (
     if [[ "$DRY_RUN" == "true" ]]; then
       printf 'DRY-RUN apply generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
     else
-      backup_existing "$base"
+      backup_existing "$base" || {
+        printf 'ERROR: refusing unsafe candidate promotion: %s\n' "$(bootstrap_path_diagnostic "$base")" >&2
+        skipped=$((skipped + 1))
+        continue
+      }
+      if bootstrap_existing_file_is_eligible "$base"; then
+        harness_journal_add apply "$rel_base" "$base"
+      else
+        harness_journal_add create "$rel_base"
+      fi
       mkdir -p "$(dirname "$base")"
       mv "$candidate" "$base"
+      harness_baseline_record "$(harness_baseline_relpath "$base" || true)" "$base"
       printf 'Applied generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
     fi
     printf '%s\n' "$base" >> "$applied_list"
@@ -901,6 +1209,11 @@ apply_generated_candidates() (
   if [[ "$applied_any" != "true" && "$skipped" -eq 0 ]]; then
     printf 'No generated candidates to apply.\n'
   fi
+  while IFS= read -r rel_base; do
+    [[ -n "$rel_base" ]] || continue
+    grep -Fxq "$TARGET_DIR/$rel_base" "$applied_list" || printf 'No generated candidate applied for %s\n' "$rel_base"
+  done <<<"$APPLY_ONLY"
+  harness_journal_finalize
   if [[ "$skipped" -gt 0 ]]; then
     printf 'Skipped %s candidate(s) in read-only directories; promote with write access.\n' "$skipped"
   fi
@@ -949,6 +1262,163 @@ cleanup_backups() {
   rm -f "$allowed_list"
 }
 
+print_upgrade_plan_json() (
+  # Classify every generated file by replaying generation on a temporary copy
+  # of the target (with its harness baseline); nothing in the target changes.
+  local tmp_root tmp_target plan_log arg baseline relpath
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
+  tmp_target="$tmp_root/target"
+  plan_log="$tmp_root/plan.tsv"
+  copy_target_for_diff "$tmp_target" || return 1
+  baseline="$TARGET_DIR/$HARNESS_BASELINE_DIR/files"
+  if [[ -d "$baseline" ]] && harness_state_path_is_safe "$baseline"; then
+    while IFS= read -r relpath; do
+      relpath="${relpath#./}"
+      if [[ -f "$baseline/$relpath" && ! -L "$baseline/$relpath" ]] && harness_state_path_is_safe "$baseline/$relpath"; then
+        mkdir -p "$tmp_target/$HARNESS_BASELINE_DIR/files/$(dirname "$relpath")"
+        cp -p "$baseline/$relpath" "$tmp_target/$HARNESS_BASELINE_DIR/files/$relpath"
+      fi
+    done < <(cd "$baseline" && find . -type f -print)
+  fi
+  : > "$plan_log"
+  set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --no-backup
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] || continue
+    set -- "$@" "$arg"
+  done < <(optional_skill_generation_args)
+  if ! AGENT_BOOTSTRAP_PLAN_LOG="$plan_log" "$@" >"$tmp_root/generate.out" 2>&1; then
+    cat "$tmp_root/generate.out" >&2
+    return 1
+  fi
+  python3 - "$TARGET_DIR" "$plan_log" "$AGENT_BOOTSTRAP_VERSION" "$(read_lock_value version)" "$WORKFLOW_PRESET" \
+    "$([[ -d "$baseline" ]] && printf present || printf missing)" <<'PY'
+import collections
+import json
+import os
+import sys
+
+target, plan_log, bundle, installed, workflow, baseline = sys.argv[1:7]
+actions = {}
+with open(plan_log, encoding="utf-8") as handle:
+    for line in handle:
+        action, rel = line.rstrip("\n").split("\t", 1)
+        if rel.startswith(".tools/") or ".generated." in rel:
+            continue
+        actions.setdefault(rel, action)
+files = []
+for rel in sorted(actions):
+    action = actions[rel]
+    real = os.path.join(target, rel)
+    if action == "create" and (os.path.lexists(real)):
+        action = "unsafe"
+    files.append({"path": rel, "action": action})
+print(json.dumps({
+    "schema": "agent-bootstrap-upgrade-plan/v1",
+    "target": target,
+    "bundle_version": bundle,
+    "installed_version": installed,
+    "workflow_preset": workflow,
+    "baseline": baseline,
+    "counts": dict(sorted(collections.Counter(item["action"] for item in files).items())),
+    "files": files,
+}, indent=2))
+PY
+)
+
+rollback_upgrade() {
+  local id="$1" upgrades jdir
+  upgrades="$TARGET_DIR/$HARNESS_BASELINE_DIR/upgrades"
+  jdir="$upgrades/$id"
+  if [[ ! "$id" =~ ^[0-9]{8}-[0-9]{6}$ ]] || [[ ! -f "$jdir/journal.tsv" ]] || ! harness_state_path_is_safe "$jdir/journal.tsv"; then
+    printf 'ERROR: no upgrade journal for %s\n' "$id" >&2
+    if [[ -d "$upgrades" ]] && harness_state_path_is_safe "$upgrades"; then
+      printf 'Available upgrade ids: %s\n' "$(cd "$upgrades" && find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' -print | sed 's|^\./||' | sort | tr '\n' ' ')" >&2
+    fi
+    return 1
+  fi
+  if [[ -e "$jdir/rolled-back" ]]; then
+    printf 'ERROR: upgrade %s was already rolled back\n' "$id" >&2
+    return 1
+  fi
+  python3 - "$TARGET_DIR" "$jdir" "$TARGET_DIR/$HARNESS_BASELINE_DIR/files" "$id" <<'PY'
+import hashlib
+import os
+import shutil
+import sys
+
+root, jdir, baseline, upgrade_id = sys.argv[1:5]
+root = os.path.abspath(root)
+
+
+def safe(path):
+    """Inside the root with no linked component below it."""
+    path = os.path.abspath(path)
+    if os.path.commonpath([root, path]) != root:
+        return False
+    current = root
+    for part in os.path.relpath(path, root).split(os.sep):
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return False
+    return True
+
+
+def digest(path):
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+restored = kept = 0
+with open(os.path.join(jdir, "journal.tsv"), encoding="utf-8") as handle:
+    rows = [line.rstrip("\n").split("\t") for line in handle if line.strip()]
+for action, rel, post in reversed(rows):
+    path = os.path.join(root, rel)
+    if not safe(path) or (os.path.lexists(path) and not os.path.isfile(path)):
+        print(f"kept {rel}: not a safe regular file")
+        kept += 1
+        continue
+    present = os.path.exists(path)
+    if action in ("create", "candidate") and not present:
+        print(f"already absent {rel}")
+        restored += 1
+    elif (digest(path) if present else "-") != post:
+        print(f"kept {rel}: changed after the upgrade")
+        kept += 1
+        continue
+    elif action in ("create", "candidate"):
+        os.remove(path)
+        print(f"removed {rel}")
+        restored += 1
+    else:
+        pre = os.path.join(jdir, "pre", rel)
+        if not os.path.isfile(pre) or os.path.islink(pre):
+            print(f"kept {rel}: no saved copy")
+            kept += 1
+            continue
+        staged = f"{path}.rollback.{os.getpid()}"
+        shutil.copy2(pre, staged)
+        os.replace(staged, path)
+        print(f"restored {rel}")
+        restored += 1
+    if action == "candidate":
+        continue
+    previous = os.path.join(jdir, "base-pre", rel)
+    current = os.path.join(baseline, rel)
+    if not safe(current):
+        continue
+    if os.path.isfile(previous) and not os.path.islink(previous):
+        os.makedirs(os.path.dirname(current), exist_ok=True)
+        shutil.copy2(previous, current)
+    elif os.path.isfile(current):
+        os.remove(current)
+with open(os.path.join(jdir, "rolled-back"), "w", encoding="utf-8") as handle:
+    handle.write(f"restored={restored} kept={kept}\n")
+print(f"Rollback {upgrade_id}: {restored} restored, {kept} kept")
+sys.exit(3 if kept else 0)
+PY
+}
+
 print_upgrade_plan() {
   local status_fields
   status_fields="$(current_status_fields)"
@@ -963,6 +1433,10 @@ print_upgrade_plan() {
   printf '  bash %s --target %s --apply-candidates\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
   printf 'Validate target after review/apply:\n'
   printf '  scripts/verify-ai-deps.sh\n'
+  printf 'Per-file plan (update, merge, conflict, kept) as JSON:\n'
+  printf '  bash %s --target %s --upgrade-plan --json\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
+  printf 'Undo an upgrade by the id it printed:\n'
+  printf '  bash %s --target %s --rollback <upgrade-id>\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
   if optional_skill_installed mobile-optimization; then
     printf '\n'
     printf 'Optional skills installed from lock:\n'
@@ -1030,7 +1504,16 @@ main() {
   validate_requested_optional_skills
   case "$ACTION" in
     status)
+      if [[ "$JSON_OUTPUT" == "true" && "$STATUS_VERSION" == "2" ]]; then
+        local status_json
+        status_json="$(print_status)"
+        printf '%s\n' "$status_json" |
+          python3 "$LIB_DIR/retirement.py" status-v2 --target "$TARGET_DIR" --scope "$RETIREMENT_SCOPE" || exit $?
+        exit 0
+      fi
       print_status
+      # Status JSON v1 stays byte-for-byte unchanged and retirement-blind.
+      [[ "$JSON_OUTPUT" == "true" ]] || print_retirement_section status || exit $?
       exit 0
       ;;
     first-10)
@@ -1039,18 +1522,30 @@ main() {
       ;;
     diff)
       print_generated_diff
+      print_retirement_section diff || exit $?
       exit 0
       ;;
     upgrade-plan)
+      if [[ "$JSON_OUTPUT" == "true" ]]; then
+        print_upgrade_plan_json
+        exit $?
+      fi
       print_upgrade_plan
+      print_retirement_section upgrade-plan || exit $?
       exit 0
+      ;;
+    rollback)
+      rollback_upgrade "$ROLLBACK_ID"
+      exit $?
       ;;
     apply-candidates)
       apply_generated_candidates
+      print_retirement_section apply-candidates || exit $?
       exit 0
       ;;
     cleanup-backups)
       cleanup_backups
+      print_retirement_section cleanup-backups || exit $?
       exit 0
       ;;
   esac
@@ -1062,6 +1557,7 @@ main() {
 
   if [[ "$REFRESH_LOCK" == "true" ]]; then
     write_agent_bootstrap_lock
+    harness_journal_finalize
     log "Refreshed docs/agent-configs/agent-bootstrap.lock.json."
     exit 0
   fi
@@ -1099,6 +1595,7 @@ main() {
     write_infra_tool_entrypoints
   fi
   append_gitignore_block
+  harness_journal_finalize
 
   log "Generated multi-agent files."
   if [[ "$BACKUP" == "true" ]]; then
@@ -1110,6 +1607,7 @@ main() {
   else
     log "Full onboarding helpers are available with: --workflow full"
   fi
+  print_retirement_section generate || exit $?
 }
 
 main

@@ -319,6 +319,7 @@ main() {
   copy_file "verify-ai-deps.sh" "verify-ai-deps.sh"
   copy_file "model-profiles/codex-model-profiles.json" "model-profiles/codex-model-profiles.json"
   copy_file "policies/agent-context-policy.json" "policies/agent-context-policy.json"
+  copy_file "policies/retired-artifacts-v1.json" "policies/retired-artifacts-v1.json"
   copy_file "provenance/rtk-v0.37.2.sha256" "provenance/rtk-v0.37.2.sha256"
   copy_file "schemas/agent-context-policy-v1.schema.json" "schemas/agent-context-policy-v1.schema.json"
   copy_file "schemas/agent-model-profiles-v1.schema.json" "schemas/agent-model-profiles-v1.schema.json"
@@ -326,6 +327,8 @@ main() {
   copy_file "schemas/agent-project-tech-stack-v1.schema.json" "schemas/agent-project-tech-stack-v1.schema.json"
   copy_file "schemas/agent-bootstrap-lock-v1.schema.json" "schemas/agent-bootstrap-lock-v1.schema.json"
   copy_file "schemas/agent-bootstrap-status-v1.schema.json" "schemas/agent-bootstrap-status-v1.schema.json"
+  copy_file "schemas/agent-bootstrap-status-v2.schema.json" "schemas/agent-bootstrap-status-v2.schema.json"
+  copy_file "schemas/agent-bootstrap-retirement-v1.schema.json" "schemas/agent-bootstrap-retirement-v1.schema.json"
   copy_file "schemas/agent-bootstrap-verify-report-v1.schema.json" "schemas/agent-bootstrap-verify-report-v1.schema.json"
   copy_file "schemas/agent-guard-event-v2.schema.json" "schemas/agent-guard-event-v2.schema.json"
   copy_file "templates/base/README.md" "templates/base/README.md"
@@ -357,6 +360,7 @@ main() {
   copy_file "lib/writers-docs.sh" "lib/writers-docs.sh"
   copy_file "lib/onboarding.sh" "lib/onboarding.sh"
   copy_file "lib/overlays.sh" "lib/overlays.sh"
+  copy_file "lib/retirement.py" "lib/retirement.py"
   write_source_metadata
   init_history
 

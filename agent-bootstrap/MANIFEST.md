@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.09.10.1`
+Version: `2026.10.13.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -13,8 +13,11 @@ This bundle carries two independent version stamps. Bump
 `lib/detect.sh` emitter) only when detector logic changes. Bump
 `AGENT_BOOTSTRAP_VERSION` (entrypoint) together with `VERSION` when preparing a
 user-authorized release of any bundle change, including doc, generator, or
-runtime-snapshot edits. Unreleased feature branches retain the published pins;
-do not invent a release tag or source branch to complete a feature PR.
+runtime-snapshot edits; `scripts/release.sh <version>` bumps every pin from
+`VERSION` and `scripts/release.sh --check` reports drift. Runtime snapshots are
+refreshed with `scripts/sync-runtime-snapshots.sh`, never edited by hand.
+Unreleased feature branches retain the published pins; do not invent a release
+tag or source branch to complete a feature PR.
 
 ## Source Roles
 
@@ -41,6 +44,7 @@ do not invent a release tag or source branch to complete a feature PR.
 | `verify-ai-deps.sh` | Runtime verifier snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/verify-ai-deps.sh`. |
 | `model-profiles/codex-model-profiles.json` | Legacy model profile catalog retained as one-release migration input; fresh targets do not receive `model-profiles.json`. | Must match canonical home export; used only when `seats.json` is missing. |
 | `policies/agent-context-policy.json` | Source Agent Guard Lite context policy copied into generated target `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target context policy. |
+| `policies/retired-artifacts-v1.json` | Closed HK-07 inventory of retired generated files with pinned historical size/SHA-256 provenance; read only by `lib/retirement.py`. | Must match canonical home export and the inventory pinned in `lib/retirement.py`; never emitted into targets. |
 | `provenance/rtk-v0.37.2.sha256` | Pinned rtk release asset checksums used by generated installer verification. | Must match canonical home export and generated target provenance catalog. |
 | `schemas/agent-context-policy-v1.schema.json` | JSON Schema for `policies/agent-context-policy.json` and generated `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-model-profiles-v1.schema.json` | JSON Schema for the legacy model profile migration input and its generated schema catalog copy. | Must match canonical home export and generated target schema catalog. |
@@ -48,6 +52,8 @@ do not invent a release tag or source branch to complete a feature PR.
 | `schemas/agent-project-tech-stack-v1.schema.json` | JSON Schema for generated `docs/superpowers/specs/project-tech-stack.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-lock-v1.schema.json` | JSON Schema for `agent-bootstrap.lock.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-status-v1.schema.json` | JSON Schema for `--status --json` output. | Must match canonical home export and generated target schema catalog. |
+| `schemas/agent-bootstrap-status-v2.schema.json` | JSON Schema for opt-in `--status --json --status-version 2` output (v1 fields plus the retirement report). | Must match canonical home export and generated target schema catalog. |
+| `schemas/agent-bootstrap-retirement-v1.schema.json` | JSON Schema for `--retirement-plan`, `--retirement-status` and `--apply-retirements` `--json` reports. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-verify-report-v1.schema.json` | JSON Schema for `scripts/verify-ai-deps.sh --json` output. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-guard-event-v2.schema.json` | JSON Schema for `agent-guard.sh` close-out telemetry events. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
@@ -79,6 +85,7 @@ do not invent a release tag or source branch to complete a feature PR.
 | `lib/writers-docs.sh` | Sourced library that emits agent docs, tool entrypoints, and Codex files. | Must match canonical home export. |
 | `lib/onboarding.sh` | Sourced library that emits the onboarding scaffold (full workflow). | Must match canonical home export. |
 | `lib/overlays.sh` | Sourced USER-overlay engine; preserves keyed `<!-- BEGIN USER -->` regions across regeneration. | Must match canonical home export. |
+| `lib/retirement.py` | HK-07 retired-artifact engine: read-only plan/status sections and the explicit `--apply-retirements` backup/delete path. | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

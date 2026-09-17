@@ -538,6 +538,29 @@ PY
   case_dir="$(copy_fixture_for_negative_case "$dir" "$name-unfilled-tech-md")"
   printf '<!-- UNFILLED -->\n' >> "$case_dir/docs/superpowers/specs/project-tech-stack.md"
   expect_onboarding_check_rejects "$case_dir" "$name unfilled tech-stack markdown"
+
+  # HK-01: contract files are classified before reading; an outside link (on
+  # the file or a parent directory) is reported unsafe and never opened.
+  local outside_dir status_json
+  outside_dir="$TMP_ROOT/$name-outside-knowledge"
+  rm -rf "$outside_dir"
+  mkdir -p "$outside_dir"
+  case_dir="$(copy_fixture_for_negative_case "$dir" "$name-outside-brief")"
+  { cat "$case_dir/docs/agent-configs/project-brief.md"; printf 'OUTSIDE-BRIEF-SENTINEL\n'; } >"$outside_dir/brief.md"
+  rm "$case_dir/docs/agent-configs/project-brief.md"
+  ln -s "$outside_dir/brief.md" "$case_dir/docs/agent-configs/project-brief.md"
+  expect_onboarding_check_rejects "$case_dir" "$name outside project brief"
+  status_json="$(cd "$case_dir" && scripts/agent-onboarding.sh status --json)"
+  need_not_contains "$status_json" "OUTSIDE-BRIEF-SENTINEL" "$name outside brief content stays unread"
+  printf '%s' "$status_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d["status"] == "invalid" and d["brief"]["status"] == "unsafe" else 1)' ||
+    fail "$name outside project brief must be unsafe and overall invalid"
+
+  case_dir="$(copy_fixture_for_negative_case "$dir" "$name-outside-specs-parent")"
+  mv "$case_dir/docs/superpowers" "$outside_dir/superpowers"
+  ln -s "$outside_dir/superpowers" "$case_dir/docs/superpowers"
+  status_json="$(cd "$case_dir" && scripts/agent-onboarding.sh status --json)"
+  printf '%s' "$status_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit(0 if d["tech_stack"]["status"] == "unsafe" else 1)' ||
+    fail "$name tech-stack contract behind an outside parent link must be unsafe"
 }
 
 evaluate_filled_contract() {

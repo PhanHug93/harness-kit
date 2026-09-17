@@ -1,0 +1,400 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-bootstrap-retirement-v1.schema.json",
+  "title": "Agent Bootstrap Retirement Report",
+  "description": "Typed plan/status/apply report for the closed HK-07 retired-artifact inventory. Entries are always the two inventory rows in order; no link target or file content is included.",
+  "type": "object",
+  "required": [
+    "schema",
+    "policy_id",
+    "policy_sha256",
+    "target",
+    "mode",
+    "dry_run",
+    "scope",
+    "run_id",
+    "entries",
+    "summary",
+    "errors"
+  ],
+  "properties": {
+    "schema": { "const": "agent-bootstrap-retirement/v1" },
+    "policy_id": { "const": "hk07-agent-guard/v1" },
+    "policy_sha256": { "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}] },
+    "target": { "type": "string", "pattern": "^/" },
+    "mode": { "enum": ["plan", "status", "apply"] },
+    "dry_run": { "type": "boolean" },
+    "scope": { "enum": ["local-only", "all-matching"] },
+    "run_id": { "anyOf": [{"$ref": "#/$defs/runId"}, {"type": "null"}] },
+    "entries": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "allOf": [
+            { "$ref": "#/$defs/entry" },
+            {
+              "properties": {
+                "id": { "const": "agent-guard-workflow" },
+                "path": { "const": ".github/workflows/agent-guard.yml" },
+                "backup": {
+                  "anyOf": [
+                    { "type": "null" },
+                    {
+                      "type": "string",
+                      "pattern": "^\\.github/workflows/agent-guard\\.yml\\.bak\\.retirement\\.[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}$"
+                    }
+                  ]
+                },
+                "stale_candidates": {
+                  "items": {
+                    "properties": {
+                      "path": { "pattern": "^\\.github/workflows/agent-guard\\.yml\\.generated\\.[\\s\\S]+$" }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/entry" },
+            {
+              "properties": {
+                "id": { "const": "agent-guard-template" },
+                "path": {
+                  "const": "docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml"
+                },
+                "backup": {
+                  "anyOf": [
+                    { "type": "null" },
+                    {
+                      "type": "string",
+                      "pattern": "^docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard\\.yml\\.bak\\.retirement\\.[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}$"
+                    }
+                  ]
+                },
+                "stale_candidates": {
+                  "items": {
+                    "properties": {
+                      "path": {
+                        "pattern": "^docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard\\.yml\\.generated\\.[\\s\\S]+$"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "items": false
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "errors": { "type": "array", "items": {"$ref": "#/$defs/error"} }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": {"mode": {"enum": ["plan", "status"]}}, "required": ["mode"] },
+      "then": {
+        "properties": {
+          "run_id": { "type": "null" },
+          "entries": { "prefixItems": [{"$ref": "#/$defs/plannedEntry"}, {"$ref": "#/$defs/plannedEntry"}] }
+        }
+      }
+    },
+    {
+      "if": { "properties": {"mode": {"const": "apply"}}, "required": ["mode"] },
+      "then": {
+        "properties": {
+          "dry_run": { "const": false },
+          "run_id": { "$ref": "#/$defs/runId" },
+          "entries": { "prefixItems": [{"$ref": "#/$defs/appliedEntry"}, {"$ref": "#/$defs/appliedEntry"}] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "runId": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{16}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "observation": {
+      "type": "object",
+      "required": ["status", "reason", "file_type", "size_bytes", "sha256", "ownership"],
+      "properties": {
+        "status": { "enum": ["absent", "eligible", "modified", "unsafe-type", "error"] },
+        "reason": {
+          "enum": [
+            "missing",
+            "exact-match",
+            "size-mismatch",
+            "digest-mismatch",
+            "symlink-leaf",
+            "symlink-ancestor",
+            "special-leaf",
+            "non-directory-ancestor",
+            "multiple-hard-links",
+            "io-error",
+            "ownership-error",
+            "identity-changed",
+            "invalid-policy",
+            "invalid-root"
+          ]
+        },
+        "file_type": { "enum": ["absent", "regular", "symlink", "directory", "other", "unknown"] },
+        "size_bytes": { "anyOf": [{"$ref": "#/$defs/count"}, {"type": "null"}] },
+        "sha256": { "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}] },
+        "ownership": { "enum": ["local-only", "project-owned", "error", null] }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": {"status": {"const": "absent"}}, "required": ["status"] },
+          "then": {
+            "properties": {
+              "reason": { "const": "missing" },
+              "file_type": { "const": "absent" },
+              "size_bytes": { "type": "null" },
+              "sha256": { "type": "null" },
+              "ownership": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": {"status": {"const": "eligible"}}, "required": ["status"] },
+          "then": {
+            "properties": {
+              "reason": { "const": "exact-match" },
+              "file_type": { "const": "regular" },
+              "size_bytes": { "const": 605 },
+              "sha256": { "const": "751c8c3f88fd1fc3bcc5c1ddff940e1280b1a5149c787d3110a4408a39810ebb" },
+              "ownership": { "enum": ["local-only", "project-owned"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": {"status": {"const": "modified"}}, "required": ["status"] },
+          "then": {
+            "properties": {
+              "reason": { "enum": ["size-mismatch", "digest-mismatch"] },
+              "file_type": { "const": "regular" },
+              "size_bytes": { "$ref": "#/$defs/count" },
+              "ownership": { "enum": ["local-only", "project-owned", null] }
+            },
+            "allOf": [
+              {
+                "if": { "properties": {"reason": {"const": "digest-mismatch"}}, "required": ["reason"] },
+                "then": { "properties": {"sha256": {"$ref": "#/$defs/digest"}} }
+              }
+            ]
+          }
+        },
+        {
+          "if": { "properties": {"status": {"const": "unsafe-type"}}, "required": ["status"] },
+          "then": {
+            "properties": {
+              "reason": {
+                "enum": [
+                  "symlink-leaf",
+                  "symlink-ancestor",
+                  "special-leaf",
+                  "non-directory-ancestor",
+                  "multiple-hard-links"
+                ]
+              },
+              "file_type": { "enum": ["regular", "symlink", "directory", "other", "unknown"] },
+              "sha256": { "type": "null" },
+              "ownership": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": {"status": {"const": "error"}}, "required": ["status"] },
+          "then": {
+            "properties": {
+              "reason": {
+                "enum": ["io-error", "ownership-error", "identity-changed", "invalid-policy", "invalid-root"]
+              },
+              "ownership": { "enum": ["error", null] }
+            }
+          }
+        }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "id",
+        "path",
+        "observed",
+        "action",
+        "result",
+        "after",
+        "backup",
+        "stale_candidates",
+        "candidate_scan"
+      ],
+      "properties": {
+        "id": { "enum": ["agent-guard-workflow", "agent-guard-template"] },
+        "path": {
+          "enum": [
+            ".github/workflows/agent-guard.yml",
+            "docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml"
+          ]
+        },
+        "observed": { "$ref": "#/$defs/observation" },
+        "action": { "enum": ["retire", "preserve", "none"] },
+        "result": { "enum": ["planned", "retired", "preserved", "unchanged", "error", "not-attempted"] },
+        "after": { "anyOf": [{"$ref": "#/$defs/observation"}, {"type": "null"}] },
+        "backup": { "type": ["string", "null"] },
+        "stale_candidates": { "type": "array", "items": {"$ref": "#/$defs/candidate"} },
+        "candidate_scan": { "enum": ["complete", "unsafe-parent", "error"] }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "observed": { "properties": {"status": {"const": "absent"}}, "required": ["status"] }
+            },
+            "required": ["observed"]
+          },
+          "then": { "properties": {"action": {"const": "none"}} },
+          "else": { "properties": {"action": {"enum": ["retire", "preserve"]}} }
+        },
+        {
+          "if": {
+            "properties": {
+              "observed": { "properties": {"status": {"enum": ["modified", "unsafe-type", "error"]}} }
+            }
+          },
+          "then": { "properties": {"action": {"const": "preserve"}} }
+        },
+        {
+          "if": {
+            "properties": { "candidate_scan": {"enum": ["unsafe-parent", "error"]} },
+            "required": ["candidate_scan"]
+          },
+          "then": { "properties": {"stale_candidates": {"maxItems": 0}} }
+        }
+      ]
+    },
+    "plannedEntry": {
+      "properties": { "result": {"const": "planned"}, "after": {"type": "null"}, "backup": {"type": "null"} }
+    },
+    "appliedEntry": {
+      "properties": { "result": {"enum": ["retired", "preserved", "unchanged", "error", "not-attempted"]} },
+      "allOf": [
+        {
+          "if": { "properties": {"result": {"const": "retired"}}, "required": ["result"] },
+          "then": {
+            "properties": {
+              "action": { "const": "retire" },
+              "after": {
+                "type": "object",
+                "properties": { "status": {"const": "absent"} },
+                "required": ["status"]
+              },
+              "backup": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": {"result": {"const": "unchanged"}}, "required": ["result"] },
+          "then": {
+            "properties": {
+              "after": {
+                "type": "object",
+                "properties": { "status": {"const": "absent"} },
+                "required": ["status"]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": {"result": {"const": "preserved"}}, "required": ["result"] },
+          "then": { "properties": {"after": {"$ref": "#/$defs/observation"}} }
+        },
+        {
+          "if": { "properties": {"result": {"const": "not-attempted"}}, "required": ["result"] },
+          "then": { "properties": {"after": {"type": "null"}, "backup": {"type": "null"}} }
+        }
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "required": ["path", "file_type"],
+      "properties": {
+        "path": { "type": "string" },
+        "file_type": { "enum": ["regular", "symlink", "directory", "other", "unknown"] }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "states",
+        "results",
+        "stale_candidate_count",
+        "incomplete_candidate_scans",
+        "attention_required"
+      ],
+      "properties": {
+        "states": {
+          "type": "object",
+          "required": ["absent", "eligible", "modified", "unsafe-type", "error"],
+          "properties": {
+            "absent": { "$ref": "#/$defs/count" },
+            "eligible": { "$ref": "#/$defs/count" },
+            "modified": { "$ref": "#/$defs/count" },
+            "unsafe-type": { "$ref": "#/$defs/count" },
+            "error": { "$ref": "#/$defs/count" }
+          },
+          "additionalProperties": false
+        },
+        "results": {
+          "type": "object",
+          "required": ["planned", "retired", "preserved", "unchanged", "error", "not-attempted"],
+          "properties": {
+            "planned": { "$ref": "#/$defs/count" },
+            "retired": { "$ref": "#/$defs/count" },
+            "preserved": { "$ref": "#/$defs/count" },
+            "unchanged": { "$ref": "#/$defs/count" },
+            "error": { "$ref": "#/$defs/count" },
+            "not-attempted": { "$ref": "#/$defs/count" }
+          },
+          "additionalProperties": false
+        },
+        "stale_candidate_count": { "$ref": "#/$defs/count" },
+        "incomplete_candidate_scans": { "$ref": "#/$defs/count" },
+        "attention_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "path", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "policy-invalid",
+            "root-invalid",
+            "inspection-failed",
+            "candidate-scan-failed",
+            "ownership-failed",
+            "changed-before-delete",
+            "backup-failed",
+            "delete-failed",
+            "interrupted"
+          ]
+        },
+        "path": { "type": ["string", "null"] },
+        "message": { "type": "string", "pattern": "^[^\\n\\r]*$" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

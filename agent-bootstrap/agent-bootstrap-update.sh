@@ -68,7 +68,9 @@ try:
 except Exception:
     sys.exit(0)
 
-value = doc.get(key, "")
+value = doc
+for part in key.split("."):
+    value = value.get(part, "") if isinstance(value, dict) else ""
 if isinstance(value, (str, int, float)):
     print(value)
 elif isinstance(value, bool):
@@ -261,7 +263,9 @@ self_update() {
 target_workflow() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
   local workflow
-  workflow="$(read_json_value "$lock_file" workflow_preset)"
+  # The lock nests the preset under templates; old locks kept it at top level.
+  workflow="$(read_json_value "$lock_file" templates.workflow_preset)"
+  [[ -n "$workflow" ]] || workflow="$(read_json_value "$lock_file" workflow_preset)"
   case "$workflow" in
     infra|full) printf '%s\n' "$workflow" ;;
     *) printf 'infra\n' ;;
@@ -281,6 +285,7 @@ apply_target() {
   print_update_status
   printf '\n'
   workflow="$(target_workflow)"
+  printf 'Applying installed workflow: %s\n' "$workflow"
   bash "$HOME_DIR/bootstrap-multi-agent-project.sh" --target "$TARGET_DIR" --workflow "$workflow"
 }
 

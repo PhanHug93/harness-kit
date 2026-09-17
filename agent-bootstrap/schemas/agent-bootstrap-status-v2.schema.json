@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v2.schema.json",
+  "title": "Agent Bootstrap Status v2",
+  "description": "Opt-in --status --json --status-version 2 output: every v1 field with unchanged meaning, plus the status-mode retirement report.",
+  "type": "object",
+  "required": [
+    "schema",
+    "target",
+    "project",
+    "lock_schema",
+    "bundle_version",
+    "installed_version",
+    "channel",
+    "workflow_preset",
+    "installed_skills",
+    "skill_mobile_optimization_installed_from_version",
+    "skill_mobile_optimization_content_hash",
+    "skill_mobile_optimization_skew",
+    "detector_lock_status",
+    "onboarding_status",
+    "pending_generated_candidates",
+    "generated_file_drift",
+    "retirement"
+  ],
+  "properties": {
+    "schema": { "const": "agent-bootstrap-status/v2" },
+    "target": { "type": "string" },
+    "project": { "type": "string" },
+    "lock_schema": { "type": "string" },
+    "bundle_version": { "type": "string" },
+    "installed_version": { "type": "string" },
+    "channel": { "type": "string" },
+    "workflow_preset": { "enum": ["infra", "full", "missing"] },
+    "installed_skills": { "type": "string" },
+    "skill_mobile_optimization_installed_from_version": { "type": "string" },
+    "skill_mobile_optimization_content_hash": { "type": "string" },
+    "skill_mobile_optimization_skew": { "enum": ["clean", "stale", "unknown", "not-installed"] },
+    "detector_lock_status": { "enum": ["match", "drift", "missing"] },
+    "onboarding_status": { "enum": ["filled", "partial", "unfilled", "invalid", "missing", "not-installed"] },
+    "pending_generated_candidates": { "type": "integer", "minimum": 0 },
+    "generated_file_drift": { "enum": ["clean", "stale", "unknown"] },
+    "retirement": {
+      "allOf": [
+        { "$ref": "agent-bootstrap-retirement-v1.schema.json" },
+        { "properties": {"mode": {"const": "status"}} }
+      ]
+    }
+  },
+  "additionalProperties": false
+}
