@@ -24,12 +24,52 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
+      - name: Verify release tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: bash scripts/release.sh --check-tag "$GITHUB_REF_NAME"
+      - name: Run release script checks
+        run: bash scripts/test-release.sh
+      - name: Run workspace repository guard checks
+        run: python3 scripts/test-workspace-repository-guard.py
+      - name: Run retirement lifecycle checks
+        run: python3 scripts/test-agent-retirement.py
       - name: Run bootstrap drift test
         run: bash scripts/test-bootstrap-multi-agent-project.sh
-      - name: Run onboarding fixtures
-        run: bash scripts/test-onboarding-fixtures.sh
-      - name: Run one-shot and historical configuration migrations
+      # Bootstrap already runs onboarding and seats/launcher with inherited PATH.
+      - name: Run one-shot and tagged historical migrations
+        env:
+          HARNESS_MIGRATION_HISTORICAL_SOURCE: tags
         run: bash scripts/test-one-shot-upgrade.sh
+      - name: Run tagless historical fixture migration
+        run: |
+          campaign="$(mktemp -d)"
+          trap 'rm -rf "$campaign"' EXIT
+          mkdir -p "$campaign/source/scripts"
+          cp -R agent-bootstrap "$campaign/source/"
+          cp scripts/test-agent-seats-migration.py "$campaign/source/scripts/"
+          cp -R scripts/fixtures "$campaign/source/scripts/"
+          python3 "$campaign/source/scripts/test-agent-seats-migration.py" \
+            --historical-source fixtures --evidence-dir "$campaign/evidence"
+      - name: Run seats and launcher with absent PATH
+        run: |
+          campaign="$(mktemp -d)"
+          trap 'rm -rf "$campaign"' EXIT
+          mkdir -p "$campaign/target"
+          bash scripts/bootstrap-multi-agent-project.sh --target "$campaign/target" --workflow full
+          python3 - "$PWD" "$campaign" <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          root, campaign = map(Path, sys.argv[1:])
+          env = dict(os.environ, SEATS_QA_BASH="/bin/bash")
+          env.pop("PATH", None)
+          subprocess.run([sys.executable, str(root / "scripts/test-agent-seats.py"),
+                          str(campaign / "target"), str(root / "agent-bootstrap/agent-seats.sh"),
+                          str(campaign / "seats.json")], env=env, check=True)
+          subprocess.run([sys.executable, str(root / "scripts/test-agent-seats-launcher.py")],
+                         env=env, check=True)
+          PY
       - name: Run generated target verifier
         run: |
           tmp="$(mktemp -d)"

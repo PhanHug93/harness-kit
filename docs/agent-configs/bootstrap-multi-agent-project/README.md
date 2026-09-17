@@ -45,17 +45,21 @@ agent-bootstrap/
 │   ├── render.sh
 │   ├── writers-runtime.sh
 │   ├── writers-docs.sh
-│   └── onboarding.sh
+│   ├── onboarding.sh
+│   └── retirement.py
 ├── model-profiles/
 │   └── codex-model-profiles.json
 ├── policies/
-│   └── agent-context-policy.json
+│   ├── agent-context-policy.json
+│   └── retired-artifacts-v1.json
 ├── provenance/
 │   └── rtk-v0.37.2.sha256
 ├── schemas/
 │   ├── agent-context-policy-v1.schema.json
 │   ├── agent-bootstrap-lock-v1.schema.json
 │   ├── agent-bootstrap-status-v1.schema.json
+│   ├── agent-bootstrap-status-v2.schema.json
+│   ├── agent-bootstrap-retirement-v1.schema.json
 │   ├── agent-bootstrap-verify-report-v1.schema.json
 │   ├── agent-model-profiles-v1.schema.json
 │   ├── agent-seats-v1.schema.json
@@ -90,7 +94,8 @@ $HOME/dev/agent-bootstrap/
 │   ├── render.sh
 │   ├── writers-runtime.sh
 │   ├── writers-docs.sh
-│   └── onboarding.sh
+│   ├── onboarding.sh
+│   └── retirement.py
 ├── model-profiles/
 ├── policies/
 ├── provenance/
@@ -206,16 +211,18 @@ agent-init --first-10
 agent-init --diff
 agent-init --upgrade-plan
 agent-init --apply-candidates
+agent-init --retirement-plan
 ```
 
 One-shot safe upgrade for an old project on another machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.09.10.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 That script installs the pinned harness release, creates
-`codex/upgrade-harness-kit`, runs the generator without `--force`, and leaves
+`feature/upgrade-harness-kit`, runs the generator with the installed workflow
+(`full` when no harness lock exists) without `--force`, and leaves
 `*.generated.*` candidates local-only for review.
 
 `--diff` materializes a temporary copy of the target, regenerates harness files
@@ -223,6 +230,18 @@ there, normalizes volatile timestamps and temp paths, and prints generated-file
 diffs without mutating the real target.
 `--apply-candidates` promotes the latest reviewed `*.generated.*` candidate for
 each generated path and removes older candidates for that same path.
+
+Retired generated files (the `v2026.08.10.1` `.github/workflows/agent-guard.yml`
+and its template mirror) are never removed by generation, `--force`, `--diff`,
+`--upgrade-plan`, `--status`, `--apply-candidates`, `--cleanup-backups`,
+`agent-update --apply` or the one-shot defaults; those append a read-only
+retirement plan. `agent-init --apply-retirements` removes only byte-exact
+local-only copies (add `--retirement-scope all-matching` for tracked or non-Git
+copies) after a verified adjacent `<path>.bak.retirement.<run-id>` backup.
+Edited files, links, special files and stale `*.generated.*` candidates are
+preserved for manual review, and exit 3 says so. `--status --json` stays v1;
+`--status --json --status-version 2` adds the retirement report. Restore with
+the recipe in `docs/agent-configs/RECOVERY.md`.
 
 ## Optional Symlink
 
@@ -394,6 +413,9 @@ Default behavior is non-destructive:
 - `--force` is required to overwrite intentionally.
 - Backups are still created unless `--no-backup` is also supplied. Backup files
   are ignored by the managed local-state block.
+- Retired harness files are deleted only by an explicit `--apply-retirements`,
+  with mandatory verified backups; `--force`, `--skip-existing` and
+  `--no-backup` are rejected with it.
 
 RTK is required for the harness "ready" state and for token-efficient git
 inspection. Freshly bootstrapped projects may run with warnings before RTK is

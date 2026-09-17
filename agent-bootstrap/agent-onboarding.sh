@@ -64,6 +64,7 @@ import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
+resolved_root = root.resolve()
 brief_path = root / "docs/agent-configs/project-brief.md"
 tech_md_path = root / "docs/superpowers/specs/project-tech-stack.md"
 tech_json_path = root / "docs/superpowers/specs/project-tech-stack.json"
@@ -122,6 +123,27 @@ def safe_relative_path(value):
     return True
 
 
+def unsafe_reason(path):
+    """Classify before reading: never open content outside the project root.
+
+    A link (on the file or any parent) that resolves outside the root, or a
+    non-regular file such as a FIFO, is reported without being opened.
+    """
+    if not path.is_symlink() and not path.exists():
+        return None
+    try:
+        path.resolve().relative_to(resolved_root)
+    except ValueError:
+        return "resolves outside the project root; not read"
+    if path.exists() and not path.is_file():
+        return "is not a regular file; not read"
+    return None
+
+
+def unsafe_result(path, label, reason, **extra):
+    return {"status": "unsafe", "path": relative(path), "missing": [f"{label} {reason}"], "warnings": [], **extra}
+
+
 def markdown_sections(text):
     sections = {}
     current = None
@@ -143,6 +165,9 @@ def markdown_sections(text):
 def evaluate_markdown_contract(path, required_headings, label):
     missing = []
     warnings = []
+    reason = unsafe_reason(path)
+    if reason:
+        return unsafe_result(path, label, reason)
     if not path.exists():
         return {
             "status": "missing",
@@ -191,6 +216,9 @@ def evaluate_tech_stack():
     markdown = evaluate_markdown_contract(tech_md_path, tech_stack_sections, "project tech-stack markdown")
     missing.extend(f"project-tech-stack.md: {item}" for item in markdown.get("missing", []))
     warnings.extend(markdown.get("warnings", []))
+    reason = unsafe_reason(tech_json_path)
+    if reason:
+        return unsafe_result(tech_json_path, "project tech-stack JSON", reason, markdown=markdown)
     if not tech_json_path.exists():
         return {
             "status": "missing",
@@ -290,7 +318,7 @@ for area in (brief, tech_stack):
 
 if brief["status"] == "filled" and tech_stack["status"] == "filled":
     status = "filled"
-elif brief["status"] in ("missing",) or tech_stack["status"] in ("missing", "invalid"):
+elif brief["status"] in ("missing", "unsafe") or tech_stack["status"] in ("missing", "invalid", "unsafe"):
     status = "invalid"
 elif brief["status"] == "unfilled" and tech_stack["status"] == "unfilled":
     status = "unfilled"

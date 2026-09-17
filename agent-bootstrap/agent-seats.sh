@@ -12,6 +12,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SEATS_FILE="${AGENT_SEATS_FILE:-$PROJECT_ROOT/docs/agent-configs/seats.json}"
 LEGACY_PROFILES="${AGENT_SEATS_LEGACY_PROFILES:-$PROJECT_ROOT/docs/agent-configs/model-profiles.json}"
 AGENTS_MD="${AGENT_SEATS_AGENTS_MD:-$PROJECT_ROOT/AGENTS.md}"
+SEATS_PROJECT_ROOT="${AGENT_SEATS_PROJECT_ROOT-$PROJECT_ROOT}"
 
 usage() {
   printf '%s\n' \
@@ -52,6 +53,7 @@ import sys
 SEATS_FILE = pathlib.Path(os.environ["SEATS_FILE"])
 LEGACY = pathlib.Path(os.environ["LEGACY_PROFILES"])
 AGENTS_MD = pathlib.Path(os.environ["AGENTS_MD"])
+PROJECT_ROOT_ENV = os.environ.get("AGENT_SEATS_PROJECT_ROOT")
 ROSTER_BEGIN = "<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->"
 ROSTER_END = "<!-- END MANAGED: multi-agent-bootstrap:seat-roster -->"
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
@@ -122,6 +124,78 @@ def warn(message):
 
 def note(message):
     print(f"agent-seats: note: {message}", file=sys.stderr)
+
+
+def escaped_path(path):
+    """Keep refusal diagnostics to one safe, readable physical line."""
+    text = str(path)
+    result = []
+    for char in text:
+        code = ord(char)
+        if char == "\\":
+            result.append("\\\\")
+        elif char == "\n":
+            result.append("\\n")
+        elif char == "\r":
+            result.append("\\r")
+        elif char == "\t":
+            result.append("\\t")
+        elif code < 0x20 or 0x7F <= code <= 0x9F:
+            result.append(f"\\u{code:04x}")
+        else:
+            result.append(char)
+    return "".join(result)
+
+
+def configured_root():
+    """Return the canonical project root selected for this invocation.
+
+    The explicit root is an interface for generated targets and must be an
+    absolute existing directory.  The installed script's own project remains
+    the default when the variable is absent.
+    """
+    if PROJECT_ROOT_ENV is not None:
+        if not PROJECT_ROOT_ENV or not os.path.isabs(PROJECT_ROOT_ENV):
+            raise SeatsError("AGENT_SEATS_PROJECT_ROOT must be a non-empty absolute existing directory")
+        root = pathlib.Path(PROJECT_ROOT_ENV)
+    else:
+        root = pathlib.Path(os.environ["AGENT_SEATS_PROJECT_ROOT"])
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SeatsError(f"AGENT_SEATS_PROJECT_ROOT is not a usable directory: {escaped_path(exc)}")
+    if not root.is_dir():
+        raise SeatsError(f"AGENT_SEATS_PROJECT_ROOT is not a directory: {escaped_path(root)}")
+    return root
+
+
+def canonical_destination(path, root):
+    """Resolve an intended destination, including a missing final component."""
+    raw = pathlib.Path(path)
+    if not raw.is_absolute():
+        raw = pathlib.Path.cwd() / raw
+    try:
+        resolved = raw.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise SeatsError(f"cannot resolve configured destination {escaped_path(raw)}: {escaped_path(exc)}")
+    if resolved == root or root not in resolved.parents:
+        raise SeatsError(
+            f"configured destination outside project root: {escaped_path(raw)} "
+            f"(root {escaped_path(root)})"
+        )
+    return resolved
+
+
+def check_destinations():
+    """Validate both configured write destinations before any project I/O."""
+    root = configured_root()
+    canonical_destination(SEATS_FILE, root)
+    canonical_destination(AGENTS_MD, root)
+    return root
+
+
+def check_destination(path):
+    return canonical_destination(path, configured_root())
 
 
 def clone(value):
@@ -363,6 +437,8 @@ def report(errors, warnings):
 def write_atomic(path, data):
     """Write bytes via a sibling temp file + rename so readers never see a
     truncated file and a failed write leaves the old content intact."""
+    path = pathlib.Path(path)
+    check_destination(path)
     path = pathlib.Path(os.path.realpath(path))  # write through symlinks, never replace the link
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     if path.exists() and not os.access(path, os.W_OK):
@@ -388,6 +464,7 @@ SAVED = {"seats": False}
 
 
 def save(doc):
+    check_destination(SEATS_FILE)
     errors, _ = validate(doc)
     if errors:
         report(errors, [])
@@ -466,6 +543,7 @@ def render_block_bytes(doc, newline):
 def render(doc):
     """Replace exactly one balanced roster block or append one; every byte
     outside the block is preserved. Unbalanced markers -> exit 3, no write."""
+    check_destination(AGENTS_MD)
     if not AGENTS_MD.exists():
         raise SeatsError(f"{AGENTS_MD} is missing; cannot render the seat roster")
     if not AGENTS_MD.is_file():
@@ -682,6 +760,7 @@ def lock_for_write(wait_seconds=10.0):
     global LOCK_FD
     import fcntl
     import time
+    check_destinations()
     try:
         SEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
         LOCK_FD = os.open(str(SEATS_FILE.parent), os.O_RDONLY)
@@ -691,6 +770,7 @@ def lock_for_write(wait_seconds=10.0):
     while True:
         try:
             fcntl.flock(LOCK_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            check_destinations()
             return
         except BlockingIOError:
             if time.monotonic() >= deadline:
@@ -703,6 +783,8 @@ def lock_for_write(wait_seconds=10.0):
 
 def main():
     validate_command_args()
+    if cmd in ("render", "set", "wizard", "reset", "init"):
+        check_destinations()
     if cmd in ("set", "wizard", "reset", "render"):
         lock_for_write()
     if cmd == "suggest":
@@ -916,6 +998,7 @@ case "$cmd" in
     python3 -c 'import sys' >/dev/null 2>&1 || fail "python3 is required (a working interpreter, not the macOS command-line-tools stub)"
     shift
     SEATS_FILE="$SEATS_FILE" LEGACY_PROFILES="$LEGACY_PROFILES" AGENTS_MD="$AGENTS_MD" \
+      AGENT_SEATS_PROJECT_ROOT="$SEATS_PROJECT_ROOT" \
       python3 -c "$SEATS_PY" "$cmd" "$@"
     ;;
   -h|--help|help|"")

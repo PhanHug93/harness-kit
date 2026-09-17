@@ -188,6 +188,18 @@ append_gitignore_block() {
   local marker="# >>> multi-agent bootstrap local state >>>"
   local existed=false
 
+  if bootstrap_entry_exists "$gitignore"; then
+    if ! bootstrap_existing_file_is_eligible "$gitignore"; then
+      log "warn: refusing unsafe .gitignore entry: $(bootstrap_path_diagnostic "$gitignore")"
+      return 1
+    fi
+  else
+    bootstrap_write_parent_is_eligible "$gitignore" || {
+      log "warn: refusing unsafe .gitignore parent: $(bootstrap_path_diagnostic "$(dirname "$gitignore")")"
+      return 1
+    }
+  fi
+
   if [[ "$DRY_RUN" == "true" ]]; then
     log "DRY-RUN update $gitignore"
     return

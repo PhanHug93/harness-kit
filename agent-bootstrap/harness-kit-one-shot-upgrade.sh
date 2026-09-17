@@ -2,20 +2,24 @@
 set -euo pipefail
 
 DEFAULT_REPO_URL="https://github.com/PhanHug93/harness-kit.git"
-DEFAULT_REF="v2026.09.10.1"
+DEFAULT_REF="v2026.10.13.1"
 
 REPO_URL="${HARNESS_KIT_REPO_URL:-$DEFAULT_REPO_URL}"
 REF="${HARNESS_KIT_REF:-$DEFAULT_REF}"
 CACHE_DIR="${HARNESS_KIT_CACHE_DIR:-$HOME/dev/harness-kit}"
 HOME_DIR="${AGENT_BOOTSTRAP_HOME:-$HOME/dev/agent-bootstrap}"
 TARGET_DIR="$(pwd -P)"
-BRANCH_NAME="codex/upgrade-harness-kit"
+DEFAULT_BRANCH_NAME="feature/upgrade-harness-kit"
+BRANCH_NAME="$DEFAULT_BRANCH_NAME"
+WORKFLOW=""
 SOURCE_DIR=""
 ALLOW_DIRTY=false
 APPLY_CANDIDATES=false
 DRY_RUN=false
 NO_BRANCH=false
 SKIP_VERIFY=false
+APPLY_RETIREMENTS=false
+RETIREMENT_SCOPE=""
 
 usage() {
   cat <<'HELP'
@@ -27,17 +31,24 @@ generates *.generated.* candidates for conflicts, and does NOT apply candidates.
 
 Options:
   --repo URL             Harness-kit Git repo. Defaults to https://github.com/PhanHug93/harness-kit.git.
-  --ref REF              Harness-kit ref/tag. Defaults to v2026.09.10.1.
+  --ref REF              Harness-kit ref/tag. Defaults to v2026.10.13.1.
   --cache-dir DIR        Local source clone/cache. Defaults to $HOME/dev/harness-kit.
   --source-dir DIR       Use an existing harness-kit checkout instead of cloning/fetching.
   --home DIR             Canonical harness home. Defaults to $AGENT_BOOTSTRAP_HOME or $HOME/dev/agent-bootstrap.
   --target DIR           Project to upgrade. Defaults to the current directory.
-  --branch NAME          Upgrade branch to create/switch to. Defaults to codex/upgrade-harness-kit.
+  --branch NAME          Upgrade branch to create/switch to. Defaults to feature/upgrade-harness-kit.
+  --workflow PRESET      infra or full. Defaults to the installed workflow, or full
+                         for projects without a harness lock.
   --allow-dirty          Continue even when the target Git worktree has uncommitted changes.
   --no-branch            Do not create or switch branches.
   --apply-candidates     Promote reviewed bootstrap *.generated.* candidates after generation.
+  --apply-retirements    After generation (and candidates), remove exact retired harness
+                         files with mandatory verified backups. Never implied by other flags.
+  --retirement-scope S   local-only (default) or all-matching for the retirement plan/apply.
   --skip-verify          Skip generated runtime verification commands.
-  --dry-run              Print the planned source/home/target operations without writing.
+  --dry-run              Print the planned operations and a retirement plan from an already
+                         available local source (--source-dir or a matching cache) without
+                         fetching, installing, switching branches or writing.
   -h, --help             Show this help.
 HELP
 }
@@ -94,6 +105,14 @@ while [[ $# -gt 0 ]]; do
       BRANCH_NAME="${2:?missing value for --branch}"
       shift 2
       ;;
+    --workflow)
+      WORKFLOW="${2:?missing value for --workflow}"
+      case "$WORKFLOW" in
+        infra|full) ;;
+        *) fail "--workflow must be infra or full" ;;
+      esac
+      shift 2
+      ;;
     --allow-dirty)
       ALLOW_DIRTY=true
       shift
@@ -110,6 +129,17 @@ while [[ $# -gt 0 ]]; do
       SKIP_VERIFY=true
       shift
       ;;
+    --apply-retirements)
+      APPLY_RETIREMENTS=true
+      shift
+      ;;
+    --retirement-scope)
+      case "${2:-}" in
+        local-only|all-matching) RETIREMENT_SCOPE="$2" ;;
+        *) printf 'one-shot: ERROR: --retirement-scope must be local-only or all-matching\n' >&2; exit 2 ;;
+      esac
+      shift 2
+      ;;
     --dry-run)
       DRY_RUN=true
       shift
@@ -124,7 +154,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "$NO_BRANCH" == true && "$BRANCH_NAME" != "codex/upgrade-harness-kit" ]]; then
+if [[ "$NO_BRANCH" == true && "$BRANCH_NAME" != "$DEFAULT_BRANCH_NAME" ]]; then
   fail "--branch cannot be combined with --no-branch"
 fi
 
@@ -144,8 +174,64 @@ log "ref=$REF"
 log "target=$TARGET_DIR"
 log "home=$HOME_DIR"
 
+retirement_scope_args=()
+if [[ -n "$RETIREMENT_SCOPE" ]]; then
+  retirement_scope_args=(--retirement-scope "$RETIREMENT_SCOPE")
+fi
+
+# Dry-run plans retirements only from an already available local source: an
+# explicit --source-dir, or a cache checkout already at the requested ref. It
+# never fetches, clones, checks out, installs, creates home/cache directories,
+# switches branches, generates or verifies.
+dry_run_source() {
+  local head wanted
+  if [[ -n "$SOURCE_DIR" ]]; then
+    [[ -x "$SOURCE_DIR/agent-bootstrap/install-agent-bootstrap-home.sh" ]] ||
+      fail "--source-dir is missing agent-bootstrap/install-agent-bootstrap-home.sh"
+    printf '%s\n' "$SOURCE_DIR"
+    return 0
+  fi
+  [[ -d "$CACHE_DIR/.git" ]] || return 1
+  head="$(git -C "$CACHE_DIR" rev-parse --verify --quiet HEAD 2>/dev/null)" || return 1
+  wanted="$(git -C "$CACHE_DIR" rev-parse --verify --quiet "$REF^{commit}" 2>/dev/null)" || return 1
+  [[ -n "$head" && "$head" == "$wanted" ]] || return 1
+  printf '%s\n' "$CACHE_DIR"
+}
+
 if [[ "$DRY_RUN" == true ]]; then
+  git -C "$TARGET_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    fail "target is not inside a Git worktree: $TARGET_DIR"
+  plan_target="$(git -C "$TARGET_DIR" rev-parse --show-toplevel)"
+  log "target_git_root=$plan_target"
+  plan_source="$(dry_run_source)" || plan_source=""
+  plan_bundle="$plan_source/agent-bootstrap"
+  if [[ -z "$plan_source" || ! -f "$plan_bundle/bootstrap-multi-agent-project.sh" ||
+    ! -f "$plan_bundle/lib/retirement.py" || ! -f "$plan_bundle/policies/retired-artifacts-v1.json" ]]; then
+    warn "retirement plan is unavailable: no validated local harness source for $REF that supports retirement plans; dry-run never fetches"
+    warn "rerun with a local checkout of $REF: bash harness-kit-one-shot-upgrade.sh --dry-run --source-dir /path/to/harness-kit --target $(printf '%q' "$plan_target")"
+    exit 1
+  fi
+  version="$(sed -n '1p' "$plan_bundle/VERSION" 2>/dev/null || true)"
+  expected_version="$(version_from_ref)"
+  if [[ -n "$expected_version" && "$version" != "$expected_version" ]]; then
+    fail "source VERSION '$version' does not match requested ref '$REF' ($expected_version)"
+  fi
+  [[ -n "$version" ]] || fail "source VERSION is missing"
+  log "source=$plan_source"
+  log "version=$version"
+  log "source_commit=$(git -C "$plan_source" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+  log "retirement_policy_sha256=$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$plan_bundle/policies/retired-artifacts-v1.json")"
+  plan_action=(--retirement-plan)
+  if [[ "$APPLY_RETIREMENTS" == true ]]; then
+    plan_action=(--apply-retirements --dry-run)
+  fi
+  bash "$plan_bundle/bootstrap-multi-agent-project.sh" --target "$plan_target" "${plan_action[@]}" \
+    ${retirement_scope_args[@]+"${retirement_scope_args[@]}"} ||
+    fail "retirement plan reported an inspection error; nothing was written"
   log "DRY-RUN would install/update harness home and generate target candidates"
+  if [[ "$APPLY_RETIREMENTS" == true ]]; then
+    log "DRY-RUN would then apply the retirement plan above with mandatory backups"
+  fi
   exit 0
 fi
 
@@ -153,6 +239,39 @@ git -C "$TARGET_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
   fail "target is not inside a Git worktree: $TARGET_DIR"
 TARGET_DIR="$(git -C "$TARGET_DIR" rev-parse --show-toplevel)"
 log "target_git_root=$TARGET_DIR"
+
+installed_workflow() {
+  # Lock content is read only when it resolves inside the target.
+  python3 - "$TARGET_DIR" <<'PY' 2>/dev/null || true
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+lock = root / "docs/agent-configs/agent-bootstrap.lock.json"
+try:
+    lock.resolve().relative_to(root)
+    if not lock.is_file():
+        sys.exit(0)
+    doc = json.loads(lock.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+value = (doc.get("templates") or {}).get("workflow_preset") or doc.get("workflow_preset") or ""
+print(value if value in ("infra", "full") else "")
+PY
+}
+
+if [[ -n "$WORKFLOW" ]]; then
+  log "workflow=$WORKFLOW (requested)"
+else
+  WORKFLOW="$(installed_workflow)"
+  if [[ -n "$WORKFLOW" ]]; then
+    log "workflow=$WORKFLOW (installed)"
+  else
+    WORKFLOW="full"
+    log "workflow=full (no harness lock found)"
+  fi
+fi
 
 if [[ "$ALLOW_DIRTY" != true ]] && [[ -n "$(git -C "$TARGET_DIR" status --porcelain)" ]]; then
   git -C "$TARGET_DIR" status --short >&2
@@ -236,17 +355,37 @@ run_bootstrap() {
   bash "$bootstrap" --target "$TARGET_DIR" "$@"
 }
 
-run_bootstrap "status before generation" --status
-run_bootstrap "upgrade plan" --upgrade-plan
-if ! run_bootstrap "generated diff preview" --diff; then
+run_bootstrap "status before generation" --status ${retirement_scope_args[@]+"${retirement_scope_args[@]}"}
+run_bootstrap "upgrade plan" --upgrade-plan ${retirement_scope_args[@]+"${retirement_scope_args[@]}"}
+if ! run_bootstrap "generated diff preview" --diff ${retirement_scope_args[@]+"${retirement_scope_args[@]}"}; then
   warn "generated diff preview failed; continuing because preview is informational"
 fi
-run_bootstrap "generating full workflow candidates" --workflow full
+run_bootstrap "generating $WORKFLOW workflow candidates" --workflow "$WORKFLOW" \
+  ${retirement_scope_args[@]+"${retirement_scope_args[@]}"}
 
 if [[ "$APPLY_CANDIDATES" == true ]]; then
   run_bootstrap "applying reviewed generated candidates" --apply-candidates
 else
   log "safe default: candidates were not auto-applied"
+fi
+
+# Retirement runs only on explicit request, after generation and candidates;
+# the bootstrap rebuilds the plan at this apply boundary.
+retirement_rc=0
+if [[ "$APPLY_RETIREMENTS" == true ]]; then
+  log "applying explicit retirements (fresh plan, mandatory verified backups)"
+  bash "$bootstrap" --target "$TARGET_DIR" --apply-retirements \
+    ${retirement_scope_args[@]+"${retirement_scope_args[@]}"} || retirement_rc=$?
+  case "$retirement_rc" in
+    0) ;;
+    3) warn "retirement preserved modified, unsafe or out-of-scope files; review the report above" ;;
+    *)
+      warn "retirement apply failed (exit $retirement_rc); the partial outcome is reported above and backups are retained"
+      fail "stopped before verification and status; earlier generation changes are not rolled back"
+      ;;
+  esac
+else
+  log "safe default: retired harness files were not removed"
 fi
 
 if [[ "$SKIP_VERIFY" != true ]]; then
@@ -311,5 +450,11 @@ Next steps
 2. Merge repo-specific overlays manually where needed.
 3. When reviewed, run:
    bash "$bootstrap" --target "$TARGET_DIR" --apply-candidates
-4. Commit from the upgrade branch only after project tests/verifiers pass.
+4. Retired harness files listed in the retirement plan stay until you run:
+   bash "$bootstrap" --target "$TARGET_DIR" --apply-retirements
+5. Commit from the upgrade branch only after project tests/verifiers pass.
 EOF
+
+if [[ "$retirement_rc" -eq 3 ]]; then
+  exit 3
+fi

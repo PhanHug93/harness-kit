@@ -242,12 +242,17 @@ PY
 }
 
 guard_claude_edit_tool() {
-  local edit_path="$1" rc=0
+  local edit_path="$1" ask_reason="${2:-}" rc=0 classification=""
   [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
   if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
-    "$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path")" || rc=$?
   else
-    "$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path")" || rc=$?
+  fi
+  # Stdout must be pure JSON when the hook asks the user; otherwise keep the
+  # classification on stdout (debug log only), so denials stay two stderr lines.
+  if [[ -z "$ask_reason" && -n "$classification" ]]; then
+    printf '%s\n' "$classification"
   fi
   case "$rc" in
     0) return 0 ;;
@@ -256,16 +261,120 @@ guard_claude_edit_tool() {
   esac
 }
 
+claude_anchor_env() {
+  # Claude Code adapter: mint the workspace envelope from host-provided hook
+  # data (session_id, CLAUDE_PROJECT_DIR) only when no envelope exists. Never
+  # derive it from the agent's current directory or overwrite existing values.
+  local input="$1" minted
+  CLAUDE_ANCHOR_MINTED=false
+  [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" ]] || return 0
+  [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && command -v python3 >/dev/null 2>&1 || return 0
+  minted="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null
+import base64
+import json
+import os
+import re
+import sys
+
+try:
+    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+except Exception:
+    sys.exit(1)
+session = payload.get("session_id") if isinstance(payload, dict) else None
+root = os.environ.get("CLAUDE_PROJECT_DIR", "")
+if (not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9._:-]+", session)
+        or not os.path.isabs(root) or not os.path.isdir(root)):
+    sys.exit(1)
+context = dict(original_workspace=root, target_repository=root, target_source="user", session_id=session)
+print(session)
+print("base64:" + base64.b64encode(json.dumps(context, ensure_ascii=False).encode("utf-8")).decode("ascii"))
+PY
+)" || return 0
+  AGENT_HOST_SESSION_ID="${minted%%$'\n'*}"
+  AGENT_WORKSPACE_CONTEXT="${minted#*$'\n'}"
+  export AGENT_HOST_SESSION_ID AGENT_WORKSPACE_CONTEXT
+  CLAUDE_ANCHOR_MINTED=true
+}
+
+workspace_ask_reason() {
+  # Print a reason only when Claude Code should ask the user: a cross-repository
+  # mismatch. Worktree mismatches and unattested sessions stay advisory.
+  local report
+  report="$("$AGENT_GUARD" workspace-check 2>/dev/null)" && return 0
+  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    doc = json.loads(os.environ.get("REPORT", "").strip().splitlines()[-1])
+except Exception:
+    raise SystemExit(0)
+if doc.get("status") == "mismatch" and doc.get("mismatch_kind") == "repository":
+    print("Workspace-repository guard: " + str(doc.get("reason")) + "; context="
+          + json.dumps(doc.get("context"), ensure_ascii=False)
+          + "; confirm the target repository with the user before writing.")
+PY
+}
+
+claude_ask() {
+  ASK_REASON="$1" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
+                                         "permissionDecisionReason": os.environ["ASK_REASON"]}},
+                 ensure_ascii=False))
+PY
+}
+
+claude_session_start() {
+  # SessionStart hook: anchor the session, persist the envelope for later Bash
+  # tool commands through CLAUDE_ENV_FILE, and report the status to Claude.
+  # Never blocks the session.
+  local input="" report
+  if [[ ! -t 0 ]]; then
+    input="$(cat || true)"
+  fi
+  claude_anchor_env "$input"
+  if [[ "$CLAUDE_ANCHOR_MINTED" == "true" && -n "${CLAUDE_ENV_FILE:-}" ]]; then
+    printf 'export AGENT_HOST_SESSION_ID=%s\nexport AGENT_WORKSPACE_CONTEXT=%s\n' \
+      "$AGENT_HOST_SESSION_ID" "$AGENT_WORKSPACE_CONTEXT" >>"$CLAUDE_ENV_FILE" 2>/dev/null || true
+  fi
+  report="$("$AGENT_GUARD" workspace-check 2>/dev/null || true)"
+  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+import json
+import os
+
+try:
+    doc = json.loads(os.environ.get("REPORT", "").strip().splitlines()[-1])
+except Exception:
+    doc = {"status": "unknown"}
+status = str(doc.get("status", "unknown"))
+line = "Workspace-repository guard (advisory): " + status
+if status == "verified":
+    line += "; target " + str(doc.get("target_repository"))
+elif status == "mismatch":
+    line += " (" + str(doc.get("mismatch_kind")) + "): " + str(doc.get("reason")) \
+        + "; confirm the target repository with the user before writing"
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": line}},
+                 ensure_ascii=False))
+PY
+  exit 0
+}
+
 claude_pretool() {
   required_executable "$DETECTOR"
   required_executable "$AGENT_GUARD"
   local hook_input=""
   local tool_name=""
   local edit_path=""
+  local ask_reason=""
   if [[ ! -t 0 ]]; then
     hook_input="$(cat || true)"
   fi
+  claude_anchor_env "$hook_input"
   "$AGENT_GUARD" preflight >/dev/null
+  ask_reason="$(workspace_ask_reason)"
   if [[ -n "$hook_input" ]]; then
     tool_name=""
     edit_path=""
@@ -275,12 +384,17 @@ claude_pretool() {
     exec 3<&-
     case "$tool_name" in
       Edit|Write|MultiEdit)
-        guard_claude_edit_tool "$edit_path"
+        guard_claude_edit_tool "$edit_path" "$ask_reason"
+        [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
         exit 0
         ;;
     esac
   fi
   verify_detector_lock warn
+  if [[ -n "$ask_reason" ]]; then
+    claude_ask "$ask_reason"
+    exit 0
+  fi
   cd "$PROJECT_ROOT"
   if rtk_available; then
     exec "$RTK" hook claude
@@ -294,6 +408,9 @@ codex_preflight() {
   if [[ "${1:-}" == "--check-only" ]]; then
     check_only=true
     shift
+  fi
+  if [[ "$check_only" != "true" ]]; then
+    "$AGENT_GUARD" workspace-check >/dev/null || true
   fi
   local mode="${1:-unknown}"
   local flow="${2:-unknown}"
@@ -336,6 +453,7 @@ close_out() {
   # stay advisory and should call agent-guard pre-final manually.
   local input stop_active=false report failed=0 err_file
   input="$(cat 2>/dev/null || true)"
+  claude_anchor_env "$input"
   if command -v python3 >/dev/null 2>&1; then
     stop_active="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null || printf 'false\n'
 import json
@@ -384,6 +502,9 @@ case "${1:-}" in
     shift || true
     claude_pretool "$@"
     ;;
+  claude-session-start)
+    claude_session_start
+    ;;
   codex-preflight)
     shift || true
     codex_preflight "$@"
@@ -401,7 +522,7 @@ case "${1:-}" in
     close_out
     ;;
   -h|--help|help|"")
-    echo "Usage: scripts/agent-hook.sh claude-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
+    echo "Usage: scripts/agent-hook.sh claude-pretool|claude-session-start|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
     ;;
   *)
     fail "unknown command: $1"
