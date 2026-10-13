@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# Fast tier (about 4 minutes): run on every edit. Every check runs even when an
+# Fast tier (about 5 minutes): run on every edit. Every check runs even when an
 # earlier one fails, and the summary lists all failures at once. The full tier
 # (scripts/test-bootstrap-multi-agent-project.sh and test-one-shot-upgrade.sh)
 # runs before a PR or release.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-CHECKS=(syntax release-pins release-script guard onboarding retirement)
+CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race)
 
 usage() {
   printf '%s\n' \
@@ -30,6 +30,9 @@ run_check() {
     guard) python3 "$ROOT_DIR/scripts/test-workspace-repository-guard.py" ;;
     onboarding) bash "$ROOT_DIR/scripts/test-onboarding-fixtures.sh" ;;
     retirement) python3 "$ROOT_DIR/scripts/test-agent-retirement.py" ;;
+    detector) bash "$ROOT_DIR/scripts/test-detector-fixtures.sh" ;;
+    path-policy) bash "$ROOT_DIR/scripts/test-path-policy.sh" ;;
+    guard-race) bash "$ROOT_DIR/scripts/test-guard-concurrency.sh" ;;
   esac
 }
 

@@ -152,7 +152,7 @@ bash "$HOME/dev/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$PWD
 One-shot safe upgrade for an old project on another laptop:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 This installs the pinned release into `$HOME/dev/agent-bootstrap`, switches the
@@ -185,7 +185,10 @@ allowlist, so unrelated project files matching `*.generated.*` are not touched.
 A local-only baseline of the last kit output lets upgrades update unedited
 files in place and merge kit changes into edited ones (candidates only for
 overlapping edits); `--upgrade-plan --json` previews this per file and
-`--rollback <upgrade-id>` undoes a run.
+`--rollback <upgrade-id>` undoes a run. Previews work on a temporary copy that
+skips ignored build and dependency folders at any depth and never includes
+personal or secret files (`*.local.*`, signing certificates, provisioning
+profiles, `*.xcconfig`, Firebase config, `.netrc`, `.npmrc`, `.pypirc`).
 Harness files are local-only by policy; if a previous run already tracked them,
 run `scripts/agent-local-only-check.sh status`, remove reported paths with
 `git rm --cached -- <path>`, and commit the removal before pushing.

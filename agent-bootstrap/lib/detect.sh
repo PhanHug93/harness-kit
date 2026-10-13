@@ -14,7 +14,7 @@ emit_tech_stack_lib() {
 # Shared tech-stack detection library for agent bootstrap/runtime scripts.
 # Keep this file portable: bash 3.2 compatible, no repo-specific paths.
 
-AGENT_TECH_STACK_LIB_VERSION="2026.09.12.1"
+AGENT_TECH_STACK_LIB_VERSION="2026.10.13.2"
 
 agent_reset_detection() {
   AGENT_TECH_STACKS=()
@@ -29,6 +29,13 @@ agent_has_file() {
   agent_is_real_regular_file "$root" "$root/$relative"
 }
 
+# Presence only (stat, never opened). Sensitive files are outside the read
+# policy, so agent_has_file can never report them.
+agent_sensitive_file_present() {
+  local path="$1/$2"
+  [[ -e "$path" || -L "$path" ]] && [[ ! -d "$path" ]]
+}
+
 agent_find_name() {
   local root="$1"
   local maxdepth="$2"
@@ -41,7 +48,7 @@ agent_find_name() {
     printf '%s\n' "$candidate"
     return 0
   done < <(find "$search_root" -maxdepth "$maxdepth" \
-    \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+    \( -type d \( -name .git -o -name .tools -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
     -name "$name" -print 2>/dev/null)
   return 1
 }
@@ -59,7 +66,7 @@ agent_find_name_pattern() {
     printf '%s\n' "$candidate"
     return 0
   done < <(find "$search_root" -maxdepth "$maxdepth" \
-    \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+    \( -type d \( -name .git -o -name .tools -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
     -name "$pattern" -print 2>/dev/null)
   return 1
 }
@@ -76,12 +83,61 @@ agent_find_file_pattern() {
     printf '%s\n' "$candidate"
     return 0
   done < <(find "$search_root" -maxdepth "$maxdepth" \
-    \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+    \( -type d \( -name .git -o -name .tools -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
     -name "$pattern" -print 2>/dev/null)
   return 1
 }
 
+# Same verdict as the Python policy without a process per path: a normalized
+# absolute path under a normalized root, with no linked component below the
+# root, resolves to resolved-root + the same relative path, so only the
+# excluded-component rule applies. Links and unusual spellings use Python.
 agent_path_is_eligible() {
+  local root="$1"
+  local path="$2"
+  local rel current part i count exists=true
+  local -a parts
+  case "$root" in
+    /*) ;;
+    *) agent_path_policy_python "$root" "$path"; return ;;
+  esac
+  case "$root/" in
+    */../*|*/./*|*//*|*$'\n'*) agent_path_policy_python "$root" "$path"; return ;;
+  esac
+  case "$path" in
+    "$root"/*) rel="${path#"$root"/}" ;;
+    *) agent_path_policy_python "$root" "$path"; return ;;
+  esac
+  case "/$rel/" in
+    */../*|*/./*|*//*|*$'\n'*) agent_path_policy_python "$root" "$path"; return ;;
+  esac
+  IFS=/ read -r -a parts <<<"$rel"
+  count=${#parts[@]}
+  current="$root"
+  for ((i = 0; i < count; i++)); do
+    part="${parts[$i]}"
+    case "$part" in
+      .git|.tools|.idea|.next|node_modules|Pods|vendor|build|dist|out|local.properties|keystore.properties|\
+      .gradle*|.env*|*.jks|*.keystore|*.pem|*.p8|*.key)
+        return 1
+        ;;
+      .agents)
+        case "${parts[$((i + 1))]:-}" in runtime|state|cache) return 1 ;; esac
+        ;;
+    esac
+    if [[ "$exists" == "true" ]]; then
+      current="$current/$part"
+      if [[ -L "$current" ]]; then
+        agent_path_policy_python "$root" "$path"
+        return
+      fi
+      [[ -e "$current" ]] || exists=false
+    fi
+  done
+  return 0
+}
+
+agent_path_policy_python() {
   local root="$1"
   local path="$2"
   AGENT_POLICY_ROOT="$root" AGENT_POLICY_PATH="$path" python3 - <<'PY'
@@ -284,7 +340,7 @@ agent_any_named_file_contains() {
       fi
     done < <(
       find "$root" -maxdepth "$maxdepth" \
-        \( -type d \( -name .git -o -name .gradle -o -name .idea -o -name .next -o -name build -o -name dist -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
+        \( -type d \( -name .git -o -name .tools -o -name '.gradle*' -o -name .idea -o -name .next -o -name build -o -name dist -o -name out -o -name node_modules -o -name Pods -o -name vendor \) -prune \) -o \
         -name "$name" -print 2>/dev/null
     )
   done
@@ -510,7 +566,11 @@ agent_detect_tech_stack() {
 
   if agent_is_real_directory "$root" "$root/wear" || agent_is_real_directory "$root" "$root/wear-api"; then
     agent_add_unique AGENT_TECH_STACKS "wear_os"
-    agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew :wear:compileDebugKotlin"
+  fi
+  if agent_has_detected_module ":wear"; then
+    local wear_prefix
+    wear_prefix="$(agent_android_module_variant_prefix "$root" ":wear")"
+    agent_add_unique AGENT_VERIFY_COMMANDS "./gradlew :wear:compile${wear_prefix}DebugKotlin"
   fi
 
   if agent_is_real_directory "$root" "$root/health-core" || agent_has_detected_module ":health-core"; then
@@ -672,16 +732,22 @@ agent_detect_tech_stack() {
     agent_add_unique AGENT_VERIFY_COMMANDS "composer test"
   fi
 
-  if agent_has_file "$root" "local.properties"; then
+  if agent_sensitive_file_present "$root" "local.properties"; then
     agent_add_unique AGENT_WARNINGS "local.properties exists and must remain local-only."
   fi
 
-  if agent_has_file "$root" "keystore.properties"; then
+  if agent_sensitive_file_present "$root" "keystore.properties"; then
     agent_add_unique AGENT_WARNINGS "keystore.properties exists; never print or commit secrets."
   fi
 
   if [[ ${#AGENT_TECH_STACKS[@]} -eq 0 ]]; then
     agent_add_unique AGENT_TECH_STACKS "generic"
+    agent_add_unique AGENT_VERIFY_COMMANDS "Add project-specific build/test commands in docs/agent-configs/project-agent-context.md"
+  fi
+
+  # A detected stack without runnable commands (for example wear/ without
+  # Gradle settings) still needs a pointer; callers expand the list under set -u.
+  if [[ ${#AGENT_VERIFY_COMMANDS[@]} -eq 0 ]]; then
     agent_add_unique AGENT_VERIFY_COMMANDS "Add project-specific build/test commands in docs/agent-configs/project-agent-context.md"
   fi
 

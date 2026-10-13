@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026.10.13.2 — Fast upgrades on large projects, reliable guard checks
+
+- Large Android checkouts upgrade in seconds again. Previews (`--status`,
+  `--diff`, `--upgrade-plan`, `--apply-candidates` and the one-shot upgrader)
+  no longer walk nested `build/`, project Gradle homes (`.gradle-*`) or other
+  ignored directories. Path checks in the generator and the detector run in
+  the shell instead of one `python3` process per path; links and unusual
+  spellings still use the Python policy. A downstream Android + Wear OS
+  checkout (157k files) took 87 minutes for `--apply-candidates` and more
+  than 2 hours for `--status` on 2026.10.13.1.
+- Wear OS: the compile command follows the module's product flavor
+  (`:wear:compileProdDebugKotlin`) and is emitted only when `:wear` is a
+  Gradle module, not for `wear-api` alone.
+- The `local.properties` and `keystore.properties` warnings work again; their
+  presence is checked without opening them.
+- Detection always lists at least one verification entry, so a `wear/`
+  folder without Gradle settings no longer stops generation on bash 3.2.
+- Previews never copy personal or secret files into the temporary snapshot:
+  `*.local.*` (such as `.claude/settings.local.json`), `.p12`/`.pfx`,
+  provisioning profiles, `*.xcconfig`, Firebase config files, `.netrc`,
+  `.npmrc` and `.pypirc`. Generation does not read them, and other sessions
+  could read the copy under `$TMPDIR`.
+- `agent-guard.sh preflight` writes the context pack to a temporary file and
+  renames it into place. Concurrent `check`, `doctor`, `pre-final` and hook
+  runs no longer fail with "cannot read context pack" (53 of 64 failed in the
+  new race test before the fix).
+- CI: clean under Ubuntu's shellcheck 0.9, and the historical migration test
+  allows 600 seconds per upgrade on slow runners.
+
 ## 2026.10.13.1 — Safer upgrades and releases, advisory workspace guard
 
 - Upgrades and detection stay inside the project: the generator and

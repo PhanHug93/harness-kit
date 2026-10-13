@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.10.13.1`](agent-bootstrap/VERSION)
+Current release: [`2026.10.13.2`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -64,7 +64,7 @@ or `agent-init --next`.
 rtk is intentionally hard-pinned to the bundle's audited version so projects
 do not drift with an unreviewed upstream release.
 
-## Upgrade an existing project to 2026.10.13.1
+## Upgrade an existing project to 2026.10.13.2
 
 ### Option A: one-shot pinned upgrade
 
@@ -76,10 +76,10 @@ home is missing or stale.
 
    ```bash
    cd /path/to/project
-   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
    ```
 
-3. The upgrader installs release `2026.10.13.1` into
+3. The upgrader installs release `2026.10.13.2` into
    `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
    reviewable candidates instead of overwriting existing managed files.
 4. Inspect the result before accepting candidates:
@@ -218,11 +218,19 @@ baseline (`.tools/agent-state/harness-baseline/`):
 `agent-init --upgrade-plan --json` lists the action for each file without
 writing anything. Every run prints an upgrade id; `--rollback <id>` restores the
 files that run changed and removes what it created, keeping (and listing, exit
-3) any file edited since. Projects generated before this release have no
+3) any file edited since. Projects generated before 2026.10.13.1 have no
 baseline yet, so their first upgrade still uses candidates.
 
 `agent-init --status --json` reports bundle version, installed version, drift,
 and pending candidates for tooling or CI.
+
+`--diff`, `--upgrade-plan`, `--status` and `--apply-candidates` replay generation
+on a temporary copy of the project. The copy skips build output, Gradle homes,
+dependency folders and other ignored directories at any depth, so large
+Android checkouts take seconds. It never includes personal or secret files:
+`*.local.*` (such as `.claude/settings.local.json`), signing certificates,
+provisioning profiles, `*.xcconfig`, Firebase config files, `.netrc`, `.npmrc`
+and `.pypirc`.
 
 ### Retired harness files
 
@@ -362,8 +370,9 @@ change the existing optional Git hook. Existing downstream projects receive the
 updated instructions through the normal reviewed upgrade/candidate flow.
 
 Tests run in two tiers. On every edit run the fast tier,
-`bash scripts/test-fast.sh` (about 4 minutes: syntax, release pins and mirrors,
-release script, workspace guard, onboarding, retirement lifecycle). It runs every check and lists all
+`bash scripts/test-fast.sh` (about 5 minutes: syntax, release pins and mirrors,
+release script, workspace guard, onboarding, retirement lifecycle, detector
+fixtures, path policy, concurrent guard reads). It runs every check and lists all
 failures at the end; `--only <check>` reruns one. Before a PR or release run
 the full tier below.
 

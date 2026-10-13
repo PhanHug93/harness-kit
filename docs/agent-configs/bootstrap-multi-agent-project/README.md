@@ -217,7 +217,7 @@ agent-init --retirement-plan
 One-shot safe upgrade for an old project on another machine:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.1/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
 ```
 
 That script installs the pinned harness release, creates
