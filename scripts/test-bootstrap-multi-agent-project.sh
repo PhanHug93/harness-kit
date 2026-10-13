@@ -1866,7 +1866,8 @@ for sp_needle in \
   "Review quarterly, or when a relevant release is published." \
   "Inspect the release diff and run two or three representative brainstorming" \
   "Freeze on the last validated release when a new one gives no relevant benefit" \
-  "reverify it before any update"; do
+  "reverify it before any update" \
+  "Kit guidance is written for v7.0.0"; do
   need_contains "$root_readme" "$sp_needle" "root README Superpowers policy"
   need_contains "$bundle_readme" "$sp_needle" "bundle README Superpowers policy"
 done
@@ -2853,7 +2854,9 @@ need_not_contains "$mode_contracts" "initial implementation plus at most two rem
 need_contains "$mode_contracts" "The user may authorize another pass in the same task." "mode remediation same-task authorization"
 need_contains "$mode_contracts" "Do not create a child task or a new lifecycle state solely because the checkpoint was reached." "mode remediation no forced child or state"
 need_contains "$mode_contracts" "runner, status, reason, and real report" "mode contracts verification evidence"
-need_contains "$mode_contracts" "testimony pending fresh confirmation" "mode contracts executing-host pass rule"
+need_contains "$mode_contracts" "evidence to check, not to re-run" "mode contracts executing-host pass rule"
+need_contains "$mode_contracts" "re-runs only a check whose" "mode contracts verify re-runs only on missing or doubtful evidence"
+need_contains "$mode_contracts" "Seats do not spawn extra reviewer helpers." "mode contracts no helper reviewers"
 need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
 need_contains "$mode_contracts" "state/review consistency" "mode contracts Claude consistency check"
 need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
@@ -4506,6 +4509,9 @@ bash "$ROOT_DIR/scripts/test-detector-fixtures.sh"
 
 note "context pack is replaced atomically under concurrent readers"
 bash "$ROOT_DIR/scripts/test-guard-concurrency.sh"
+
+note "local-only mode: only specs, plan journals and summaries are pushed"
+bash "$ROOT_DIR/scripts/test-local-only-mode.sh"
 
 note "HK-07 retirement lifecycle"
 python3 "$ROOT_DIR/scripts/test-agent-retirement.py"

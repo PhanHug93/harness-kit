@@ -162,6 +162,10 @@ Design specs live here, one folder per topic:
 boundaries, success criteria, and open questions. Reference the spec path from
 commits/PRs for traceability.
 
+Specs here are pushed, so keep only specs of work that has started. Draft a new
+spec in `docs/superpowers/plans/<topic>/` (local-only) and move it here in the
+first commit that implements it.
+
 On first onboarding, fill `docs/superpowers/specs/project-tech-stack.md` with
 the verified project-specific tech-stack, module map, conventions, protected
 paths, generated-file ownership, and verification matrix. Keep it source-backed:
@@ -220,7 +224,9 @@ EOF_TECH_STACK_CONTRACT
 
 Implementation plans live here, one folder per topic:
 `docs/superpowers/plans/<topic>/`. Each plan breaks a spec into bite-sized,
-verifiable tasks. Reference the plan path from commits/PRs for traceability.
+verifiable tasks. Plans are local-only, as are draft specs and analyses for
+work that has not started: only `<topic>/journal.md` is pushed. Move a draft
+spec to `docs/superpowers/specs/<topic>/` in the first commit that implements it.
 
 ## Optional durable decisions
 

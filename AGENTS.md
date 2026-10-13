@@ -39,9 +39,11 @@ Project defaults, skills, past practice and release requests do not relax them.
 
 - Keep canonical bundle sources and generated mirrors consistent. Follow
   `agent-bootstrap/MANIFEST.md`; run its required drift test after bundle edits.
-- Development records are local-only except `docs/superpowers/specs/` and its
-  policy README. Follow `docs/superpowers/README.md`; do not commit evidence,
-  plans, caches or unrelated user files.
+- Development records are local-only except specs of started work
+  (`docs/superpowers/specs/`), plan journals
+  (`docs/superpowers/plans/<topic>/journal.md`) and the policy README. Follow
+  `docs/superpowers/README.md`; do not commit draft specs, analyses, plans,
+  `.agents/` task packets, evidence, caches or unrelated user files.
 - Preserve existing project configuration and USER overlays during upgrades.
 - These root instructions describe contributions to the kit itself. They do not
   install a generated downstream runtime in this repository.

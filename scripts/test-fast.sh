@@ -4,9 +4,10 @@ set -uo pipefail
 # Fast tier (about 5 minutes): run on every edit. Every check runs even when an
 # earlier one fails, and the summary lists all failures at once. The full tier
 # (scripts/test-bootstrap-multi-agent-project.sh and test-one-shot-upgrade.sh)
-# runs before a PR or release.
+# runs in CI for every pull request and release tag; run it locally only to
+# reproduce a CI failure or when CI cannot run.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race)
+CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race local-only)
 
 usage() {
   printf '%s\n' \
@@ -33,6 +34,7 @@ run_check() {
     detector) bash "$ROOT_DIR/scripts/test-detector-fixtures.sh" ;;
     path-policy) bash "$ROOT_DIR/scripts/test-path-policy.sh" ;;
     guard-race) bash "$ROOT_DIR/scripts/test-guard-concurrency.sh" ;;
+    local-only) bash "$ROOT_DIR/scripts/test-local-only-mode.sh" ;;
   esac
 }
 
@@ -68,4 +70,4 @@ if [[ ${#failed[@]} -gt 0 ]]; then
   exit 1
 fi
 rm -rf "$log_dir"
-printf 'fast tier: ok (%d checks); run the full tier before a PR or release\n' "${#selected[@]}"
+printf 'fast tier: ok (%d checks); pull request CI runs the full tier\n' "${#selected[@]}"

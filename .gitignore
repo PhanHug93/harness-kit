@@ -25,8 +25,16 @@
 # OS / editor
 .DS_Store
 
-# Kit development records: only the policy README and specs are tracked.
+# Kit development records: only the policy README, specs of started work and
+# plan journals are tracked. Draft specs, analyses, plans, task packets and
+# evidence stay local.
 docs/superpowers/*
 !docs/superpowers/README.md
 !docs/superpowers/specs/
 !docs/superpowers/specs/**
+!docs/superpowers/plans/
+docs/superpowers/plans/**
+!docs/superpowers/plans/*/
+!docs/superpowers/plans/*/journal.md
+.agents/tasks/
+/Claude outputs/
