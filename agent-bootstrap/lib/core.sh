@@ -16,7 +16,80 @@ shell_quote() {
   printf '%q' "$1"
 }
 
+# Names the read policy never accepts, at any depth (see the Python policy).
+bootstrap_path_component_is_excluded() {
+  case "$1" in
+    .git|.tools|.idea|.next|node_modules|Pods|vendor|build|dist|out|local.properties|keystore.properties|\
+    .gradle*|.env*|*.jks|*.keystore|*.pem|*.p8|*.key)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Walks the target without descending into policy-excluded directories (nested
+# build/, project Gradle homes, node_modules, ...): nothing below them is ever
+# eligible, and a large Android tree keeps 100k+ files there. docs/ is always
+# walked so unsafe required configuration is still reported.
+bootstrap_find_pruned() {
+  local start="$1"
+  shift
+  find "$start" -mindepth 1 \
+    \( \( -name .git -o -name .tools -o -name .idea -o -name .next -o -name node_modules -o -name Pods \
+    -o -name vendor -o -name build -o -name dist -o -name out -o -name '.gradle*' -o -name '.env*' \
+    -o -path '*/.agents/runtime' -o -path '*/.agents/state' -o -path '*/.agents/cache' \) \
+    ! -path "$start/docs/*" \) -prune -o "$@"
+}
+
+BOOTSTRAP_POLICY_ROOT_CHECKED=""
+BOOTSTRAP_POLICY_ROOT_CANONICAL=false
+
+# Same verdict as the Python policy without a process per path: a canonical
+# absolute spelling under the canonical target with no linked component
+# resolves to itself, so only the excluded-component rule applies. Links,
+# relative or unusual spellings and a non-canonical target use the Python
+# policy.
 bootstrap_path_is_within_root() {
+  local path="$1"
+  local rel current part i count exists=true
+  local -a parts
+  if [[ "$BOOTSTRAP_POLICY_ROOT_CHECKED" != "$TARGET_DIR" ]]; then
+    BOOTSTRAP_POLICY_ROOT_CANONICAL=false
+    if [[ -d "$TARGET_DIR" && "$(cd "$TARGET_DIR" 2>/dev/null && pwd -P)" == "$TARGET_DIR" ]]; then
+      BOOTSTRAP_POLICY_ROOT_CANONICAL=true
+    fi
+    BOOTSTRAP_POLICY_ROOT_CHECKED="$TARGET_DIR"
+  fi
+  [[ "$BOOTSTRAP_POLICY_ROOT_CANONICAL" == "true" ]] || { bootstrap_path_policy_python "$path"; return; }
+  case "$path" in
+    "$TARGET_DIR"/*) rel="${path#"$TARGET_DIR"/}" ;;
+    *) bootstrap_path_policy_python "$path"; return ;;
+  esac
+  case "/$rel/" in
+    */../*|*/./*|*//*|*$'\n'*) bootstrap_path_policy_python "$path"; return ;;
+  esac
+  IFS=/ read -r -a parts <<<"$rel"
+  count=${#parts[@]}
+  current="$TARGET_DIR"
+  for ((i = 0; i < count; i++)); do
+    part="${parts[$i]}"
+    bootstrap_path_component_is_excluded "$part" && return 1
+    if [[ "$part" == ".agents" ]]; then
+      case "${parts[$((i + 1))]:-}" in runtime|state|cache) return 1 ;; esac
+    fi
+    if [[ "$exists" == "true" ]]; then
+      current="$current/$part"
+      if [[ -L "$current" ]]; then
+        bootstrap_path_policy_python "$path"
+        return
+      fi
+      [[ -e "$current" ]] || exists=false
+    fi
+  done
+  return 0
+}
+
+bootstrap_path_policy_python() {
   local path="$1"
   AGENT_POLICY_ROOT="$TARGET_DIR" AGENT_POLICY_PATH="$path" python3 - <<'PY'
 import os
@@ -82,7 +155,17 @@ bootstrap_write_parent_is_eligible() {
   bootstrap_path_is_within_root "$parent"
 }
 
+# Printable ASCII without a backslash needs no escaping.
+bootstrap_text_is_plain() {
+  local LC_ALL=C
+  [[ "$1" != *\\* && "$1" =~ ^[[:print:]]*$ ]]
+}
+
 bootstrap_path_diagnostic() {
+  if bootstrap_text_is_plain "$1"; then
+    printf '%s' "$1"
+    return 0
+  fi
   AGENT_DIAGNOSTIC_PATH="$1" python3 - <<'PY'
 import os
 

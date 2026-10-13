@@ -79,7 +79,7 @@ EOF_OVERLAY
 
 compute_apply_state() {
   local ro=false eligible=false c d candidates
-  candidates="$(find "$TARGET_DIR" \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" \) -prune -o -type f -name '*.generated.*' -print 2>/dev/null)"
+  candidates="$(bootstrap_find_pruned "$TARGET_DIR" -type f -name '*.generated.*' -print 2>/dev/null)"
   [[ -n "$candidates" ]] || { printf 'complete\n'; return 0; }
   while IFS= read -r c; do
     [[ -n "$c" ]] || continue

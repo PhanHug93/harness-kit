@@ -5,7 +5,7 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
-AGENT_BOOTSTRAP_VERSION="2026.10.13.1"
+AGENT_BOOTSTRAP_VERSION="2026.10.13.2"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
@@ -710,9 +710,7 @@ pending_generated_candidate_count() (
   count=0
   trap 'rm -f "$candidate_list" "$allowed_list"' EXIT HUP INT TERM
   generated_file_allowlist > "$allowed_list"
-  find "$TARGET_DIR" \
-    \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" -o -path "$TARGET_DIR/.gradle" -o -path "$TARGET_DIR/build" \) -prune -o \
-    -type f -name '*.generated.*' -print 2>/dev/null > "$candidate_list"
+  bootstrap_find_pruned "$TARGET_DIR" -type f -name '*.generated.*' -print 2>/dev/null > "$candidate_list"
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
     base="${candidate%.generated.*}"
@@ -877,6 +875,7 @@ copy_snapshot_regular_children() {
   while IFS= read -r child; do
     [[ -n "$child" ]] || continue
     child_rel="$relpath/$(basename "$child")"
+    snapshot_path_is_personal "$child_rel" && continue
     if ! bootstrap_existing_file_is_eligible "$child"; then
       snapshot_required_path "$child_rel" && return 1
       continue
@@ -922,25 +921,46 @@ copy_snapshot_directory_link_contents() {
   esac
 }
 
+# Copies the listed (NUL-separated) relpaths from the target into a snapshot in
+# one process; a cp per file dominated large trees.
+snapshot_copy_files() {
+  AGENT_SNAPSHOT_SOURCE="$TARGET_DIR" AGENT_SNAPSHOT_DEST="$1" python3 -c '
+import os, shutil, sys
+source, dest = os.environ["AGENT_SNAPSHOT_SOURCE"], os.environ["AGENT_SNAPSHOT_DEST"]
+for raw in sys.stdin.buffer.read().split(b"\0"):
+    if raw:
+        rel = os.fsdecode(raw)
+        target = os.path.join(dest, rel)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        shutil.copy2(os.path.join(source, rel), target)
+'
+}
+
+# Personal or secret files that generation never reads are never copied into
+# a snapshot under $TMPDIR, where other sessions of the same user could read
+# them (and a killed run would leave them behind).
+snapshot_path_is_personal() {
+  case "${1##*/}" in
+    *.local|*.local.*|*.p12|*.pfx|*.mobileprovision|*.provisionprofile|*.xcconfig|\
+    google-services.json|GoogleService-Info.plist|.netrc|.npmrc|.pypirc)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 copy_target_for_diff() {
   local dest="$1"
-  local relpath source target required=false
+  local relpath source target required=false copy_list status=0
   mkdir -p "$dest"
+  copy_list="$(mktemp "${TMPDIR:-/tmp}/agent-snapshot.XXXXXX")"
 
-  (
-    cd "$TARGET_DIR"
-    find . \
-      \( -path './.git' -o -path './.tools' -o -path './.gradle' -o -path './build' -o -path './out' -o -path './node_modules' -o -path './Pods' -o -path './vendor' \) -prune -o \
-      -type d -print
-  ) | while IFS= read -r relpath; do
+  (cd "$TARGET_DIR" && bootstrap_find_pruned . -type d -print0) | (cd "$dest" && xargs -0 mkdir -p .)
+
+  while IFS= read -r -d '' relpath; do
     relpath="${relpath#./}"
-    [[ -n "$relpath" && "$relpath" != "." ]] || continue
-    mkdir -p "$dest/$relpath"
-  done
-
-  while IFS= read -r relpath; do
     [[ -n "$relpath" ]] || continue
-    relpath="${relpath#./}"
+    snapshot_path_is_personal "$relpath" && continue
     source="$TARGET_DIR/$relpath"
     target="$dest/$relpath"
     if [[ -L "$source" && -d "$source" ]]; then
@@ -954,17 +974,16 @@ copy_target_for_diff() {
         snapshot_required_path "$relpath" && required=true
       fi
     elif bootstrap_existing_file_is_eligible "$source"; then
-      mkdir -p "$dest/$(dirname "$relpath")"
-      cp -p "$source" "$target"
+      printf '%s\0' "$relpath" >&3
     else
       printf 'warn: omitted unsafe preview entry: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
       snapshot_required_path "$relpath" && required=true
     fi
-  done < <(
-    cd "$TARGET_DIR" && find . \
-      \( -path './.git' -o -path './.tools' -o -path './.gradle' -o -path './build' -o -path './out' -o -path './node_modules' -o -path './Pods' -o -path './vendor' \) -prune -o \
-      \( -type f -o -type l \) -print
-  )
+  done 3>"$copy_list" < <(cd "$TARGET_DIR" && bootstrap_find_pruned . \( -type f -o -type l \) -print0)
+
+  snapshot_copy_files "$dest" < "$copy_list" || status=1
+  rm -f "$copy_list"
+  [[ "$status" -eq 0 ]] || return 1
 
   if [[ "$required" == "true" ]]; then
     printf 'ERROR: required preview configuration was unsafe or unavailable\n' >&2
@@ -1112,10 +1131,10 @@ generated_file_allowlist() (
 # candidate can never restore retired CI. Fails closed without the inventory.
 exclude_retired_artifact_paths() {
   local retired
-  retired="$(python3 "$LIB_DIR/retirement.py" paths)" && [[ -n "$retired" ]] || {
+  if ! retired="$(python3 "$LIB_DIR/retirement.py" paths)" || [[ -z "$retired" ]]; then
     echo "ERROR: retired artifact inventory is unavailable" >&2
     return 1
-  }
+  fi
   grep -Fvx -f <(printf '%s\n' "$retired") || true
 }
 
@@ -1138,9 +1157,7 @@ apply_generated_candidates() (
   skipped=0
   trap 'rm -f "$candidate_list" "$applied_list" "$allowed_list"' EXIT HUP INT TERM
   generated_file_allowlist > "$allowed_list"
-  find "$TARGET_DIR" \
-    \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" -o -path "$TARGET_DIR/.gradle" -o -path "$TARGET_DIR/build" \) -prune -o \
-    -type f -name '*.generated.*' -print 2>/dev/null |
+  bootstrap_find_pruned "$TARGET_DIR" -type f -name '*.generated.*' -print 2>/dev/null |
     sort -r > "$candidate_list"
 
   if [[ ! -s "$candidate_list" ]]; then
@@ -1253,7 +1270,7 @@ cleanup_backups() {
         printf 'warn: could not remove %s\n' "$relpath" >&2
       fi
     fi
-  done < <(find "$TARGET_DIR" \( -path "$TARGET_DIR/.git" -o -path "$TARGET_DIR/.tools" \) -prune -o -type f \( -name '*.bak.*' -o -name '*.generated.*' \) -print 2>/dev/null)
+  done < <(bootstrap_find_pruned "$TARGET_DIR" -type f \( -name '*.bak.*' -o -name '*.generated.*' \) -print 2>/dev/null)
   if [[ "$removed" -eq 0 ]]; then
     printf 'No harness-stamped .bak.* or .generated.* leftovers to clean.\n'
   else

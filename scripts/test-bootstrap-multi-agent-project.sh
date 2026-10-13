@@ -4498,6 +4498,15 @@ python3 "$ROOT_DIR/scripts/test-agent-seats-launcher.py"
 note "upgrade baseline, merge, plan and rollback"
 bash "$ROOT_DIR/scripts/test-upgrade-merge.sh"
 
+note "path policy fast paths and snapshot cost"
+bash "$ROOT_DIR/scripts/test-path-policy.sh"
+
+note "detector fixtures (wear flavors, sensitive files)"
+bash "$ROOT_DIR/scripts/test-detector-fixtures.sh"
+
+note "context pack is replaced atomically under concurrent readers"
+bash "$ROOT_DIR/scripts/test-guard-concurrency.sh"
+
 note "HK-07 retirement lifecycle"
 python3 "$ROOT_DIR/scripts/test-agent-retirement.py"
 

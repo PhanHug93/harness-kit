@@ -880,9 +880,12 @@ write_context_pack() {
     warn "state dir not writable ($STATE_DIR); guard advisory-only, skipping context pack"
     return 0
   fi
-  local policy_hash
+  local policy_hash pack_tmp
   policy_hash="$(hash_file "$POLICY_FILE")"
   mkdir -p "$(dirname "$CONTEXT_PACK")"
+  # check, doctor, pre-final and host hooks may read the pack while preflight
+  # runs: build it aside and rename it into place, never truncate it in place.
+  pack_tmp="$(mktemp "$CONTEXT_PACK.XXXXXX")"
   {
     printf '{"schema":"agent-context-pack/v1"'
     printf ',"generated_at":"%s"' "$(json_escape "$(utc_now)")"
@@ -896,7 +899,8 @@ write_context_pack() {
     printf ',"detector_summary":'
     detector_summary_json
     printf '}\n'
-  } > "$CONTEXT_PACK"
+  } > "$pack_tmp"
+  mv -f "$pack_tmp" "$CONTEXT_PACK"
 }
 
 check_context_pack_freshness() {

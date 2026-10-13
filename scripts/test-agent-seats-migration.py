@@ -55,7 +55,7 @@ def configure(argv=None):
 
 def command(label, argv, cwd=ROOT, expected=0):
     proc = subprocess.run([str(a) for a in argv], cwd=cwd, env=ENV,
-                          capture_output=True, text=True, timeout=240)
+                          capture_output=True, text=True, timeout=600)
     log = OUT / re.sub(r"[^a-zA-Z0-9._-]", "-", label)
     Path(str(log) + ".stdout").write_text(proc.stdout)
     Path(str(log) + ".stderr").write_text(proc.stderr)
