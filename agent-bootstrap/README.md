@@ -305,5 +305,12 @@ upstream already owns host-specific installation paths.
 - Freeze on the last validated release when a new one gives no relevant benefit
   or introduces regression risk.
 
+Kit guidance is written for v7.0.0 and stays compatible with v5.0.7. It relies
+on the default `docs/superpowers/{specs,plans}` paths, the user-preference
+override for them and `.superpowers/brainstorm/`; a release that changes any of
+these needs a kit update first. Before moving a pin to v7.0.0, run a quick, a
+small and a project task and check where the design was saved, that nothing
+was committed and that the visual companion stopped.
+
 A `v5.1.0` match was reported from a separate environment comparison, not from
 this repository; reverify it before any update.

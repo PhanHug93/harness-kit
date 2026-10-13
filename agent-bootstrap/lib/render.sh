@@ -239,8 +239,15 @@ docs/superpowers/specs/project-tech-stack.md
 docs/superpowers/specs/project-tech-stack.md.generated.*
 docs/superpowers/specs/project-tech-stack.json
 docs/superpowers/specs/project-tech-stack.json.generated.*
-docs/superpowers/plans/README.md
-docs/superpowers/plans/README.md.generated.*
+# Development records are local-only: only specs of started work and plan
+# journals are pushed. Draft specs, analyses and plans stay in
+# docs/superpowers/plans/<topic>/ until the work starts.
+docs/superpowers/*
+!docs/superpowers/specs/
+!docs/superpowers/plans/
+docs/superpowers/plans/**
+!docs/superpowers/plans/*/
+!docs/superpowers/plans/*/journal.md
 .agents/
 .claude/
 .codex/

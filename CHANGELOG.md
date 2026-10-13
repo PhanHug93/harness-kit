@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.10.13.2 — Fast upgrades on large projects, reliable guard checks
+## 2026.10.13.2 — Fast upgrades on large projects, reliable guard checks, local-only development records
 
 - Large Android checkouts upgrade in seconds again. Previews (`--status`,
   `--diff`, `--upgrade-plan`, `--apply-candidates` and the one-shot upgrader)
@@ -28,6 +28,43 @@
   new race test before the fix).
 - CI: clean under Ubuntu's shellcheck 0.9, and the historical migration test
   allows 600 seconds per upgrade on slow runners.
+- Local-only mode covers development records. In generated projects only
+  specs of started work (`docs/superpowers/specs/`) and plan journals
+  (`docs/superpowers/plans/<topic>/journal.md`) are pushed. Plans, reviews,
+  archives and other `docs/superpowers/` folders join the `.gitignore` block,
+  and `agent-local-only-check.sh` (pre-push) reports them when they are already
+  tracked; untrack them with `git rm --cached`.
+- Draft specs and analyses for work that has not started live in
+  `docs/superpowers/plans/<topic>/` (local) and move to
+  `docs/superpowers/specs/` in the first commit that implements them. The specs
+  README, plans README and task journal say so.
+- Kit repository: `.agents/` task packets and evidence are no longer tracked
+  (362 files left the index and stay on disk); its policy allows specs of
+  started work and plan journals only.
+- Generated `AGENTS.md` has a short Development Records section: open each
+  task as a local packet, draft specs and plans in
+  `docs/superpowers/plans/<topic>/`, move a spec to `docs/superpowers/specs/`
+  when work starts, and record what was done in the journal. It overrides
+  skill defaults for where specs and plans are written.
+- Superpowers brainstorming is the explicit anchor of `@spec`. The mode
+  contracts say that `@spec` opens new behaviour with
+  `superpowers:brainstorming` and that other seats never brainstorm. The
+  skill's size call picks one owner for the design: `task.md` for small work,
+  `docs/superpowers/plans/<topic>/design.md` for a project. The builder check
+  writes no file, `@gate` stays the only blocking verdict, and for a project
+  `@build` writes the plan after `@gate` approves. `AGENTS.md` tells
+  brainstorming and writing-plans to keep drafts in
+  `docs/superpowers/plans/<topic>/`, uncommitted. The Superpowers policy now
+  says the guidance is written for v7.0.0 and stays compatible with v5.0.7.
+- Verification is split, not repeated. `@build`'s report (command, exit code,
+  key output, commit) is the test evidence. `@verify` checks it against the
+  diff and re-runs only missing, stale or doubtful checks. The full suite runs
+  once before hand-off and again only at close or after a change or failure.
+  Seats do not spawn extra reviewer helpers.
+- Kit CI runs for pull requests, pushes to `main` and release tags; before, it
+  tested every pull request commit twice. A newer push cancels the older run.
+  Locally, the fast tier is the default and the full tier is for reproducing a
+  CI failure.
 
 ## 2026.10.13.1 — Safer upgrades and releases, advisory workspace guard
 

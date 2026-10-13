@@ -835,11 +835,31 @@ Contract, read on demand:
   changed since then and open questions, not skills, specs or reports already
   summarized.
 - Handoffs cite paths, commits and evidence files instead of pasting content;
-  record each decision once in \`task.md\` and link to it elsewhere.
+  record each decision once (in the design when one exists, otherwise
+  \`task.md\`) and link to it elsewhere.
 - Reports keep one role each (implementation, review, verification, state);
   verification records only new evidence: command, exit code, key excerpt.
 - Batch related checks; report progress only when state changes; avoid short
   polling loops.
+
+## Development Records
+
+Local-only mode pushes what was done; work in progress stays local. This
+overrides skill defaults for where specs and plans are written.
+
+- Open each task as a packet under \`.agents/tasks/<task-id>/\`; its \`task.md\`,
+  analyses, reports and evidence stay local.
+- Write draft specs, analyses and plans for future work in
+  \`docs/superpowers/plans/<topic>/\` (local), not \`docs/superpowers/specs/\`.
+- For superpowers brainstorming and writing-plans, save the design and plan
+  there, not at their dated defaults, and do not commit them until the spec
+  moves to \`docs/superpowers/specs/\`. Never \`git add -f\` an ignored record.
+- Move a spec to \`docs/superpowers/specs/<topic>/\` in the first commit that
+  implements it.
+- Record what was done, finished or not, as dated entries in
+  \`docs/superpowers/plans/<topic>/journal.md\` (pushed), mirroring the packet's
+  \`## Outcome\`; it is not a closure gate. Add no other summary or report
+  files to pushed paths.
 
 ## Local State And No-Scan Guard
 
@@ -1268,8 +1288,16 @@ requires an explicit user decision in the packet.
   but may never upgrade `no`; missing/inconsistent `@gate` verdicts block coding.
 - After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost. The user may authorize another pass in the same task. Do not create a child task or a new lifecycle state solely because the checkpoint was reached.
 - Record verification runner, status, reason, and real report. Unavailable/skipped
-  execution cannot pass. Only the executing host may declare a pass; other
-  reports are testimony pending fresh confirmation.
+  execution cannot pass. Only the executing host may declare a pass for what it
+  ran; another phase's report is evidence to check, not to re-run.
+- Split verification instead of repeating it. `@build` runs focused tests while
+  editing, the declared mutations once and the full suite once before hand-off;
+  its report (command, exit code, key output, commit) is the test evidence.
+  `@verify` checks that evidence against the diff and re-runs only a check whose
+  evidence is missing, stale or inconsistent, or one focused test for a specific
+  doubt; it recommends heavier validation instead of running it. The full suite
+  runs again only at close (`pre-final --run-verify`) or after a change or a
+  failure. Seats do not spawn extra reviewer helpers.
 - Every acceptance criterion names its test and the observable it asserts;
   `@gate` checks this before coding. Fixtures cross the production boundary
   they claim (a real HTTP 401, not `status: 401` in JSON).
@@ -1287,6 +1315,22 @@ requires an explicit user decision in the packet.
 - The user is the final authority for closure, bounded revision, prior-phase
   return, implementation, or a gate-coding policy exception. Readers accept
   `sol_coding` as a legacy read alias for one release.
+
+### `@spec` anchor: superpowers brainstorming
+
+- `@spec` opens new behaviour with `superpowers:brainstorming` (its steps when
+  the skill is absent). Other seats never brainstorm: an approved packet
+  satisfies its approval gate. Bugs use systematic debugging; on resume or a
+  return to analysis, revise the existing design instead.
+- The skill's size call picks one owner for the design: `task.md` for a quick
+  or small change; for a project, `docs/superpowers/plans/<topic>/design.md`,
+  linked from `task.md`, which then adds only criteria and their tests,
+  verification and boundaries. Revisions edit the design and note it in `task.md`.
+- The builder check writes no file; its answers go into the design. `@gate`
+  stays the only blocking verdict.
+- For a project, `@build` writes the plan with `superpowers:writing-plans`
+  beside the design after `@gate` approves, skipping its execution-method
+  choice, and updates the plan's spec path when the spec moves.
 
 ## Planning Mode
 
@@ -1382,7 +1426,10 @@ Optional journals preserve decisions in Git; they never select active tasks. `.a
 `docs/agent-configs/agent-handoff-schema.md`.
 
 Create `docs/superpowers/plans/<topic>/journal.md` with dated entries to survive
-packet loss/compaction. Bootstrap never creates per-task journals.
+packet loss/compaction. Bootstrap never creates per-task journals. The journal
+records what was done, finished or not; with `docs/superpowers/specs/` it is the
+only development record pushed in local-only mode. Draft specs, analyses, plans
+for future work, reviews and `.agents/` stay local.
 
 Manually mirror `task.md` Summary, Evidence, and Effect on source into a dated
 entry when useful. Mirroring is optional, not a closure gate.
@@ -1557,8 +1604,9 @@ Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
 
 Operate project-local full-flow by default. Add `--supervised`, `--read-only`,
 or `--propose` only when the user wants step-by-step approval.
-Run `scripts/detect-agent-tech-stack.sh --markdown` when available. Use
-requirement exploration and council checkpoints only when appropriate. End with
+Run `scripts/detect-agent-tech-stack.sh --markdown` when available. As
+`@spec`, open new behaviour with superpowers brainstorming (the mode contracts'
+`@spec` anchor); use council checkpoints only when appropriate. End with
 a concrete plan, assumptions, risks, verification, stop conditions, and a
 Codex-ready handoff using `docs/agent-configs/agent-handoff-schema.md` when
 follow-up coding/review is expected. Respect

@@ -107,8 +107,10 @@ home is missing or stale.
    scripts/verify-ai-deps.sh --json
    ```
 
-7. Review `git status` before committing project-owned changes. Generated
-   harness files are local-only by default and should not be pushed accidentally.
+7. Review `git status` before committing project-owned changes. Only project
+   files, specs of started work and plan journals are pushed; harness files and
+   work in progress stay local. See
+   [What is pushed and what stays local](#what-is-pushed-and-what-stays-local).
 
 ### Option B: update an existing canonical installation
 
@@ -194,9 +196,47 @@ this compatibility release; configure seats instead.
 - Project brief and tech-stack templates backed by source evidence.
 - `agentmemory-mcp` and `doubt-driven` skills.
 - A local-only `.gitignore` block, a versioned bootstrap lock, and a pre-push
-  check for harness files that were already tracked.
+  check that reports already-tracked local-only files (see the next section).
 
 Running without `--workflow full` installs the smaller `infra` preset.
+
+## What is pushed and what stays local
+
+Local-only mode: what was done goes to Git, while work in progress and the
+harness itself stay on the developer's machine. The generated `.gitignore`
+block keeps local files out of `git add -A`, and the pre-push check
+(`scripts/agent-local-only-check.sh`, installed by `scripts/install-git-hooks.sh`)
+names any of them that are already tracked.
+
+**Pushed:**
+
+| Path | Content |
+|---|---|
+| Project files | Source, tests, build and project configuration; the kit does not change them. |
+| `docs/superpowers/specs/<topic>/` | Specs of work that has started or shipped. |
+| `docs/superpowers/plans/<topic>/journal.md` | Dated record of what was done, finished or not. |
+
+**Local only:**
+
+| Group | Paths |
+|---|---|
+| Agent entry files | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules` |
+| Agent configuration | `docs/agent-configs/`, `.agents/`, `.claude/`, `.codex/`, `.cursor/rules/`, `.windsurf/rules/` |
+| Harness scripts | `scripts/agent-{tech-stack-lib,hook,guard,seats,onboarding,local-only-check}.sh`, `scripts/detect-agent-tech-stack.sh`, `scripts/verify-ai-deps.sh`, `scripts/install-{git-hooks,rtk}.sh`, `scripts/rtk`, `scripts/githooks/` |
+| Onboarding scaffolds | `docs/superpowers/specs/README.md`, `docs/superpowers/specs/project-tech-stack.{md,json}`, `docs/superpowers/plans/README.md` |
+| Work in progress | Task packets in `.agents/tasks/<task-id>/` (`task.md`, `state.json`, reports, evidence); draft specs, analyses and plans in `docs/superpowers/plans/<topic>/`; `docs/superpowers/reviews/`, `archive/` and every other `docs/superpowers/` folder |
+| Kit copies and candidates | `/.harness-kit/`, `/agent-bootstrap/`, the kit's `*.generated.*` candidates, and a `.gitignore` that contains the harness-kit block |
+| Personal and machine state | `{AGENTS,CLAUDE,GEMINI}.local.md`, `docs/agent-configs/*.local.md`, `.claude/settings.local.json`, `.agents/{runtime,state,cache}/`, `.tools/`, `.codex-mode-lock`, `*.bak.*`, `.DS_Store` and other tool caches |
+
+A spec starts as a draft in `docs/superpowers/plans/<topic>/` and moves to
+`docs/superpowers/specs/<topic>/` in the first commit that implements it. The
+generated `AGENTS.md` tells agents the same, overriding skill defaults that
+write specs straight to `docs/superpowers/specs/`.
+
+To untrack files the check reports, run
+`scripts/agent-local-only-check.sh status`, then
+`git rm --cached -- <path>`, and commit the removal before pushing; the files
+stay on disk.
 
 ## Safe generation and upgrades
 
@@ -372,12 +412,16 @@ updated instructions through the normal reviewed upgrade/candidate flow.
 Tests run in two tiers. On every edit run the fast tier,
 `bash scripts/test-fast.sh` (about 5 minutes: syntax, release pins and mirrors,
 release script, workspace guard, onboarding, retirement lifecycle, detector
-fixtures, path policy, concurrent guard reads). It runs every check and lists all
-failures at the end; `--only <check>` reruns one. Before a PR or release run
-the full tier below.
+fixtures, path policy, concurrent guard reads, local-only mode). It runs every check and lists all
+failures at the end; `--only <check>` reruns one.
 
-Run affected parent entrypoints before publishing bundle changes; map their children
-once so that the campaign does not repeat covered work:
+The full tier below runs in CI on Linux and macOS for every pull request,
+push to `main` and release tag. Other branches are tested through their pull
+request (or a manual `workflow_dispatch` run), so one commit is not tested
+twice, and a newer push cancels the older run. Locally, run a full-tier
+entrypoint only to reproduce a CI failure or when CI cannot run, and run it
+once rather than after every edit; map its children once so that a campaign
+does not repeat covered work:
 
 ```bash
 bash scripts/test-bootstrap-multi-agent-project.sh
@@ -543,6 +587,13 @@ upstream owns its host-specific installation paths.
   tasks before moving the pin.
 - Freeze on the last validated release when a new one gives no relevant benefit
   or introduces regression risk.
+
+Kit guidance is written for v7.0.0 and stays compatible with v5.0.7. It relies
+on the default `docs/superpowers/{specs,plans}` paths, the user-preference
+override for them and `.superpowers/brainstorm/`; a release that changes any of
+these needs a kit update first. Before moving a pin to v7.0.0, run a quick, a
+small and a project task and check where the design was saved, that nothing
+was committed and that the visual companion stopped.
 
 A `v5.1.0` match was reported from a separate environment comparison, not from
 this repository; reverify it before any update.
