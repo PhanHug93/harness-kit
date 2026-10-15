@@ -130,7 +130,7 @@ evaluate_common_onboarding() {
   need_contains "$mode_contracts" '`analysis` · `@spec`' "mode contracts Claude analysis owner"
   need_contains "$mode_contracts" '`technical_review` · `@gate`' "mode contracts Sol technical review owner"
   need_contains "$mode_contracts" '`implementation` · `@build`' "mode contracts Luna implementation owner"
-  need_contains "$mode_contracts" "After two unsuccessful remediation returns" "mode remediation checkpoint"
+  need_contains "$mode_contracts" 'counts returns to `implementation` only' "mode remediation checkpoint"
   need_not_contains "$mode_contracts" "at most two remediation rounds" "mode remediation hard cap removed"
   need_contains "$mode_contracts" "another bounded pass is worth its cost" "mode remediation bounded cost"
   need_contains "$mode_contracts" "user may authorize another pass in the same task" "mode remediation same-task authorization"
@@ -146,11 +146,8 @@ evaluate_common_onboarding() {
     CLAUDE.md \
     .claude/README.md \
     .claude/commands/planning.md \
-    .claude/commands/planning-full-flow.md \
     .claude/commands/coding.md \
-    .claude/commands/coding-full-flow.md \
     .claude/commands/reviewing.md \
-    .claude/commands/reviewing-full-flow.md \
     .claude/commands/codex/setup.md \
     .claude/commands/codex/rescue.md \
     .claude/commands/codex/status.md \
@@ -183,6 +180,12 @@ evaluate_common_onboarding() {
     need_not_contains "$host_text" "at most two remediation" "$host_surface copies canonical remediation limit"
   done
 
+  # Legacy aliases only point to their canonical command.
+  local alias
+  for alias in planning coding reviewing; do
+    need_contains "$(cat "$dir/.claude/commands/$alias-full-flow.md")" ".claude/commands/$alias.md" "/$alias-full-flow points to /$alias"
+  done
+
   local claude_coding; claude_coding="$(cat "$dir/.claude/commands/coding.md")"
   need_contains "$claude_coding" "explicit user decision" "Claude coding wrapper user authorization"
   need_contains "$claude_coding" 'blocking `@gate` adequacy verdict' "Claude coding wrapper Sol gate"
@@ -193,7 +196,7 @@ evaluate_common_onboarding() {
   need_contains "$codex_mode" "docs/agent-configs/task-journal.md" "codex doctor lists the journal doc"
   local agentmemory_skill; agentmemory_skill="$(cat "$dir/.agents/skills/agentmemory-mcp/SKILL.md")"
   need_contains "$agentmemory_skill" '.agents/tasks/*/state.json' "agentmemory handoff guidance points to authoritative task state"
-  need_contains "$agentmemory_skill" "optional durable-decision" "agentmemory guidance keeps journals optional"
+  need_contains "$agentmemory_skill" "durable-decision note, not active state" "agentmemory guidance keeps journals out of active state"
   need_not_contains "$agentmemory_skill" "prefer the task journal for resumable state" "agentmemory guidance makes journals authoritative"
   local obsolete_journal_surfaces
   obsolete_journal_surfaces="$(cat \

@@ -16,8 +16,8 @@ Base rules:
 - Require rtk for all shell git operations through `./scripts/rtk git ...`.
 - Default planning/coding/reviewing modes are project-local full-flow; use a
   supervised/read-only/propose argument only when the user wants gated actions.
-- Use Claude as primary planning owner and Codex as primary coding/review
-  owner unless a project-specific override says otherwise.
+- Seat occupants (who plans, gates, builds and reviews) live in
+  `docs/agent-configs/seats.json`.
 - Use `docs/agent-configs/agent-handoff-schema.md` for ownership changes and
   rescue handoffs.
 - Respect `scripts/agent-hook.sh no-scan-paths` before broad search; the

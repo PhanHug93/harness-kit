@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Full tier: the one-shot entry script (harness-kit-one-shot.sh and its
+# byte-identical old name harness-kit-one-shot-upgrade.sh) driving the
+# orchestrator on real projects, offline (--source-dir) and through the clone
+# path, with the old flags; then the historical migration selectors and the
+# HK-07 one-shot retirement boundaries.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ENTRY="$ROOT_DIR/agent-bootstrap/harness-kit-one-shot.sh"
 ONE_SHOT="$ROOT_DIR/agent-bootstrap/harness-kit-one-shot-upgrade.sh"
 TMP_ROOT="$(mktemp -d)"
 
@@ -25,223 +31,113 @@ need_contains() {
   esac
 }
 
-[[ -x "$ONE_SHOT" ]] || fail "missing executable one-shot upgrader: ${ONE_SHOT#"$ROOT_DIR"/}"
-bash -n "$ONE_SHOT"
+new_target() { # a repository on main with one commit
+  mkdir -p "$1"
+  git -C "$1" init -q
+  git -C "$1" symbolic-ref HEAD refs/heads/main
+  git -C "$1" config user.email "one-shot@example.invalid"
+  git -C "$1" config user.name "One Shot Test"
+  printf '# %s\n' "$(basename "$1")" >"$1/README.md"
+  git -C "$1" add README.md
+  git -C "$1" commit -qm "seed $(basename "$1")"
+}
+
+for script in "$ENTRY" "$ONE_SHOT"; do
+  [[ -x "$script" ]] || fail "missing executable entry script: ${script#"$ROOT_DIR"/}"
+  bash -n "$script"
+done
+cmp -s "$ENTRY" "$ONE_SHOT" || fail "harness-kit-one-shot-upgrade.sh must be a byte-identical copy of harness-kit-one-shot.sh"
 version="$(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION")"
 
-help_out="$("$ONE_SHOT" --help)"
-need_contains "$help_out" "Usage: harness-kit-one-shot-upgrade.sh" "one-shot help usage"
-need_contains "$help_out" "--source-dir DIR" "one-shot help source-dir option"
-need_contains "$help_out" "--skip-verify" "one-shot help skip-verify option"
-need_contains "$help_out" "--apply-candidates" "one-shot help apply-candidates option"
-need_contains "$help_out" "Defaults to v$version." "one-shot help default ref matches bundle version"
+help_out="$("$ENTRY" --help)"
+need_contains "$help_out" "Usage: harness-kit-one-shot.sh" "entry help usage"
+need_contains "$help_out" "--to VERSION|latest" "entry help --to"
+need_contains "$help_out" "--source-dir DIR" "entry help --source-dir"
+need_contains "$help_out" "Defaults to v$version." "entry help default version matches the bundle"
+run_help="$(bash "$ROOT_DIR/agent-bootstrap/harness-kit-run.sh" --help)"
+need_contains "$run_help" "--take-kit PATH|all" "orchestrator help --take-kit"
+need_contains "$run_help" "--skip-verify" "orchestrator help --skip-verify"
+need_contains "$run_help" "--apply-retirements" "orchestrator help old flags"
 
-diff_fail_source="$TMP_ROOT/diff-fail-source"
-diff_fail_home="$TMP_ROOT/diff-fail-home"
-diff_fail_target="$TMP_ROOT/diff-fail-target"
-mkdir -p "$diff_fail_source/agent-bootstrap" "$diff_fail_target"
-printf '%s\n' "$version" > "$diff_fail_source/agent-bootstrap/VERSION"
-cat > "$diff_fail_source/agent-bootstrap/install-agent-bootstrap-home.sh" <<'EOF_DIFF_FAIL_INSTALLER'
-#!/usr/bin/env bash
-set -euo pipefail
-home=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --home)
-      home="${2:?missing --home value}"
-      shift 2
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-[[ -n "$home" ]] || { echo "missing --home" >&2; exit 2; }
-mkdir -p "$home"
-cat > "$home/bootstrap-multi-agent-project.sh" <<'EOF_FAKE_BOOTSTRAP'
-#!/usr/bin/env bash
-set -euo pipefail
-target=""
-action="generate"
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --target)
-      target="${2:?missing --target value}"
-      shift 2
-      ;;
-    --status)
-      action="status"
-      shift
-      ;;
-    --upgrade-plan)
-      action="upgrade-plan"
-      shift
-      ;;
-    --diff)
-      action="diff"
-      shift
-      ;;
-    --workflow)
-      shift 2
-      ;;
-    --json|--apply-candidates)
-      shift
-      ;;
-    *)
-      shift
-      ;;
-  esac
-done
-case "$action" in
-  status)
-    printf '%s\n' '{"schema":"agent-bootstrap-status/v1","generated_file_drift":"unknown"}'
-    ;;
-  upgrade-plan)
-    printf '%s\n' "Upgrade plan"
-    ;;
-  diff)
-    printf '%s\n' "fixture diff failure" >&2
-    exit 64
-    ;;
-  generate)
-    mkdir -p "$target/docs/agent-configs"
-    printf '%s\n' "{}" > "$target/docs/agent-configs/agent-bootstrap.lock.json"
-    printf '%s\n' "Generated multi-agent files."
-    ;;
-esac
-EOF_FAKE_BOOTSTRAP
-chmod +x "$home/bootstrap-multi-agent-project.sh"
-printf '%s\n' "fixture" > "$home/VERSION"
-EOF_DIFF_FAIL_INSTALLER
-chmod +x "$diff_fail_source/agent-bootstrap/install-agent-bootstrap-home.sh"
-git -C "$diff_fail_target" init -b main >/dev/null
-git -C "$diff_fail_target" config user.email "one-shot@example.invalid"
-git -C "$diff_fail_target" config user.name "One Shot Test"
-printf '# Diff Failure Target\n' > "$diff_fail_target/README.md"
-git -C "$diff_fail_target" add README.md
-git -C "$diff_fail_target" commit -m "seed diff failure target" >/dev/null
-if ! diff_fail_out="$("$ONE_SHOT" \
-  --source-dir "$diff_fail_source" \
-  --target "$diff_fail_target" \
-  --home "$diff_fail_home" \
-  --branch feature/test-one-shot-diff-failure \
-  --skip-verify 2>&1)"; then
-  fail "one-shot should continue after informational diff failure:
-$diff_fail_out"
-fi
-need_contains "$diff_fail_out" "WARN: generated diff preview failed; continuing" "one-shot non-fatal diff warning"
-need_contains "$diff_fail_out" "Generated multi-agent files." "one-shot generated after diff failure"
-
-home_dir="$TMP_ROOT/home"
+# A legacy project with a hand-written AGENTS.md, through the old entry name:
+# the run keeps AGENTS.md, writes a kit candidate beside it and ends needs
+# review; no branch is created and git status shows no harness file.
 target_dir="$TMP_ROOT/target"
-mkdir -p "$target_dir"
-
-git -C "$target_dir" init -b main >/dev/null
-git -C "$target_dir" config user.email "one-shot@example.invalid"
-git -C "$target_dir" config user.name "One Shot Test"
-printf '# Legacy Project\n\nKeep this repo-specific overlay.\n' > "$target_dir/AGENTS.md"
+new_target "$target_dir"
+printf '# Legacy Project\n\nKeep this repo-specific overlay.\n' >"$target_dir/AGENTS.md"
 git -C "$target_dir" add AGENTS.md
-git -C "$target_dir" commit -m "seed legacy harness overlay" >/dev/null
-
-if ! run_out="$("$ONE_SHOT" \
-  --source-dir "$ROOT_DIR" \
-  --target "$target_dir" \
-  --home "$home_dir" \
-  --branch feature/test-one-shot-upgrade \
-  --skip-verify 2>&1)"; then
-  fail "one-shot source-dir run failed:
+git -C "$target_dir" commit -qm "seed legacy harness overlay"
+run_rc=0
+run_out="$("$ONE_SHOT" --source-dir "$ROOT_DIR" --target "$target_dir" --skip-verify 2>&1)" || run_rc=$?
+[[ "$run_rc" -eq 3 ]] || fail "legacy AGENTS.md run must end needs review (exit 3), got $run_rc:
 $run_out"
-fi
+need_contains "$run_out" "mode: install $version" "legacy run mode line"
+need_contains "$run_out" "RESULT: needs review" "legacy run result"
+need_contains "$(cat "$target_dir/AGENTS.md")" "Keep this repo-specific overlay." "legacy AGENTS.md overwritten"
+[[ -n "$(find "$target_dir" -maxdepth 1 -name 'AGENTS.md.generated.*' -print -quit)" ]] ||
+  fail "the run did not write a kit candidate beside AGENTS.md"
+[[ -f "$target_dir/docs/agent-configs/agent-bootstrap.lock.json" ]] || fail "the run did not generate the lock"
+[[ "$(git -C "$target_dir" branch --format='%(refname:short)')" == "main" ]] || fail "the run created or switched a branch"
+[[ -z "$(git -C "$target_dir" status --porcelain)" ]] ||
+  fail "git status must show no harness file: $(git -C "$target_dir" status --porcelain)"
 
-need_contains "$run_out" "harness-kit one-shot upgrade" "one-shot run banner"
-need_contains "$run_out" "safe default: candidates were not auto-applied" "one-shot safe default"
-need_contains "$run_out" "Review generated candidates before applying them" "one-shot review guidance"
-need_contains "$run_out" "retrofit: wrap custom sections" "one-shot retrofit hint for pre-overlay files"
-need_contains "$run_out" "workflow=full (no harness lock found)" "one-shot defaults pre-lock projects to full"
-
-[[ "$(git -C "$target_dir" branch --show-current)" == "feature/test-one-shot-upgrade" ]] ||
-  fail "one-shot did not switch target onto upgrade branch"
-[[ "$(sed -n '1p' "$home_dir/VERSION")" == "$version" ]] ||
-  fail "one-shot did not install expected harness version into home"
-[[ -f "$target_dir/docs/agent-configs/agent-bootstrap.lock.json" ]] ||
-  fail "one-shot did not generate bootstrap lock"
-[[ -n "$(find "$target_dir" -name 'AGENTS.md.generated.*' -print -quit)" ]] ||
-  fail "one-shot did not preserve existing AGENTS.md as a generated candidate"
-need_contains "$(cat "$target_dir/AGENTS.md")" "Keep this repo-specific overlay." \
-  "one-shot overwrote legacy AGENTS overlay"
-
-status_json="$(bash "$home_dir/bootstrap-multi-agent-project.sh" --target "$target_dir" --status --json)"
-need_contains "$status_json" "\"bundle_version\":\"$version\"" "one-shot status bundle version"
-need_contains "$status_json" '"generated_file_drift":"stale"' "one-shot status generated drift"
-
-# An installed infra project keeps its workflow, and the default upgrade branch
-# follows the feature/<slug> convention.
+# An installed infra project keeps --workflow infra; --branch creates the branch.
 infra_target_dir="$TMP_ROOT/infra-target"
-mkdir -p "$infra_target_dir"
-git -C "$infra_target_dir" init -b main >/dev/null
-git -C "$infra_target_dir" config user.email "one-shot@example.invalid"
-git -C "$infra_target_dir" config user.name "One Shot Test"
-printf '# Infra Project\n' > "$infra_target_dir/README.md"
-git -C "$infra_target_dir" add README.md
-git -C "$infra_target_dir" commit -m "seed infra target" >/dev/null
+new_target "$infra_target_dir"
 bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$infra_target_dir" --workflow infra >/dev/null
-if ! infra_out="$("$ONE_SHOT" \
-  --source-dir "$ROOT_DIR" \
-  --target "$infra_target_dir" \
-  --home "$TMP_ROOT/infra-home" \
-  --allow-dirty \
-  --skip-verify 2>&1)"; then
-  fail "one-shot infra run failed:
+infra_rc=0
+infra_out="$("$ENTRY" --source-dir "$ROOT_DIR" --target "$infra_target_dir" --skip-verify --branch feature/x 2>&1)" ||
+  infra_rc=$?
+[[ "$infra_rc" -eq 0 ]] || fail "infra reinstall failed ($infra_rc):
 $infra_out"
-fi
-need_contains "$infra_out" "workflow=infra (installed)" "one-shot reads the installed workflow"
-need_contains "$infra_out" "generating infra workflow candidates" "one-shot keeps an infra project infra"
-[[ "$(git -C "$infra_target_dir" branch --show-current)" == "feature/upgrade-harness-kit" ]] ||
-  fail "one-shot default upgrade branch must be feature/upgrade-harness-kit"
-python3 - "$infra_target_dir/docs/agent-configs/agent-bootstrap.lock.json" <<'PY' ||
+need_contains "$infra_out" "mode: reinstall $version" "infra run mode line"
+[[ "$(git -C "$infra_target_dir" branch --show-current)" == "feature/x" ]] || fail "--branch feature/x must create and switch to the branch"
+python3 -I -B - "$infra_target_dir/docs/agent-configs/agent-bootstrap.lock.json" <<'PY' ||
 import json, sys
 raise SystemExit(0 if json.load(open(sys.argv[1]))["templates"]["workflow_preset"] == "infra" else 1)
 PY
-  fail "one-shot must not convert an infra project to full"
+  fail "the one-shot must not convert an infra project to full"
 
+# Old flags are accepted with their notes (--dry-run is --plan, so nothing is
+# applied and --apply-retirements is ignored).
+old_home="$TMP_ROOT/old-home"
+old_cache="$TMP_ROOT/old-cache"
+old_rc=0
+old_out="$("$ONE_SHOT" --source-dir "$ROOT_DIR" --target "$infra_target_dir" --no-branch --allow-dirty \
+  --apply-candidates --apply-retirements --skip-verify --home "$old_home" --cache-dir "$old_cache" --dry-run 2>&1)" ||
+  old_rc=$?
+[[ "$old_rc" -eq 0 ]] || fail "old flags run failed ($old_rc):
+$old_out"
+for old_note in "--no-branch is now the default" "--allow-dirty is now the default" \
+  "--apply-candidates is replaced by --take-kit" "--apply-retirements is ignored with --plan" \
+  "--home is no longer used" "--cache-dir is no longer used" "--dry-run now means --plan"; do
+  need_contains "$old_out" "note: $old_note" "old flag note"
+done
+need_contains "$old_out" "RESULT: done (plan only, nothing applied)" "old --dry-run is a plan"
+[[ ! -e "$old_home" && ! -e "$old_cache" ]] || fail "--home and --cache-dir must not create anything"
+
+# The clone path: --repo <local repo tagged v$version> --ref v$version.
 source_repo="$TMP_ROOT/source-repo"
-cache_dir="$TMP_ROOT/cache"
-clone_home_dir="$TMP_ROOT/clone-home"
 clone_target_dir="$TMP_ROOT/clone-target"
-mkdir -p "$source_repo" "$clone_target_dir"
+mkdir -p "$source_repo"
 cp -R "$ROOT_DIR/agent-bootstrap" "$source_repo/agent-bootstrap"
-git -C "$source_repo" init -b main >/dev/null
+git -C "$source_repo" init -q
 git -C "$source_repo" config user.email "one-shot@example.invalid"
 git -C "$source_repo" config user.name "One Shot Test"
 git -C "$source_repo" add agent-bootstrap
-git -C "$source_repo" commit -m "fixture harness release" >/dev/null
+git -C "$source_repo" commit -qm "fixture harness release"
 git -C "$source_repo" tag "v$version"
-
-git -C "$clone_target_dir" init -b main >/dev/null
-git -C "$clone_target_dir" config user.email "one-shot@example.invalid"
-git -C "$clone_target_dir" config user.name "One Shot Test"
-printf '# Clone Path Project\n' > "$clone_target_dir/README.md"
-git -C "$clone_target_dir" add README.md
-git -C "$clone_target_dir" commit -m "seed clone path target" >/dev/null
-
-if ! clone_out="$("$ONE_SHOT" \
-  --repo "$source_repo" \
-  --ref "v$version" \
-  --cache-dir "$cache_dir" \
-  --target "$clone_target_dir" \
-  --home "$clone_home_dir" \
-  --branch feature/test-one-shot-clone \
-  --skip-verify 2>&1)"; then
-  fail "one-shot clone/cache run failed:
+new_target "$clone_target_dir"
+clone_rc=0
+clone_out="$("$ENTRY" --repo "$source_repo" --ref "v$version" --target "$clone_target_dir" --skip-verify 2>&1)" ||
+  clone_rc=$?
+[[ "$clone_rc" -eq 0 ]] || fail "clone path run failed ($clone_rc):
 $clone_out"
-fi
-
-need_contains "$clone_out" "cloning source cache" "one-shot clone path"
-need_contains "$clone_out" "safe default: candidates were not auto-applied" "one-shot clone safe default"
-[[ "$(git -C "$clone_target_dir" branch --show-current)" == "feature/test-one-shot-clone" ]] ||
-  fail "one-shot clone path did not switch target onto upgrade branch"
-[[ "$(sed -n '1p' "$clone_home_dir/VERSION")" == "$version" ]] ||
-  fail "one-shot clone path did not install expected harness version"
+need_contains "$clone_out" "mode: install $version" "clone path mode line"
+[[ "$(sed -n '1p' "$clone_target_dir/.harness-kit/v$version/agent-bootstrap/VERSION")" == "$version" ]] ||
+  fail "the clone path must keep the kit copy in .harness-kit/v$version/"
+[[ "$(git -C "$clone_target_dir" branch --show-current)" == "main" && -z "$(git -C "$clone_target_dir" status --porcelain)" ]] ||
+  fail "the clone path run must stay on main with a clean status"
 
 # Historical selector and archive-boundary negatives are disposable and fail
 # before migration generation, so corrupt or missing history cannot be skipped.

@@ -8,16 +8,23 @@ PASS=0
 FAIL=0
 WARN=0
 OUTPUT_JSON=false
+BUDGET_ONLY=false
 CHECKS=()
+CONTEXT_BUDGET_JSON=""
 
 usage() {
-  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json]"
+  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget]" \
+    "  --context-budget  run only the context budget check (core startup and on-demand)"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --json)
       OUTPUT_JSON=true
+      shift
+      ;;
+    --context-budget)
+      BUDGET_ONLY=true
       shift
       ;;
     -h|--help)
@@ -85,7 +92,11 @@ emit_json_report() {
     fi
     printf '{"status":"%s","label":"%s"}' "$(json_escape "$status")" "$(json_escape "$label")"
   done
-  printf ']}\n'
+  printf ']'
+  if [[ -n "$CONTEXT_BUDGET_JSON" ]]; then
+    printf ',"context_budget":%s' "$CONTEXT_BUDGET_JSON"
+  fi
+  printf '}\n'
 }
 
 need_file() {
@@ -217,6 +228,14 @@ walk(document)
 PY
 }
 
+token_estimate() {  # <words> <bytes>: the larger of bytes/4 and words*1.3
+  awk -v words="$1" -v chars="$2" 'BEGIN {
+    by_chars = chars / 4
+    by_words = words * 1.3
+    printf "%d", (by_chars > by_words ? by_chars : by_words)
+  }'
+}
+
 estimate_tokens_for_file() {
   local path="$1"
   local words="0"
@@ -225,57 +244,183 @@ estimate_tokens_for_file() {
     printf '0'
     return 0
   fi
-  read -r words chars < <(wc -w -c < "$path")
-  awk -v words="$words" -v chars="$chars" 'BEGIN {
-    by_chars = chars / 4
-    by_words = words * 1.3
-    printf "%d", (by_chars > by_words ? by_chars : by_words)
-  }'
+  read -r words chars < <(LC_ALL=C wc -w -c < "$path")
+  token_estimate "$words" "$chars"
 }
 
-sum_estimated_tokens() {
-  local total=0
-  local token_count=0
-  local relpath
-  for relpath in "$@"; do
-    token_count="$(estimate_tokens_for_file "$ROOT_DIR/$relpath")"
-    total=$((total + token_count))
-  done
-  printf '%s' "$total"
+# Project content is the user's: the user-owned files below, and in any other
+# counted file the body of each <!-- BEGIN USER: ... --> region and of each
+# detector-filled managed block (stacks, modules, verification commands,
+# warnings). The rest, marker lines included, is kit text.
+BUDGET_USER_OWNED_FILES=" docs/agent-configs/project-brief.md docs/agent-configs/project-agent-context.md "
+
+# Prints "<kit> <project>" token estimates for one counted file.
+split_file_estimate() {
+  local relpath="$1"
+  local path="$ROOT_DIR/$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0 0\n'
+    return 0
+  fi
+  if [[ "$BUDGET_USER_OWNED_FILES" == *" $relpath "* ]]; then
+    printf '0 %s\n' "$(estimate_tokens_for_file "$path")"
+    return 0
+  fi
+  LC_ALL=C awk '
+    function est(b, w) { b = b / 4; w = w * 1.3; return int(b > w ? b : w) }
+    /<!-- BEGIN (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 1; next }
+    /<!-- END (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 0; next }
+    user { pb += length($0) + 1; pw += NF; next }
+    { kb += length($0) + 1; kw += NF }
+    END { printf "%d %d\n", est(kb, kw), est(pb, pw) }
+  ' "$path"
 }
 
+# Prints "<kit><TAB><project><TAB><heading text>" for each ## or ### section of a
+# Markdown file; a section runs to the next such heading outside a code fence.
+markdown_section_estimates() {
+  [[ -f "$1" ]] || return 0
+  LC_ALL=C awk '
+    function est(b, w) { b = b / 4; w = w * 1.3; return int(b > w ? b : w) }
+    function flush() { if (name != "") printf "%d\t%d\t%s\n", est(kb, kw), est(pb, pw), name }
+    /^```/ { fence = !fence }
+    !fence && /^###? / { flush(); name = $0; sub(/^#+ /, "", name); kb = 0; kw = 0; pb = 0; pw = 0 }
+    name == "" { next }
+    /<!-- BEGIN (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 1; next }
+    /<!-- END (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 0; next }
+    user { pb += length($0) + 1; pw += NF; next }
+    { kb += length($0) + 1; kw += NF }
+    END { flush() }
+  ' "$1"
+}
+
+budget_status() {  # <estimate> <amber> <gate>
+  if [[ "$1" -gt "$3" ]]; then
+    printf 'over'
+  elif [[ "$1" -gt "$2" ]]; then
+    printf 'amber'
+  else
+    printf 'ok'
+  fi
+}
+
+# Prints the largest project parts as "path N, path N" (at most three).
+largest_project_parts() {
+  [[ $# -gt 0 ]] || return 0
+  printf '%s\n' "$@" | sort -t "$(printf '\t')" -k1,1nr | head -3 |
+    awk -F '\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $2, $1 }'
+}
+
+# The total (kit + project) only warns: project content is the user's to shorten.
+# Kit text above a gate is an error.
+report_budget() {  # <label> <total> <kit> <amber> <gate> <status> <kit status> [project part...]
+  local label="$1" total="$2" kit="$3" amber="$4" gate="$5" status="$6" kit_status="$7" parts
+  shift 7
+  case "$status" in
+    over)
+      parts="$(largest_project_parts "$@")"
+      warn "$label: $total tokens exceeds gate $gate${parts:+; project content is yours to shorten: $parts}"
+      ;;
+    amber) warn "$label: $total tokens (gate $gate, amber above $amber); measure after any edit to a counted file" ;;
+    *) ok "$label: $total tokens (gate $gate, amber above $amber)" ;;
+  esac
+  case "$kit_status" in
+    over) bad "kit $label: $kit tokens exceeds gate $gate" ;;
+    amber) warn "kit $label: $kit tokens (gate $gate, amber above $amber); measure after any edit to a counted file" ;;
+    *) ok "kit $label: $kit tokens (gate $gate, amber above $amber)" ;;
+  esac
+}
+
+budget_json() {  # <total> <kit> <project> <amber> <gate> <status> <kit status>
+  printf '"estimate":%s,"kit":%s,"project":%s,"amber":%s,"gate":%s,"status":"%s","kit_status":"%s"' "$@"
+}
+
+# Core startup: what every seat reads first. On demand: core plus the workflow
+# docs and, from the handoff reference, its State values section and the largest
+# other section (a seat reads those two, not the whole reference).
 check_context_budget() {
-  local core_tokens
-  local full_tokens
-  core_tokens="$(sum_estimated_tokens \
-    AGENTS.md \
-    docs/agent-configs/project-agent-context.md \
-    docs/agent-configs/project-brief.md)"
-  full_tokens="$(sum_estimated_tokens \
+  local reference="$ROOT_DIR/docs/agent-configs/agent-handoff-reference.md"
+  local relpath kit project label tab
+  local core_kit=0 core_project=0 od_kit=0 od_project=0
+  local state_kit=0 state_project=0 largest_kit=0 largest_project=0 largest_name=""
+  local section_kit section_project section_name sections_json=""
+  local core_total od_total core_status core_kit_status od_status od_kit_status
+  local core_parts=() od_parts=()
+  tab="$(printf '\t')"
+  for relpath in \
     AGENTS.md \
     docs/agent-configs/project-agent-context.md \
     docs/agent-configs/project-brief.md \
     docs/agent-configs/agent-mode-contracts.md \
     docs/agent-configs/agent-handoff-schema.md \
     docs/agent-configs/karpathy-llm-coding-agent-config.md \
-    docs/agent-configs/llm-council-agent-workflow.md \
-    docs/agent-configs/task-journal.md)"
-
-  if [[ "$core_tokens" -gt 4000 ]]; then
-    warn "core startup context estimate: ${core_tokens} tokens exceeds gate 4000; the 4000 gate is enforced by the harness test suite"
-  elif [[ "$core_tokens" -gt 3800 ]]; then
-    warn "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800); measure after any edit to a counted file"
-  else
-    ok "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800)"
+    docs/agent-configs/llm-council-agent-workflow.md; do
+    read -r kit project < <(split_file_estimate "$relpath")
+    label="$relpath"
+    if [[ "$BUDGET_USER_OWNED_FILES" != *" $relpath "* ]]; then
+      label="$relpath (USER and detected blocks)"
+    fi
+    case "$relpath" in
+      AGENTS.md|docs/agent-configs/project-agent-context.md|docs/agent-configs/project-brief.md)
+        core_kit=$((core_kit + kit))
+        core_project=$((core_project + project))
+        if [[ "$project" -gt 0 ]]; then
+          core_parts+=("$project$tab$label")
+        fi
+        ;;
+    esac
+    od_kit=$((od_kit + kit))
+    od_project=$((od_project + project))
+    if [[ "$project" -gt 0 ]]; then
+      od_parts+=("$project$tab$label")
+    fi
+  done
+  while IFS="$tab" read -r section_kit section_project section_name; do
+    if [[ "$section_name" == "State values" ]]; then
+      state_kit="$section_kit"
+      state_project="$section_project"
+    elif [[ $((section_kit + section_project)) -gt $((largest_kit + largest_project)) ]]; then
+      largest_kit="$section_kit"
+      largest_project="$section_project"
+      largest_name="$section_name"
+    fi
+  done < <(markdown_section_estimates "$reference")
+  od_kit=$((od_kit + state_kit + largest_kit))
+  od_project=$((od_project + state_project + largest_project))
+  if [[ $((state_project + largest_project)) -gt 0 ]]; then
+    od_parts+=("$((state_project + largest_project))${tab}docs/agent-configs/agent-handoff-reference.md (USER and detected blocks)")
   fi
+  core_total=$((core_kit + core_project))
+  od_total=$((od_kit + od_project))
+  core_status="$(budget_status "$core_total" 3800 4000)"
+  core_kit_status="$(budget_status "$core_kit" 3800 4000)"
+  od_status="$(budget_status "$od_total" 5900 6200)"
+  od_kit_status="$(budget_status "$od_kit" 5900 6200)"
 
-  if [[ "$full_tokens" -gt 6200 ]]; then
-    warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite"
-  elif [[ "$full_tokens" -gt 5900 ]]; then
-    warn "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900); measure after any edit to a counted file"
-  else
-    ok "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900)"
+  report_budget "core startup context estimate" "$core_total" "$core_kit" 3800 4000 \
+    "$core_status" "$core_kit_status" ${core_parts[@]+"${core_parts[@]}"}
+  report_budget "on-demand full workflow context estimate" "$od_total" "$od_kit" 5900 6200 \
+    "$od_status" "$od_kit_status" ${od_parts[@]+"${od_parts[@]}"}
+
+  if [[ $((state_kit + state_project)) -gt 0 ]]; then
+    sections_json='"State values"'
   fi
+  if [[ -n "$largest_name" ]]; then
+    sections_json="${sections_json:+$sections_json,}\"$(json_escape "$largest_name")\""
+  fi
+  CONTEXT_BUDGET_JSON="{\"core\":{$(budget_json "$core_total" "$core_kit" "$core_project" 3800 4000 "$core_status" "$core_kit_status")},\"on_demand\":{$(budget_json "$od_total" "$od_kit" "$od_project" 5900 6200 "$od_status" "$od_kit_status"),\"reference_sections\":[$sections_json]}}"
+}
+
+finish_report() {
+  if [[ "$OUTPUT_JSON" == "true" ]]; then
+    emit_json_report
+  else
+    printf '\nPass: %s  Warn: %s  Fail: %s\n' "$PASS" "$WARN" "$FAIL"
+  fi
+  if [[ "$FAIL" -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
 }
 
 validate_json_contracts() {
@@ -419,6 +564,9 @@ expected_schema_ids = {
     "agent-bootstrap-status-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
     "agent-bootstrap-verify-report-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-verify-report-v1.schema.json",
     "agent-guard-event-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-event-v2.schema.json",
+    "agent-guard-verification-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-verification-v2.schema.json",
+    "harness-project-knowledge-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-project-knowledge-v1.schema.json",
+    "harness-kit-run-report-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-kit-run-report-v1.schema.json",
 }
 for filename, schema_id in expected_schema_ids.items():
     schema = load_json(f"{schema_dir}/{filename}") or {}
@@ -531,7 +679,7 @@ if isinstance(doc, dict):
             "conventions",
             "source_evidence",
             "open_questions",
-        ),
+        ) + (("toolchain",) if "toolchain" in doc else ()),
         "project tech-stack contract",
     )
     require(doc.get("schema") == "agent-project-tech-stack/v1", "project tech-stack schema must be agent-project-tech-stack/v1")
@@ -563,9 +711,14 @@ if isinstance(doc, dict):
         for index, item in enumerate(verification):
             require(isinstance(item, dict), f"project tech-stack verification[{index}] must be an object")
             if isinstance(item, dict):
-                require_exact_keys(item, ("command", "purpose", "source"), f"project tech-stack verification[{index}]")
+                require_exact_keys(item, ("command", "purpose", "source") + (("scope",) if "scope" in item else ()), f"project tech-stack verification[{index}]")
+                if "scope" in item:
+                    require(item.get("scope") in ("fast", "full"), f"project tech-stack verification[{index}].scope must be fast or full")
                 for key in ("command", "purpose", "source"):
                     require(non_empty_string(item.get(key)), f"project tech-stack verification[{index}].{key} must be a non-empty string")
+    if "toolchain" in doc:
+        toolchain = doc.get("toolchain")
+        require(isinstance(toolchain, list) and all(non_empty_string(entry) for entry in toolchain), "project tech-stack toolchain must be an array of non-empty strings")
     evidence = doc.get("source_evidence")
     require(isinstance(evidence, list), "project tech-stack source_evidence must be an array")
     if isinstance(evidence, list):
@@ -592,6 +745,15 @@ if errors:
     sys.exit(1)
 PY
 }
+
+if [[ "$BUDGET_ONLY" == "true" ]]; then
+  if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
+    check_context_budget
+  else
+    ok "workflow preset is infra-only; no context budget applies"
+  fi
+  finish_report
+fi
 
 if [[ "$OUTPUT_JSON" != "true" ]]; then
   echo "Verifying generated agent infrastructure..."
@@ -679,7 +841,10 @@ if command -v python3 >/dev/null 2>&1; then
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1; then
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-verification-v2.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-project-knowledge-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-kit-run-report-v1.schema.json" >/dev/null 2>&1; then
     ok "schema JSON parses"
   else
     bad "schema JSON is invalid"
@@ -775,6 +940,7 @@ need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
 need_executable scripts/agent-guard.sh
 need_executable scripts/agent-local-only-check.sh
+need_executable scripts/harness-kit.sh
 need_executable scripts/detect-agent-tech-stack.sh
 need_executable scripts/verify-ai-deps.sh
 
@@ -784,6 +950,7 @@ need_bash_syntax scripts/agent-tech-stack-lib.sh
 need_bash_syntax scripts/agent-hook.sh
 need_bash_syntax scripts/agent-guard.sh
 need_bash_syntax scripts/agent-local-only-check.sh
+need_bash_syntax scripts/harness-kit.sh
 need_bash_syntax scripts/detect-agent-tech-stack.sh
 need_bash_syntax scripts/verify-ai-deps.sh
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
@@ -940,11 +1107,4 @@ else
   warn "portable bootstrap integration smoke test missing"
 fi
 
-if [[ "$OUTPUT_JSON" == "true" ]]; then
-  emit_json_report
-else
-  printf '\nPass: %s  Warn: %s  Fail: %s\n' "$PASS" "$WARN" "$FAIL"
-fi
-if [[ "$FAIL" -gt 0 ]]; then
-  exit 1
-fi
+finish_report

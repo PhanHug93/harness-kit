@@ -173,6 +173,10 @@ def pty_run(cmd_args, answers, timeout=20, reap_timeout=5.0, name="pty", signal_
                 if pending.rstrip().endswith(b">"):
                     prompts += 1
                     if signal_at_prompt is not None and prompts == signal_at_prompt:
+                        # Let the child reach its blocking read: a SIGINT that lands
+                        # between the prompt write and read() is only flagged, and
+                        # the read then waits for input until the timeout.
+                        time.sleep(0.5)
                         os.killpg(proc.pid, signal.SIGINT)
                         pending = b""
                         continue
@@ -278,9 +282,7 @@ rc, o, e = run("init")
 check("L7 init: default models + planning_reasoning_effort=max -> migrated (max kept)", rc == 0 and "created from legacy" in o and read_seats()["seats"]["gate"]["occupant"]["effort"] == "max")
 # incomplete / invalid legacy -> refused, nothing written
 for label, prof in (("missing planning_model", {"reasoning_effort": "high"}),
-                    ("unsupported effort turbo", dict(LEGACY_CUSTOM["profiles"]["stable"], reasoning_effort="turbo")),
-                    ("empty fallback", dict(LEGACY_CUSTOM["profiles"]["stable"], coding_fallback_model="")),
-                    ("route effort with LF", dict(LEGACY_CUSTOM["profiles"]["stable"], planning_reasoning_effort="high\n"))):
+                    ("empty fallback", dict(LEGACY_CUSTOM["profiles"]["stable"], coding_fallback_model=""))):
     if os.path.exists(SEATS):
         os.remove(SEATS)
     write_json(LEGACY, {"schema": "agent-model-profiles/v1", "default_profile": "stable", "profiles": {"stable": prof}})
@@ -288,6 +290,13 @@ for label, prof in (("missing planning_model", {"reasoning_effort": "high"}),
     rc2, o2, e2 = run("suggest")
     rc3, o3, e3 = run("wizard", "--yes")
     check(f"L8 legacy {label}: init/suggest/wizard --yes -> rc 1, nothing written, no traceback", rc == 1 and rc2 == 1 and rc3 == 1 and not os.path.exists(SEATS) and all(no_traceback(x) for x in (e, e2, e3)), (e or e2 or e3).strip().splitlines()[-1] if (e or e2 or e3) else "")
+# an effort outside the old launcher set is kept in the note; the seat default applies (F4)
+for label, key, bad in (("turbo", "reasoning_effort", "turbo"), ("route effort with LF", "planning_reasoning_effort", "high\n")):
+    if os.path.exists(SEATS):
+        os.remove(SEATS)
+    write_json(LEGACY, {"schema": "agent-model-profiles/v1", "default_profile": "stable", "profiles": {"stable": dict(LEGACY_CUSTOM["profiles"]["stable"], **{key: bad})}})
+    rc, o, e = run("init")
+    check(f"L8b legacy effort {label}: init succeeds, note names the effort, seats.json valid", rc == 0 and repr(bad) in e and run("validate")[0] == 0 and no_traceback(e), e.strip()[-200:])
 # A malformed legacy selector must fail as a configuration error rather than
 # reaching dict.get with an unhashable key.  Each read/init path is checked and
 # none may create seats.json.
@@ -345,14 +354,16 @@ check("L19 init under a PTY never prompts", rc == 0 and prompts == 0 and ">" not
 
 # ---------- G: grammar / transport (R2/B2) ----------
 run("reset")
-lines = run("resolve", "planning")[1].split("\n")[:-1]
+lines = run("resolve", "gate")[1].split("\n")[:-1]
 check("G1 resolve: 8 lines, empty fields preserved when fallback absent", True and len(lines) == 8, str(lines))
-run("set", "@gate", "--no-fallback")
 lines = run("resolve", "planning")[1].split("\n")[:-1]
+check("G1b route alias planning resolves @spec (not @gate)", len(lines) == 8 and lines[0] == "spec" and lines[1] == "@spec", str(lines))
+run("set", "@gate", "--no-fallback")
+lines = run("resolve", "gate")[1].split("\n")[:-1]
 check("G2 resolve: no fallback -> 8 lines with empty fallback fields", len(lines) == 8 and lines[6] == "" and lines[7] == "", str(lines))
 reader = r'''
 i=0; n=0
-while IFS= read -r line; do i=$((i+1)); n=$i; eval "f$i=\$line"; done < <("$1" "$2" resolve planning)
+while IFS= read -r line; do i=$((i+1)); n=$i; eval "f$i=\$line"; done < <("$1" "$2" resolve gate)
 printf 'count=%s model=[%s] fallback=[%s] fbeff=[%s]\n' "$n" "$f5" "$f7" "$f8"
 '''
 p = subprocess.run([BASH, "-c", reader, "reader", BASH, SCRIPT], cwd=TARGET, capture_output=True, text=True)
@@ -422,7 +433,7 @@ check("C6 conflict: unknown seat -> rc 1", run("conflict", "nope", "x")[0] == 1)
 run("reset")
 run("set", "@build", "--model", "gpt-6-astra")
 rc, o, e = run("validate")
-check("C7 shared primary model -> warning names gate_coding", rc == 0 and "gate_coding" in e and "@gate and @build share" in e)
+check("C7 shared primary model -> warning is a fact for @audit, never gate_coding", rc == 0 and "fact for @audit" in e and "gate_coding" not in e and "@gate and @build share" in e)
 run("reset")
 
 # ---------- S: set option handling (F4/F5) ----------
@@ -447,9 +458,11 @@ run("reset")
 rc, o, e = run("set", "@gate", "--host", "claude")
 check("S2 set host claude drops model fields", rc == 0 and read_seats()["seats"]["gate"]["occupant"] == {"host": "claude"})
 rc, o, e = run("set", "planning", "--host", "codex", "--model", "gpt-5.6-luna")
-check("S3 set via route alias, model without effort -> catalog default", rc == 0 and read_seats()["seats"]["gate"]["occupant"]["effort"] == "xhigh")
-mutate(lambda d: d["seats"]["gate"]["occupant"].__setitem__("effort", "turbo"))
-rc, o, e = run("set", "gate", "--effort", "ultra", "--model", "gpt-6-astra")
+check("S3 set via route alias planning -> @spec, model without effort -> catalog default",
+      rc == 0 and read_seats()["seats"]["spec"]["occupant"] == {"host": "codex", "model": "gpt-5.6-luna", "effort": "xhigh"}
+      and read_seats()["seats"]["gate"]["occupant"] == {"host": "claude"})
+mutate(lambda d: d["seats"]["spec"]["occupant"].__setitem__("effort", "turbo"))
+rc, o, e = run("set", "spec", "--effort", "ultra", "--model", "gpt-6-astra")
 check("S4 set repairs an invalid (structurally sound) file", rc == 0 and run("validate")[0] == 0, e.strip())
 run("reset")
 

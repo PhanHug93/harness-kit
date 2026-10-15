@@ -1,5 +1,82 @@
 # Changelog
 
+## Unreleased
+
+- One command installs, reinstalls or updates a project. The first time, run
+  `curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v<ver>/agent-bootstrap/harness-kit-one-shot.sh | bash`
+  (`| bash -s -- --to latest` for the newest release); after that,
+  `scripts/harness-kit.sh` reinstalls the installed version and
+  `scripts/harness-kit.sh --to latest` updates. The entry fetches the release
+  into `<project>/.harness-kit/v<ver>/` (or copies it with `--source-dir DIR`)
+  and runs that version's `harness-kit-run.sh`. A downgrade is refused with a
+  `--rollback <STAMP>` suggestion. `harness-kit-one-shot-upgrade.sh` stays as
+  an identical copy for existing links.
+- Each run goes through preflight, stage, apply, migrate, verify and report,
+  and prints a summary of at most 12 lines with the exact next command for each
+  open item. Exit codes: 0 done, 3 needs review, 1 refused or failed, 2 usage
+  error. The report is `.tools/agent-state/upgrades/<STAMP>/report.json`
+  (`harness-kit-run-report/v1`), and what the kit knows about the project is
+  kept in `.tools/agent-state/project-knowledge.json` (`--knowledge` prints
+  it).
+- New options: `--plan`, `--reset` (the kit wins for kit-owned files; the
+  brief, the tech-stack contract, `seats.json` and USER overlays stay),
+  `--rollback STAMP`, `--knowledge`, `--workflow infra|full`,
+  `--ignore-target exclude|gitignore`, `--source-dir DIR`, `--take-kit PATH`,
+  `--resolved PATH [--reason TEXT]`, `--keep-local PATH`, `--accept ID`,
+  `--decline ID`, `--branch feature/x|bugfix/x`, `--project-verify`, `--json`
+  and `--skip-verify`. Old options keep working with a note: `--no-branch` and
+  `--allow-dirty` are now the defaults, `--dry-run` means `--plan`,
+  `--apply-retirements` accepts the retire-files decision, and
+  `--apply-candidates` points to `--take-kit` and `--resolved`.
+- No branch is created or switched unless `--branch` is given; the one-shot
+  upgrader used to create `feature/upgrade-harness-kit`.
+- Harness files never show in `git status`. The local-only ignore block now
+  goes to `.git/info/exclude` by default, and `/.harness-kit/` and `/.tools/`
+  are excluded before anything is written. `.gitignore` is used only with
+  `--ignore-target gitignore`, or when a project already has the block there;
+  such projects get the `ignore-block-to-exclude` decision.
+- Local edits are never overwritten. Every file is classed as create,
+  unchanged, update, kept, merge, conflict, unsafe or pinned; a conflict keeps
+  the local file and writes the kit's next to it.
+- Migrations live in `agent-bootstrap/migrations/`. Unreleased ones are named
+  `next-<slug>.sh`, and `scripts/release.sh <version>` renames them to
+  `<version>-<slug>.sh`. An `auto` migration runs by itself; a `decision`
+  needs `--accept`, and `--decline` is remembered until the facts change. This
+  release adds three decisions: `next-untrack-local-records` (untrack
+  local-only harness files; the files stay on disk),
+  `next-ignore-block-to-exclude` (move the ignore block from `.gitignore` to
+  `.git/info/exclude`) and `next-retire-files` (remove retired harness files,
+  with backups).
+- Verification evidence: `agent-guard.sh pre-final` takes its commands from
+  `verification[]` in the tech-stack contract first, and detector commands
+  only when that list is empty. When no command could run, the result is
+  `unverified`, which is never a pass: exit 4, strict mode fails and advisory
+  mode warns. Strict `pre-final` (the default) now fails projects without a
+  runnable verification command; fill `verification[]` in
+  `docs/superpowers/specs/project-tech-stack.json`. The report schema is
+  `agent-guard-verification/v2`.
+- New `agent-guard.sh baseline` checks the current commit before the first
+  `@gate` round. Its result is cached by commit, verification commands,
+  toolchain fingerprint and scope.
+- The Claude Code Stop hook verifies only when the session changed files and
+  writes its own report, so it never overwrites `@build`'s evidence. The Codex
+  `@build` seat runs pre-final once when its session ends. A later `@gate`
+  round reads its previous verdict and the specification sections changed
+  since then, not a git diff.
+- Seats: `planning` mode opens `@spec`, and `@gate` has its own lock. The
+  launcher never writes an authorization; a model overlap is reported as
+  `model_overlap=`. All 31 findings of the seat process audit are fixed, so
+  the docs and scripts agree. `agent-seats.sh validate` now rejects unknown
+  keys and seats. Generated `AGENTS.md` asks every seat for short output in
+  plain words, with a concrete example instead of jargon.
+- Context budget: only the kit's own text fails the gate; project content (the
+  brief, the project context, USER blocks and detected blocks) only warns. The
+  kit's on-demand text is trimmed from 6,793 to 5,210 estimated tokens.
+- Generator: plain `--apply-candidates` now keeps files with local edits
+  unless they are named with `--only`. `--keep PATH` (repeatable) leaves a
+  file untouched, and `--ignore-target exclude|gitignore` picks where the
+  ignore block goes.
+
 ## 2026.10.13.2 — Fast upgrades on large projects, reliable guard checks, local-only development records
 
 - Large Android checkouts upgrade in seconds again. Previews (`--status`,

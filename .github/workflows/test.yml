@@ -96,7 +96,15 @@ jobs:
               scripts/test-onboarding-fixtures.sh \
               scripts/test-one-shot-upgrade.sh \
               agent-bootstrap/bootstrap-multi-agent-project.sh \
+              agent-bootstrap/harness-kit-one-shot.sh \
               agent-bootstrap/harness-kit-one-shot-upgrade.sh \
+              agent-bootstrap/harness-kit-run.sh \
+              agent-bootstrap/lib/migrations.sh \
+              scripts/test-verification-evidence.sh \
+              scripts/test-harness-kit-entry.sh \
+              scripts/test-harness-migrations.sh \
+              scripts/test-harness-kit-staging.sh \
+              scripts/test-harness-kit-oneshot.sh \
               agent-bootstrap/agent-bootstrap-update.sh \
               agent-bootstrap/install-agent-bootstrap-home.sh \
               agent-bootstrap/install-rtk.sh \
@@ -112,6 +120,7 @@ jobs:
               agent-bootstrap/lib/writers-runtime.sh \
               agent-bootstrap/lib/writers-docs.sh \
               agent-bootstrap/lib/onboarding.sh
+            shellcheck --shell=bash --exclude=SC1090,SC1091,SC2034,SC2154 agent-bootstrap/migrations/*.sh
           else
             echo "shellcheck not installed; skipping optional shell lint"
           fi

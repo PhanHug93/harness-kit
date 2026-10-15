@@ -136,7 +136,7 @@ class WorkspaceGuardTests(unittest.TestCase):
         self.assertIn('claude-session-start', json.dumps(settings['hooks']['SessionStart']))
         subprocess.run(['git', '-C', str(self.android), 'add', '-A'], check=True)
         subprocess.run(['git', '-C', str(self.android), '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
-                        'commit', '-qm', 'generated'], check=True)
+                        'commit', '--allow-empty', '-qm', 'generated'], check=True)
 
         def env_for(context=None, **extra):
             env = clean_env(**extra)
@@ -176,10 +176,18 @@ class WorkspaceGuardTests(unittest.TestCase):
                          run(['bash', guard, 'pre-final'], ok_env).returncode)
         self.assertEqual(run([hook, 'codex-preflight'], bad_env).returncode,
                          run([hook, 'codex-preflight'], ok_env).returncode)
+        # close-out verifies only changes after the session snapshot, so each
+        # environment starts its own session before the change.
+        stops = {}
+        for name, env in (('bad', bad_env), ('ok', ok_env)):
+            stops[name] = json.dumps({'session_id': 'test-session-' + name, 'stop_hook_active': False})
+            self.assertEqual(run([hook, 'claude-session-start'], env, stdin=stops[name]).returncode, 0)
         (self.android / 'scratch.txt').write_text('dirty\n')
-        stop = json.dumps({'session_id': 'test-session', 'stop_hook_active': False})
-        self.assertEqual(run([hook, 'close-out'], bad_env, stdin=stop).returncode,
-                         run([hook, 'close-out'], ok_env, stdin=stop).returncode)
+        closed = {name: run([hook, 'close-out'], env, stdin=stops[name])
+                  for name, env in (('bad', bad_env), ('ok', ok_env))}
+        for result in closed.values():
+            self.assertNotIn('close-out skipped', result.stderr)
+        self.assertEqual(closed['bad'].returncode, closed['ok'].returncode)
         (self.android / 'scratch.txt').unlink()
         bash_input = json.dumps({'session_id': 'claude-1', 'tool_name': 'Bash', 'tool_input': {'command': 'true'}})
         edit_input = json.dumps({'session_id': 'claude-1', 'tool_name': 'Edit',

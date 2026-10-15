@@ -29,9 +29,11 @@ usage() {
     "  scripts/agent-seats.sh roster-block               # print the roster block text (for generators)" \
     "  scripts/agent-seats.sh resolve <seat|route>       # 8 lines for launchers: seat tag phase host model effort fallback_model fallback_effort" \
     "  scripts/agent-seats.sh model-info <model>         # 3 lines: host default_effort efforts(space-separated)" \
-    "  scripts/agent-seats.sh conflict <seat|route> <effective-model>   # prints 1 when @build launches with the primary model of @gate or @verify" \
+    "  scripts/agent-seats.sh model-overlap [--quiet] <seat|route> <model>   # comma-separated other seats (build<->gate, build<->verify, verify<->build) whose codex primary model is <model>; empty when none. A fact for @audit, never an authorization; --quiet drops the stderr note and warnings (the launcher warns itself)" \
+    "  scripts/agent-seats.sh roster-check <AGENTS.md>   # exit 1 'roster drift' when the roster block differs from render output" \
+    "  scripts/agent-seats.sh conflict <seat|route> <effective-model>   # deprecated: prints 1 when model-overlap for @build is non-empty" \
     "" \
-    "Seats: @spec @gate @build @verify @audit @owner. Route aliases: planning=@gate coding=@build reviewing=@verify." \
+    "Seats: @spec @gate @build @verify @audit @owner. Route aliases: planning=@spec coding=@build reviewing=@verify." \
     "Exit codes: 0 ok; 1 invalid input, refused (lock busy, end of input, unwritable) or usage — nothing written;" \
     "            2 seats.json written but the roster was not rendered; 3 roster markers unbalanced (nothing written);" \
     "            130 interrupted (if 'seats.json written' was printed, run render)."
@@ -58,11 +60,19 @@ ROSTER_BEGIN = "<!-- BEGIN MANAGED: multi-agent-bootstrap:seat-roster -->"
 ROSTER_END = "<!-- END MANAGED: multi-agent-bootstrap:seat-roster -->"
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
 args = sys.argv[2:]
+# model-overlap --quiet: the caller (the launcher) prints its own warning.
+QUIET = cmd == "model-overlap" and "--quiet" in args
+if QUIET:
+    args = [a for a in args if a != "--quiet"]
 
 SCHEMA = "agent-seats/v1"
 HOSTS = ("claude", "codex", "gemini", "cursor", "windsurf", "human")
 LAUNCHABLE = ("codex",)
-ROUTE_ALIASES = {"planning": "gate", "coding": "build", "reviewing": "verify"}
+# User-facing route names (resolve, set, model-overlap): planning opens @spec.
+ROUTE_ALIASES = {"planning": "spec", "coding": "build", "reviewing": "verify"}
+# Legacy model-profiles.json route fields: the old planning_* model was the
+# pre-coding reviewer, so migration seeds @gate from it.
+LEGACY_ROUTE_SEATS = {"planning": "gate", "coding": "build", "reviewing": "verify"}
 SEAT_ORDER = ["spec", "gate", "build", "verify", "audit", "owner"]
 SEAT_META = {
     "spec": {"tag": "@spec", "phase": "analysis", "duty": "analysis and specification"},
@@ -250,8 +260,17 @@ def migrate_legacy(doc):
         if not isinstance(value, str) or not value:
             raise SeatsError(f"legacy model-profiles.json: profile '{legacy.get('default_profile')}' is missing required field '{key}'; fix it, or delete the file and run scripts/agent-seats.sh reset")
     base_effort = profile["reasoning_effort"]
-    if base_effort not in LEGACY_EFFORTS:
-        raise SeatsError(f"legacy model-profiles.json: unsupported reasoning_effort '{base_effort}' (old launcher set: {', '.join(LEGACY_EFFORTS)})")
+    seat_defaults = {}
+
+    def allowed_effort(raw, label, seat, fallback=False):
+        """Efforts outside the old launcher set are kept in the diagnostic note
+        only; the seat default applies instead of failing the migration."""
+        if raw in LEGACY_EFFORTS:
+            return raw
+        default = DEFAULT_SEATS[seat]
+        value = default.get("fallback_effort" if fallback else "effort") or default.get("effort")
+        notes.append(f"legacy {label} effort {raw!r} is outside {', '.join(LEGACY_EFFORTS)}; the seat default '{value}' applies")
+        return value
     for key in LEGACY_ROUTE_KEYS:
         if not is_model(profile[key]):
             raise SeatsError(f"legacy model-profiles.json: invalid model id for '{key}'")
@@ -274,13 +293,13 @@ def migrate_legacy(doc):
             spec["efforts"].append(effort)
             notes.append(f"catalog: {model} gains effort '{effort}' declared by the legacy profile")
 
-    for route, seat in ROUTE_ALIASES.items():
+    for route, seat in LEGACY_ROUTE_SEATS.items():
         model = profile[f"{route}_model"]
-        effort = profile.get(f"{route}_reasoning_effort", base_effort)
+        effort = allowed_effort(profile.get(f"{route}_reasoning_effort", base_effort), f"{route} reasoning_effort", seat)
         ensure(model, effort)
         occ = {"host": "codex", "model": model, "effort": effort}
         fallback = profile[f"{route}_fallback_model"]
-        fallback_effort = profile.get(f"{route}_fallback_reasoning_effort", base_effort)
+        fallback_effort = allowed_effort(profile.get(f"{route}_fallback_reasoning_effort", base_effort), f"{route} fallback reasoning_effort", seat, fallback=True)
         ensure(fallback, fallback_effort)
         occ["fallback_model"] = fallback
         occ["fallback_effort"] = fallback_effort
@@ -317,7 +336,14 @@ def validate(doc):
     errors, warnings = [], []
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         return [f"schema must be {SCHEMA}"], warnings
+    for key in doc:
+        if key not in ("schema", "catalog", "seats"):
+            errors.append(f"unknown top-level key {key!r} (allowed: schema, catalog, seats)")
     catalog = doc.get("catalog")
+    if isinstance(catalog, dict):
+        for key in catalog:
+            if key != "models":
+                errors.append(f"unknown catalog key {key!r} (allowed: models)")
     models = catalog.get("models") if isinstance(catalog, dict) else None
     if not isinstance(models, dict) or not models:
         errors.append("catalog.models must be a non-empty object")
@@ -329,6 +355,9 @@ def validate(doc):
         if not isinstance(spec, dict) or spec.get("host") not in HOSTS:
             errors.append(f"catalog model {mid}: host must be one of {', '.join(HOSTS)}")
             continue
+        for key in spec:
+            if key not in ("host", "efforts", "default_effort"):
+                errors.append(f"catalog model {mid}: unknown key {key!r} (allowed: host, efforts, default_effort)")
         efforts = spec.get("efforts")
         if not isinstance(efforts, list) or not efforts or not all(is_effort(e) for e in efforts):
             errors.append(f"catalog model {mid}: efforts must be a non-empty array matching [a-z][a-z0-9_-]*")
@@ -339,18 +368,27 @@ def validate(doc):
     seats = doc.get("seats")
     if not isinstance(seats, dict):
         return errors + ["seats must be an object"], warnings
+    for seat in seats:
+        if seat not in SEAT_ORDER:
+            errors.append(f"unknown seat {seat!r} (allowed: {', '.join(SEAT_ORDER)})")
     for seat in SEAT_ORDER:
         entry = seats.get(seat)
         if not isinstance(entry, dict):
             errors.append(f"seat {seat}: missing")
             continue
         meta = SEAT_META[seat]
+        for key in entry:
+            if key not in ("tag", "phase", "duty", "occupant"):
+                errors.append(f"seat {seat}: unknown key {key!r} (allowed: tag, phase, duty, occupant)")
         if entry.get("tag") != meta["tag"] or entry.get("phase") != meta["phase"]:
             errors.append(f"seat {seat}: tag/phase are protocol constants ({meta['tag']}, {meta['phase']})")
         occ = entry.get("occupant")
         if not isinstance(occ, dict):
             errors.append(f"seat {seat}: occupant must be an object")
             continue
+        for key in occ:
+            if key != "host" and key not in OCCUPANT_KEYS:
+                errors.append(f"seat {seat}: unknown occupant key {key!r} (allowed: host, {', '.join(OCCUPANT_KEYS)})")
         host = occ.get("host")
         if host not in HOSTS:
             errors.append(f"seat {seat}: occupant.host must be one of {', '.join(HOSTS)}")
@@ -399,8 +437,34 @@ def validate(doc):
             # Primary models only: fallbacks are capacity substitutes, not the
             # review authority, so a shared fallback is not a conflict.
             if oa.get("model") and oa.get("model") == ob.get("model"):
-                warnings.append(f"{SEAT_META[reviewer]['tag']} and @build share the primary model {oa.get('model')}: review independence is by session only; such @build launches carry policy_exception=gate_coding")
+                warnings.append(f"{SEAT_META[reviewer]['tag']} and @build share the primary model {oa.get('model')}: review independence is by session only; a fact for @audit, not an authorization")
     return errors, warnings
+
+
+OVERLAP_PAIRS = {"build": ("gate", "verify"), "verify": ("build",)}
+
+
+def model_overlap(doc, seat, model):
+    """Other seats whose codex occupant uses `model` as primary model (facts for @audit)."""
+    found = []
+    for other in OVERLAP_PAIRS.get(seat, ()):
+        occ = doc["seats"][other]["occupant"]
+        if occ.get("host") == "codex" and occ.get("model") == model:
+            found.append(other)
+    return found
+
+
+def roster_check(path):
+    p = pathlib.Path(path)
+    try:
+        data = p.read_bytes().replace(b"\r\n", b"\n")
+    except OSError as exc:
+        raise SeatsError(f"cannot read {path}: {exc}")
+    begin, end = ROSTER_BEGIN.encode("utf-8"), ROSTER_END.encode("utf-8")
+    nb, ne = data.count(begin), data.count(end)
+    if nb != 1 or ne != 1 or data.index(begin) > data.index(end):
+        raise SeatsError(f"seat roster block markers in {path} are missing or unbalanced (BEGIN={nb}, END={ne}); run scripts/agent-seats.sh render")
+    return data[data.index(begin):data.index(end) + len(end)]
 
 
 def occupant_text(occ):
@@ -651,12 +715,16 @@ def validate_command_args():
         if len(args) != 1 or not args[0]:
             raise SeatsError("model-info requires exactly one model id (see --help)")
         return
-    if cmd == "conflict":
+    if cmd == "roster-check":
+        if len(args) != 1 or not args[0]:
+            raise SeatsError("roster-check requires exactly one AGENTS.md path (see --help)")
+        return
+    if cmd in ("conflict", "model-overlap"):
         if len(args) != 2:
-            raise SeatsError("conflict requires exactly a seat and an effective model (see --help)")
+            raise SeatsError(f"{cmd} requires exactly a seat and a model (see --help)")
         seat_from_arg(args[0])
         if not is_model(args[1]):
-            raise SeatsError("conflict effective model must match the model grammar (see --help)")
+            raise SeatsError(f"{cmd} model must match the model grammar (see --help)")
         return
 
 
@@ -704,7 +772,7 @@ def interactive_wizard(doc):
             new_host = host_map[choice]
             if new_host == "codex":
                 if not codex_models:
-                    raise SeatsError("the catalog has no codex model; add one to seats.json catalog first. Nothing written")
+                    raise SeatsError("the catalog has no codex model; add one to catalog.models in docs/agent-configs/seats.json (no command edits the catalog). Nothing written")
                 default = DEFAULT_SEATS[seat]
                 if default.get("host") == "codex" and default["model"] in models and default.get("fallback_model", default["model"]) in models:
                     occ = clone(default)
@@ -900,7 +968,7 @@ def main():
             raise SeatsError("seats.json is structurally invalid; run validate")
         spec = model_spec(doc.get("catalog", {}).get("models"), args[0])
         if spec is None:
-            raise SeatsError(f"model {args[0]} is not in catalog.models; add it with scripts/agent-seats.sh (edit seats.json catalog) before launching")
+            raise SeatsError(f"model {args[0]} is not in catalog.models; add it to catalog.models in docs/agent-configs/seats.json (no command edits the catalog)")
         errors, _ = validate(doc)
         if errors:
             report(errors, [])
@@ -909,27 +977,33 @@ def main():
         out(spec.get("default_effort", ""))
         out(" ".join(spec.get("efforts") or []))
         return 0
-    if cmd == "conflict":
+    if cmd == "roster-check":
+        doc = load_current()
+        errors, _ = validate(doc)
+        if errors:
+            report(errors, [])
+            raise SeatsError("invalid assignment")
+        found = roster_check(args[0])
+        if found != render_block_bytes(doc, "\n"):
+            raise SeatsError("roster drift: run scripts/agent-seats.sh render")
+        out("agent-seats: seat roster current")
+        return 0
+    if cmd in ("conflict", "model-overlap"):
         seat = seat_from_arg(args[0])
         model = args[1]
         doc = load_current()
         errors, warnings = validate(doc)
-        report(errors, warnings)
+        report(errors, [] if QUIET else warnings)
         if errors:
             raise SeatsError("seats.json is invalid; run validate")
-        if seat != "build":
-            out("0")
+        overlap = model_overlap(doc, seat, model)
+        if overlap and not QUIET:
+            note(f"@{seat} effective model {model} is also the primary model of {', '.join('@' + o for o in overlap)}: a fact for @audit, not an authorization")
+        if cmd == "model-overlap":
+            if overlap:
+                out(",".join(overlap))
             return 0
-        reviewer_models = set()
-        for reviewer in ("gate", "verify"):
-            occ = doc["seats"][reviewer]["occupant"]
-            if occ.get("host") == "codex" and occ.get("model"):
-                reviewer_models.add(occ["model"])
-        if model in reviewer_models:
-            note(f"@build effective model {model} is the primary model of @gate or @verify; the launch must carry policy_exception=gate_coding")
-            out("1")
-        else:
-            out("0")
+        out("1" if seat == "build" and overlap else "0")
         return 0
     if cmd == "set":
         if not args:
@@ -994,7 +1068,7 @@ PY
 
 cmd="${1:-}"
 case "$cmd" in
-  show|validate|suggest|wizard|set|init|reset|render|roster-block|resolve|model-info|conflict)
+  show|validate|suggest|wizard|set|init|reset|render|roster-block|resolve|model-info|conflict|model-overlap|roster-check)
     python3 -c 'import sys' >/dev/null 2>&1 || fail "python3 is required (a working interpreter, not the macOS command-line-tools stub)"
     shift
     SEATS_FILE="$SEATS_FILE" LEGACY_PROFILES="$LEGACY_PROFILES" AGENTS_MD="$AGENTS_MD" \

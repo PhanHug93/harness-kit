@@ -4,8 +4,10 @@
 # Do not execute directly. No `set` here; inherits the entrypoint's shell options.
 #
 # Shared-global contract (owned by the entrypoint, sourced into one shell; every
-# lib may read these): TARGET_DIR, WORKFLOW_PRESET, DRY_RUN, BACKUP, FORCE,
-# CANDIDATE_ON_CONFLICT, STAMP, LAST_WRITTEN_FILE, and the detection arrays
+# lib may read these): TARGET_DIR, DETECT_ROOT (the tree detection reads; the
+# real project when a preview generates into staging), WORKFLOW_PRESET, DRY_RUN,
+# BACKUP, FORCE, CANDIDATE_ON_CONFLICT, STAMP, LAST_WRITTEN_FILE, KEEP_PATHS
+# (--keep pins, one target-relative path per line), and the detection arrays
 # TECH_STACKS, MODULES, VERIFY_COMMANDS, WARNINGS.
 
 log() {
@@ -239,14 +241,21 @@ backup_existing() {
   fi
   local dir
   dir="$(dirname "$path")"
+  # Calls sharing one stamp (AGENT_BOOTSTRAP_STAMP) keep the first pre-image.
+  bootstrap_entry_exists "$path.bak.$STAMP" && return 0
   if [[ -w "$dir" ]] && cp -Pp "$path" "$path.bak.$STAMP" 2>/dev/null; then
     return 0
   fi
   # Read-only target dir (e.g. sandboxed .codex/.agents): back up to a writable
   # side location instead of failing the whole run.
-  local fallback="${AGENT_STATE_DIR:-$TARGET_DIR/.tools/agent-state}/backups"
-  if mkdir -p "$fallback" 2>/dev/null && cp -Pp "$path" "$fallback/$(basename "$path").bak.$STAMP" 2>/dev/null; then
-    log "backup (fallback): $fallback/$(basename "$path").bak.$STAMP"
+  # Keyed by the target-relative path, so files sharing a basename under one
+  # stamp each keep their own backup.
+  local fallback="${AGENT_STATE_DIR:-$TARGET_DIR/.tools/agent-state}/backups" rel
+  rel="$(bootstrap_relpath_for "$path")"
+  case "$rel" in /* | ../* | */../*) rel="_outside/$(basename "$path")" ;; esac
+  bootstrap_entry_exists "$fallback/$rel.bak.$STAMP" && return 0
+  if mkdir -p "$(dirname "$fallback/$rel")" 2>/dev/null && cp -Pp "$path" "$fallback/$rel.bak.$STAMP" 2>/dev/null; then
+    log "backup (fallback): $fallback/$rel.bak.$STAMP"
     return 0
   fi
   log "warn: could not back up $path (read-only); proceeding"
@@ -323,18 +332,24 @@ bootstrap_user_owned_file_is_filled() {
 
 write_user_owned_file() {
   local path="$1"
+  if harness_path_is_pinned "$path"; then
+    write_file "$path"
+    return
+  fi
   if bootstrap_entry_exists "$path" && ! bootstrap_existing_file_is_eligible "$path"; then
     if is_bootstrap_user_owned_relpath "$(bootstrap_relpath_for "$path")"; then
       log "warn: preserving unsafe user-owned file: $(bootstrap_path_diagnostic "$path")"
-      harness_plan_log preserved "$path"
-      cat >/dev/null
+      harness_skip_input preserved "$path"
+      # A dry-run inventories preserved files too: previews stage them.
+      [[ "$DRY_RUN" != "true" ]] || record_generated_file "$path"
       return 0
     fi
   fi
   if bootstrap_existing_file_is_eligible "$path" && [[ "$FORCE" != "true" ]] && bootstrap_user_owned_file_is_filled "$path"; then
     log "User-owned file preserved: $path"
-    harness_plan_log preserved "$path"
-    cat >/dev/null
+    harness_skip_input preserved "$path"
+    # A dry-run inventories preserved files too: previews stage them.
+    [[ "$DRY_RUN" != "true" ]] || record_generated_file "$path"
     return 0
   fi
   write_file "$path"
@@ -345,14 +360,23 @@ write_file() {
   local final_path="$path"
   local input_tmp tmp merged_tmp baseline_rel upgrade_action plan_action
   LAST_WRITTEN_FILE=""
+  if harness_path_is_pinned "$path"; then
+    # A pin wins over --force: no write, candidate, baseline or journal entry.
+    log "Pinned file left untouched: $path"
+    harness_skip_input pinned "$path"
+    [[ "$DRY_RUN" != "true" ]] || record_generated_file "$path"
+    return 0
+  fi
   bootstrap_write_parent_is_eligible "$path" || {
     fail "refusing write outside eligible project parent: $(bootstrap_path_diagnostic "$(dirname "$path")")"
   }
   ensure_dir "$(dirname "$path")"
   if [[ "$DRY_RUN" == "true" ]]; then
+    # The write log of a dry-run is the inventory previews stage from.
     log "DRY-RUN write $final_path"
     cat >/dev/null
     LAST_WRITTEN_FILE="$final_path"
+    record_generated_file "$final_path"
     return
   fi
   input_tmp="$(mktemp)"
@@ -362,7 +386,7 @@ write_file() {
   baseline_rel="$(harness_baseline_relpath "$path")" || baseline_rel=""
   if bootstrap_existing_file_is_eligible "$path" && cmp -s "$input_tmp" "$path"; then
     log "Existing file up to date: $path"
-    harness_plan_log unchanged "$path"
+    harness_plan_log unchanged "$path" "$input_tmp"
     harness_baseline_record "$baseline_rel" "$input_tmp"
     rm -f "$input_tmp"
     LAST_WRITTEN_FILE="$path"
@@ -400,7 +424,7 @@ write_file() {
       merge) log "Merged kit changes into local edits: $path" ;;
       kept)
         log "Kept local edits (kit output unchanged): $path"
-        harness_plan_log kept "$path"
+        harness_plan_log kept "$path" "$input_tmp"
         rm -f "$input_tmp" "$merged_tmp"
         LAST_WRITTEN_FILE="$path"
         record_generated_file "$path"
@@ -427,7 +451,7 @@ write_file() {
       return 1
     }
   fi
-  harness_plan_log "$plan_action" "$path"
+  harness_plan_log "$plan_action" "$path" "$input_tmp"
   if [[ "$path" == "$TARGET_DIR"/* ]]; then
     case "$upgrade_action" in
       candidate) harness_journal_add candidate "${final_path#"$TARGET_DIR"/}" ;;
@@ -609,8 +633,37 @@ harness_baseline_record() {
 }
 
 harness_plan_log() {
+  # action path [file]: one line per file for --upgrade-plan --json; the file
+  # holding the new kit output is kept beside the log so the plan can hash it.
+  local rel new
   [[ -n "${AGENT_BOOTSTRAP_PLAN_LOG:-}" ]] || return 0
-  printf '%s\t%s\n' "$1" "${2#"$TARGET_DIR"/}" >> "$AGENT_BOOTSTRAP_PLAN_LOG"
+  rel="${2#"$TARGET_DIR"/}"
+  printf '%s\t%s\n' "$1" "$rel" >> "$AGENT_BOOTSTRAP_PLAN_LOG"
+  [[ -n "${3:-}" && "$2" == "$TARGET_DIR"/* ]] || return 0
+  new="$AGENT_BOOTSTRAP_PLAN_LOG.new/$rel"
+  mkdir -p "${new%/*}" && cp "$3" "$new"
+}
+
+harness_skip_input() {
+  # Consumes the kit output of a file generation leaves alone (preserved,
+  # pinned); a plan run still logs it with that output.
+  local new
+  if [[ -z "${AGENT_BOOTSTRAP_PLAN_LOG:-}" ]]; then
+    cat >/dev/null
+    return 0
+  fi
+  new="$(mktemp)"
+  cat > "$new"
+  harness_fill_workflow_placeholder "$new"
+  harness_plan_log "$1" "$2" "$new"
+  rm -f "$new"
+}
+
+harness_path_is_pinned() {
+  local rel
+  [[ -n "${KEEP_PATHS:-}" && "$1" == "$TARGET_DIR"/* ]] || return 1
+  rel="${1#"$TARGET_DIR"/}"
+  [[ $'\n'"$KEEP_PATHS" == *$'\n'"$rel"$'\n'* ]]
 }
 
 harness_fill_workflow_placeholder() {
@@ -633,12 +686,13 @@ harness_upgrade_decision() {
   base="$(harness_baseline_file "$relpath")"
   if cmp -s "$path" "$base"; then
     printf 'update\n'
-  elif [[ "$relpath" == *.json ]]; then
-    # Structured (often machine-owned) files are never merged or kept line by
-    # line: an edited one gets a candidate, as before baselines.
-    printf 'candidate\n'
   elif cmp -s "$new" "$base"; then
+    # The kit output did not change: local edits are kept, JSON included.
     printf 'kept\n'
+  elif [[ "$relpath" == *.json ]]; then
+    # Structured (often machine-owned) files are never merged line by line:
+    # an edited one with a kit change gets a candidate, as before baselines.
+    printf 'candidate\n'
   elif command -v git >/dev/null 2>&1 &&
     git merge-file -p -L local -L previous-kit -L new-kit "$path" "$base" "$new" >"$merged" 2>/dev/null; then
     printf 'merge\n'
@@ -659,10 +713,14 @@ harness_journal_add() {
   if [[ -f "$dir/entries.tsv" ]] && cut -f2 "$dir/entries.tsv" | grep -Fxq -- "$relpath"; then
     return 0
   fi
-  if [[ -n "$pre" ]]; then
+  # Calls sharing one stamp share this journal: the first pre-image of a file
+  # (and of its baseline) wins, so --rollback returns to the state before the
+  # first call.
+  if [[ -n "$pre" ]] && ! bootstrap_entry_exists "$dir/pre/$relpath"; then
     harness_state_copy "$pre" "$dir/pre/$relpath" || return 0
   fi
-  if [[ "$action" != "candidate" ]] && harness_baseline_readable "$relpath"; then
+  if [[ "$action" != "candidate" ]] && harness_baseline_readable "$relpath" &&
+    ! bootstrap_entry_exists "$dir/base-pre/$relpath"; then
     harness_state_copy "$(harness_baseline_file "$relpath")" "$dir/base-pre/$relpath" || return 0
   fi
   harness_state_path_is_safe "$dir/entries.tsv" || return 0
@@ -687,7 +745,16 @@ import shutil
 import sys
 
 root, jdir, version, workflow, keep = sys.argv[1:6]
-rows = []
+# One row per file: a later call under the same stamp keeps the file's first
+# action (and pre-image) and only moves its post-change hash forward.
+journal = os.path.join(jdir, "journal.tsv")
+rows = {}
+if os.path.isfile(journal):
+    with open(journal, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                action, rel, post = line.rstrip("\n").split("\t", 2)
+                rows[rel] = [action, post]
 with open(os.path.join(jdir, "entries.tsv"), encoding="utf-8") as handle:
     for line in handle:
         action, rel = line.rstrip("\n").split("\t", 1)
@@ -696,9 +763,10 @@ with open(os.path.join(jdir, "entries.tsv"), encoding="utf-8") as handle:
         if os.path.isfile(path) and not os.path.islink(path):
             with open(path, "rb") as data:
                 post = hashlib.sha256(data.read()).hexdigest()
-        rows.append(f"{action}\t{rel}\t{post}\n")
-with open(os.path.join(jdir, "journal.tsv"), "a", encoding="utf-8") as handle:
-    handle.writelines(rows)
+        rows.setdefault(rel, [action, post])[1] = post
+with open(journal + ".tmp", "w", encoding="utf-8") as handle:
+    handle.writelines(f"{action}\t{rel}\t{post}\n" for rel, (action, post) in rows.items())
+os.replace(journal + ".tmp", journal)
 os.remove(os.path.join(jdir, "entries.tsv"))
 meta = os.path.join(jdir, "meta.json")
 if not os.path.exists(meta):
