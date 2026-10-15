@@ -164,12 +164,15 @@ git restore --staged --worktree <path>
 ```
 
 For bootstrap-managed `.generated.<stamp>` candidates that should replace their
-base file, run the project bootstrap with candidate application enabled from the
-same bundle that created the candidate:
+base file, take the kit version of that one file (the local file is backed up):
 
 ```bash
-bash scripts/bootstrap-multi-agent-project.sh --apply-candidates
+scripts/harness-kit.sh --take-kit <path>
 ```
+
+Without `scripts/harness-kit.sh`, apply the reviewed candidate from the kit that
+created it: `agent-init --apply-candidates --only <path>` (or
+`bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --apply-candidates --only <path>`).
 
 Then run:
 
@@ -305,6 +308,8 @@ write_portable_enforcement() {
   make_executable "$LAST_WRITTEN_FILE"
   copy_bundle_file "install-git-hooks.sh" "$TARGET_DIR/scripts/install-git-hooks.sh"
   make_executable "$LAST_WRITTEN_FILE"
+  copy_bundle_file "harness-kit-one-shot.sh" "$TARGET_DIR/scripts/harness-kit.sh"
+  make_executable "$LAST_WRITTEN_FILE"
 }
 
 write_schema_model_and_provenance_catalog() {
@@ -341,6 +346,15 @@ write_schema_model_and_provenance_catalog() {
   copy_bundle_file \
     "schemas/agent-guard-event-v2.schema.json" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json"
+  copy_bundle_file \
+    "schemas/agent-guard-verification-v2.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-verification-v2.schema.json"
+  copy_bundle_file \
+    "schemas/harness-project-knowledge-v1.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-project-knowledge-v1.schema.json"
+  copy_bundle_file \
+    "schemas/harness-kit-run-report-v1.schema.json" \
+    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-kit-run-report-v1.schema.json"
   copy_bundle_file \
     "provenance/rtk-v0.37.2.sha256" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
@@ -440,7 +454,7 @@ write_agent_seats() {
 # generated candidate, never overwritten. Skipped on --dry-run.
 seats_program() {
   AGENT_SEATS_FILE="$TARGET_DIR/docs/agent-configs/seats.json" \
-  AGENT_SEATS_LEGACY_PROFILES="$TARGET_DIR/docs/agent-configs/model-profiles.json" \
+  AGENT_SEATS_LEGACY_PROFILES="${DETECT_ROOT:-$TARGET_DIR}/docs/agent-configs/model-profiles.json" \
   AGENT_SEATS_AGENTS_MD="$TARGET_DIR/AGENTS.md" \
   AGENT_SEATS_PROJECT_ROOT="$TARGET_DIR" \
     bash "$BUNDLE_DIR/agent-seats.sh" "$@"
@@ -727,7 +741,12 @@ guard_claude_edit_tool() {
   case "$rc" in
     0) return 0 ;;
     3) exit 2 ;;
-    *) exit "$rc" ;;
+    *)
+      # Claude Code only blocks on exit 2; any other guard refusal (outside the
+      # project root, missing context, failed preflight) must block the edit too.
+      echo "agent-hook: ERROR: edit blocked: agent-guard pre-edit exited $rc" >&2
+      exit 2
+      ;;
   esac
 }
 
@@ -797,10 +816,232 @@ print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permiss
 PY
 }
 
+hook_input_field() {
+  # Print a string or boolean field of the Claude hook JSON; empty otherwise.
+  command -v python3 >/dev/null 2>&1 || return 0
+  HOOK_INPUT="$1" python3 - "$2" <<'PY' 2>/dev/null || true
+import json
+import os
+import sys
+
+try:
+    value = json.loads(os.environ.get("HOOK_INPUT", "") or "{}").get(sys.argv[1])
+except Exception:
+    value = None
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif isinstance(value, str):
+    print(value)
+PY
+}
+
+# Same order as agent_resolve_state_dir in scripts/agent-guard.sh, so session
+# snapshots live next to the guard's reports: $AGENT_STATE_DIR, .agents/state,
+# then a per-project dir under TMPDIR. Sets HOOK_STATE_DIR.
+hook_state_dir_usable() {
+  local d="$1" parent
+  if [[ -d "$d" ]]; then
+    [[ -w "$d" ]]
+    return
+  fi
+  parent="$(dirname "$d")"
+  while [[ ! -d "$parent" && "$parent" != "/" && "$parent" != "." ]]; do
+    parent="$(dirname "$parent")"
+  done
+  [[ -w "$parent" ]]
+}
+
+resolve_hook_state_dir() {
+  local candidate
+  HOOK_STATE_DIR=""
+  for candidate in \
+    "${AGENT_STATE_DIR:-}" \
+    "$PROJECT_ROOT/.agents/state" \
+    "${TMPDIR:-/tmp}/agent-bootstrap-state/$(printf '%s' "$PROJECT_ROOT" | cksum | tr -d ' \t')"; do
+    [[ -n "$candidate" ]] || continue
+    if hook_state_dir_usable "$candidate"; then
+      HOOK_STATE_DIR="$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Sets SESSION_SNAPSHOT, SESSION_TAG (first 12 hex of sha256(session_id), which
+# names this session's close-out report and error log) and HOOK_STATE_DIR; fails
+# for ids that are not ^[A-Za-z0-9._-]+$ or when no state dir is usable.
+set_session_snapshot() {
+  local session="$1" pattern='^[A-Za-z0-9._-]+$' tag_pattern='^[0-9a-f]{12}$'
+  SESSION_SNAPSHOT=""
+  SESSION_TAG=""
+  [[ "$session" =~ $pattern ]] || return 1
+  resolve_hook_state_dir || return 1
+  SESSION_TAG="$(printf '%s' "$session" | hash_text 2>/dev/null)" || return 1
+  SESSION_TAG="${SESSION_TAG:0:12}"
+  [[ "$SESSION_TAG" =~ $tag_pattern ]] || return 1
+  SESSION_SNAPSHOT="$HOOK_STATE_DIR/sessions/$session.snapshot"
+}
+
+change_map() {
+  # change_map write|same <snapshot>: the change map starts with "HEAD\t<commit
+  # or none>" (so a commit counts as a change), then one sorted line per path
+  # that `git status` reports (untracked included, ignored and the hook state
+  # dir excluded) as "<path>\t<sha256|deleted|unreadable>"; backslash, tab, CR
+  # and newline in paths are escaped. The digest covers the content and the
+  # executable bit (a link: its target; a submodule or nested repository: its
+  # HEAD and status). `write` replaces the snapshot atomically; `same` exits 0
+  # only when the snapshot equals the current map, stopping at the first
+  # difference (1 differs, 2 map unavailable).
+  python3 - "$PROJECT_ROOT" "$1" "$2" "$HOOK_STATE_DIR" <<'PY'
+import hashlib
+import os
+import stat
+import subprocess
+import sys
+
+root, mode, snapshot, state_dir = (os.fsencode(sys.argv[1]), sys.argv[2], sys.argv[3],
+                                   os.fsencode(sys.argv[4]))
+
+
+def git(args, cwd):
+    return subprocess.run(["git", "--no-optional-locks", "-C", cwd] + args, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, check=True, timeout=120).stdout
+
+
+try:
+    top = os.path.realpath(git(["rev-parse", "--show-toplevel"], root).rstrip(b"\n"))
+    raw = git(["status", "--porcelain=v1", "-z", "--untracked-files=all"], root)
+except Exception:
+    sys.exit(2)
+try:
+    head = git(["rev-parse", "--verify", "-q", "HEAD"], root).strip() or b"none"
+except Exception:
+    head = b"none"
+# Paths under the hook state dir (AGENT_STATE_DIR inside the tree) never count.
+skip = os.path.relpath(os.path.realpath(state_dir), top) if state_dir else b".."
+skip = None if skip == b"." or skip.startswith(b"..") else skip + b"/"
+fields = raw.split(b"\0")
+paths = set()
+index = 0
+while index < len(fields):
+    entry = fields[index]
+    index += 1
+    if len(entry) < 4:
+        continue
+    found = [entry[3:]]
+    if b"R" in entry[:2] or b"C" in entry[:2]:
+        # Rename/copy: the source path follows as its own field.
+        if index < len(fields) and fields[index]:
+            found.append(fields[index])
+        index += 1
+    paths.update(p for p in found if not (skip and (p + b"/").startswith(skip)))
+
+
+def digest(rel):
+    path = os.path.join(top, rel.rstrip(b"/"))
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return b"deleted"
+    except OSError:
+        return b"unreadable"
+    sha = hashlib.sha256()
+    try:
+        if stat.S_ISLNK(info.st_mode):
+            sha.update(b"link\0" + os.readlink(path))
+        elif stat.S_ISDIR(info.st_mode):
+            sha.update(b"repo\0")
+            # Only a directory with its own .git (a submodule or nested repo)
+            # is probed; a plain directory must not hash the parent's status.
+            if os.path.lexists(os.path.join(path, b".git")):
+                for args in (["rev-parse", "HEAD"], ["status", "--porcelain", "-z"]):
+                    try:
+                        sha.update(git(args, path) + b"\0")
+                    except Exception:
+                        sha.update(b"?\0")
+            else:
+                sha.update(b"dir\0")
+        else:
+            sha.update(b"file\0x\0" if info.st_mode & 0o111 else b"file\0-\0")
+            with open(path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    sha.update(chunk)
+    except OSError:
+        return b"unreadable"
+    return sha.hexdigest().encode()
+
+
+def escape(rel):
+    return (rel.replace(b"\\", b"\\\\").replace(b"\t", b"\\t")
+            .replace(b"\r", b"\\r").replace(b"\n", b"\\n"))
+
+
+rows = sorted((escape(p), p) for p in paths)
+header = b"HEAD\t" + head + b"\n"
+if mode == "same":
+    try:
+        with open(snapshot, "rb") as handle:
+            lines = handle.read().split(b"\n")
+    except OSError:
+        sys.exit(1)
+    if lines[0] + b"\n" != header or lines[-1] != b"" or len(lines) - 2 != len(rows):
+        sys.exit(1)
+    saved = {}
+    for line in lines[1:-1]:
+        name, sep, value = line.rpartition(b"\t")
+        if not sep:
+            sys.exit(1)
+        saved[name] = value
+    if set(saved) != set(name for name, _ in rows):
+        sys.exit(1)
+    for name, path in rows:
+        if digest(path) != saved[name]:
+            sys.exit(1)
+    sys.exit(0)
+content = header + b"".join(name + b"\t" + digest(path) + b"\n" for name, path in rows)
+os.makedirs(os.path.dirname(snapshot), exist_ok=True)
+temp = "{}.tmp.{}".format(snapshot, os.getpid())
+try:
+    with open(temp, "wb") as handle:
+        handle.write(content)
+    os.replace(temp, snapshot)
+finally:
+    if os.path.lexists(temp):
+        os.unlink(temp)
+PY
+}
+
+write_session_snapshot() {
+  # Record which paths are already changed when the session starts, so the Stop
+  # hook verifies only this session's changes. An existing snapshot is kept:
+  # SessionStart also fires on resume and compact for the same session id.
+  local session snapshot
+  command -v python3 >/dev/null 2>&1 || {
+    echo "agent-hook: warn: python3 is unavailable; no session snapshot, close-out will be skipped" >&2
+    return 0
+  }
+  session="$(hook_input_field "$1" session_id)"
+  if ! set_session_snapshot "$session"; then
+    echo "agent-hook: warn: no usable session_id or state dir; no session snapshot, close-out will be skipped" >&2
+    return 0
+  fi
+  snapshot="$SESSION_SNAPSHOT"
+  [[ ! -f "$snapshot" ]] || return 0
+  # Snapshots and close-out reports/logs of finished sessions are pruned after 30 days.
+  find "$HOOK_STATE_DIR/sessions" -type f \( -name '*.snapshot' -o -name '*.snapshot.tmp.*' \) \
+    -mtime +30 -exec rm -f {} + 2>/dev/null || true
+  find "$HOOK_STATE_DIR" -maxdepth 1 -type f \( -name 'closeout-*-verify.json' -o -name 'closeout-*.err' \) \
+    -mtime +30 -exec rm -f {} + 2>/dev/null || true
+  change_map write "$snapshot" ||
+    echo "agent-hook: warn: could not record the session snapshot; close-out will be skipped" >&2
+  return 0
+}
+
 claude_session_start() {
   # SessionStart hook: anchor the session, persist the envelope for later Bash
-  # tool commands through CLAUDE_ENV_FILE, and report the status to Claude.
-  # Never blocks the session.
+  # tool commands through CLAUDE_ENV_FILE, report the status to Claude, then
+  # record the session's change snapshot for close-out (after the JSON, so the
+  # report is not held behind hashing). Never blocks the session.
   local input="" report
   if [[ ! -t 0 ]]; then
     input="$(cat || true)"
@@ -827,14 +1068,20 @@ elif status == "mismatch":
     line += " (" + str(doc.get("mismatch_kind")) + "): " + str(doc.get("reason")) \
         + "; confirm the target repository with the user before writing"
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": line}},
-                 ensure_ascii=False))
+                 ensure_ascii=False), flush=True)
 PY
+  write_session_snapshot "$input" || true
   exit 0
 }
 
 claude_pretool() {
   required_executable "$DETECTOR"
-  required_executable "$AGENT_GUARD"
+  # Internal errors must not lock all edits: without python3 or the guard the
+  # policy cannot be evaluated, so warn and allow.
+  if ! command -v "${AGENT_HOOK_PYTHON:-python3}" >/dev/null 2>&1 || [[ ! -x "$AGENT_GUARD" ]]; then
+    echo "agent-hook: warn: python3 or scripts/agent-guard.sh is unavailable; skipping the edit guard" >&2
+    exit 0
+  fi
   local hook_input=""
   local tool_name=""
   local edit_path=""
@@ -843,7 +1090,11 @@ claude_pretool() {
     hook_input="$(cat || true)"
   fi
   claude_anchor_env "$hook_input"
-  "$AGENT_GUARD" preflight >/dev/null
+  local preflight_rc=0
+  "$AGENT_GUARD" preflight >/dev/null || preflight_rc=$?
+  if [[ "$preflight_rc" -ne 0 && -z "$hook_input" ]]; then
+    exit "$preflight_rc"
+  fi
   ask_reason="$(workspace_ask_reason)"
   if [[ -n "$hook_input" ]]; then
     tool_name=""
@@ -852,6 +1103,15 @@ claude_pretool() {
     IFS= read -r -d '' tool_name <&3 || true
     IFS= read -r -d '' edit_path <&3 || true
     exec 3<&-
+    if [[ "$preflight_rc" -ne 0 ]]; then
+      case "$tool_name" in
+        Edit|Write|MultiEdit)
+          echo "agent-hook: ERROR: edit blocked: agent-guard preflight exited $preflight_rc" >&2
+          exit 2
+          ;;
+      esac
+      exit "$preflight_rc"
+    fi
     case "$tool_name" in
       Edit|Write|MultiEdit)
         guard_claude_edit_tool "$edit_path" "$ask_reason"
@@ -916,54 +1176,82 @@ doctor() {
 }
 
 close_out() {
-  # Claude Code Stop hook. Run fast verification in advisory mode so unrelated
-  # strict checks do not abort the hook, then block Stop (exit 2) only when this
-  # session has file changes and the verification report contains real failures.
+  # Claude Code Stop hook. Verify only when the paths changed since this
+  # session's snapshot (written at SessionStart, advanced after each
+  # non-blocking close-out), so a seat is not blocked by another seat's edits and
+  # an unchanged turn costs nothing. Fast verification runs in advisory mode,
+  # within 300 s (the Stop hook timeout is 360 s), into this session's own report
+  # (closeout-<tag>-verify.json, never last-verify-report.json); Stop is blocked
+  # (exit 2) on missing evidence or any fail/error/timeout, and kept blocked
+  # until the change verifies. Unverified only warns.
   # Gemini/Cursor/Windsurf have no equivalent close-out hook, so those surfaces
   # stay advisory and should call agent-guard pre-final manually.
-  local input stop_active=false report failed=0 err_file
+  local input session snapshot out report verdict err_file budget digits='^[0-9]{1,3}$'
   input="$(cat 2>/dev/null || true)"
   claude_anchor_env "$input"
-  if command -v python3 >/dev/null 2>&1; then
-    stop_active="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null || printf 'false\n'
-import json
-import os
-
-try:
-    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
-except Exception:
-    payload = {}
-print("true" if payload.get("stop_hook_active") is True else "false")
-PY
-)"
-  fi
-  [[ "$stop_active" == "true" ]] && exit 0
-  if command -v git >/dev/null 2>&1 &&
-    [[ -z "$(git -C "$PROJECT_ROOT" status --porcelain 2>/dev/null)" ]]; then
+  [[ "$(hook_input_field "$input" stop_hook_active)" == "true" ]] && exit 0
+  session="$(hook_input_field "$input" session_id)"
+  if ! command -v python3 >/dev/null 2>&1 || ! set_session_snapshot "$session" ||
+    [[ ! -f "$SESSION_SNAPSHOT" ]]; then
+    echo "agent-hook: close-out skipped (no session snapshot); run scripts/agent-guard.sh pre-final --run-verify" >&2
     exit 0
   fi
-  err_file="$PROJECT_ROOT/.agents/state/closeout.err"
-  mkdir -p "$(dirname "$err_file")" 2>/dev/null || err_file="${TMPDIR:-/tmp}/agent-bootstrap-closeout.err"
-  "$AGENT_GUARD" pre-final --run-verify --verify-scope fast --advisory >/dev/null 2>"$err_file" || true
-  report="$PROJECT_ROOT/.agents/state/last-verify-report.json"
-  if [[ -f "$report" ]] && command -v python3 >/dev/null 2>&1; then
-    failed="$(python3 - "$report" <<'PY' 2>/dev/null || printf '0\n'
+  snapshot="$SESSION_SNAPSHOT"
+  change_map same "$snapshot" && exit 0
+  err_file="$HOOK_STATE_DIR/closeout-$SESSION_TAG.err"
+  # The total budget overrides the fast default in the guard; cap it at 300 s.
+  budget="${AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS:-${AGENT_GUARD_VERIFY_TOTAL_FAST_SECONDS:-300}}"
+  if [[ ! "$budget" =~ $digits ]] || ((10#$budget == 0 || 10#$budget > 300)); then
+    budget=300
+  fi
+  out="$(AGENT_GUARD_VERIFY_REPORT_NAME="closeout-$SESSION_TAG-verify.json" \
+    AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS="$((10#$budget))" \
+    "$AGENT_GUARD" pre-final --run-verify --verify-scope fast --advisory 2>"$err_file" || true)"
+  report="$(printf '%s\n' "$out" | sed -n 's/^agent-guard: verify_report=//p' | tail -n 1)"
+  verdict="$(python3 - "$report" <<'PY' 2>/dev/null || printf 'missing\n'
 import json
 import sys
 
 try:
-    doc = json.load(open(sys.argv[1], encoding="utf-8"))
+    doc = json.load(open(sys.argv[1], encoding="utf-8")) if sys.argv[1] else None
 except Exception:
-    print(0)
+    doc = None
+if not isinstance(doc, dict) or not isinstance(doc.get("results", []), list):
+    print("missing")
     raise SystemExit(0)
-print(int(doc.get("summary", {}).get("fail", 0)))
+status = doc.get("status")
+counts = {}
+for item in doc.get("results", []):
+    if isinstance(item, dict) and item.get("status") in ("fail", "error", "timeout"):
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+if counts or status in ("fail", "error"):
+    detail = ", ".join("{} {}".format(n, s) for s, n in sorted(counts.items()))
+    print("block {}{}".format(status, " (" + detail + ")" if detail else ""))
+elif status in ("pass", "unverified"):
+    print(status)
+else:
+    print("missing")
 PY
 )"
-  fi
-  if [[ "${failed:-0}" -gt 0 ]]; then
-    printf 'agent-guard: close-out fast verification failed (%s failed); review .agents/state/last-verify-report.json before completing.\n' "$failed" >&2
-    exit 2
-  fi
+  case "$verdict" in
+    pass) ;;
+    unverified)
+      echo "agent-hook: warn: close-out verification unverified (no verification command ran); fill verification[] in docs/superpowers/specs/project-tech-stack.json; report $report" >&2
+      ;;
+    "block "*)
+      printf 'agent-hook: close-out fast verification %s for changes in this session; review %s before completing.\n' \
+        "${verdict#block }" "$report" >&2
+      grep '^agent-guard: verify\[' "$err_file" 2>/dev/null | head -n 5 >&2 || true
+      exit 2
+      ;;
+    *)
+      printf 'agent-hook: close-out verification report missing or unreadable (%s); see %s and run scripts/agent-guard.sh pre-final --run-verify before completing.\n' \
+        "${report:-no verify_report line}" "$err_file" >&2
+      exit 2
+      ;;
+  esac
+  change_map write "$snapshot" ||
+    echo "agent-hook: warn: could not advance the session snapshot; the next close-out re-verifies" >&2
   exit 0
 }
 
@@ -1016,16 +1304,23 @@ PASS=0
 FAIL=0
 WARN=0
 OUTPUT_JSON=false
+BUDGET_ONLY=false
 CHECKS=()
+CONTEXT_BUDGET_JSON=""
 
 usage() {
-  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json]"
+  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget]" \
+    "  --context-budget  run only the context budget check (core startup and on-demand)"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --json)
       OUTPUT_JSON=true
+      shift
+      ;;
+    --context-budget)
+      BUDGET_ONLY=true
       shift
       ;;
     -h|--help)
@@ -1093,7 +1388,11 @@ emit_json_report() {
     fi
     printf '{"status":"%s","label":"%s"}' "$(json_escape "$status")" "$(json_escape "$label")"
   done
-  printf ']}\n'
+  printf ']'
+  if [[ -n "$CONTEXT_BUDGET_JSON" ]]; then
+    printf ',"context_budget":%s' "$CONTEXT_BUDGET_JSON"
+  fi
+  printf '}\n'
 }
 
 need_file() {
@@ -1225,6 +1524,14 @@ walk(document)
 PY
 }
 
+token_estimate() {  # <words> <bytes>: the larger of bytes/4 and words*1.3
+  awk -v words="$1" -v chars="$2" 'BEGIN {
+    by_chars = chars / 4
+    by_words = words * 1.3
+    printf "%d", (by_chars > by_words ? by_chars : by_words)
+  }'
+}
+
 estimate_tokens_for_file() {
   local path="$1"
   local words="0"
@@ -1233,57 +1540,183 @@ estimate_tokens_for_file() {
     printf '0'
     return 0
   fi
-  read -r words chars < <(wc -w -c < "$path")
-  awk -v words="$words" -v chars="$chars" 'BEGIN {
-    by_chars = chars / 4
-    by_words = words * 1.3
-    printf "%d", (by_chars > by_words ? by_chars : by_words)
-  }'
+  read -r words chars < <(LC_ALL=C wc -w -c < "$path")
+  token_estimate "$words" "$chars"
 }
 
-sum_estimated_tokens() {
-  local total=0
-  local token_count=0
-  local relpath
-  for relpath in "$@"; do
-    token_count="$(estimate_tokens_for_file "$ROOT_DIR/$relpath")"
-    total=$((total + token_count))
-  done
-  printf '%s' "$total"
+# Project content is the user's: the user-owned files below, and in any other
+# counted file the body of each <!-- BEGIN USER: ... --> region and of each
+# detector-filled managed block (stacks, modules, verification commands,
+# warnings). The rest, marker lines included, is kit text.
+BUDGET_USER_OWNED_FILES=" docs/agent-configs/project-brief.md docs/agent-configs/project-agent-context.md "
+
+# Prints "<kit> <project>" token estimates for one counted file.
+split_file_estimate() {
+  local relpath="$1"
+  local path="$ROOT_DIR/$1"
+  if [[ ! -f "$path" ]]; then
+    printf '0 0\n'
+    return 0
+  fi
+  if [[ "$BUDGET_USER_OWNED_FILES" == *" $relpath "* ]]; then
+    printf '0 %s\n' "$(estimate_tokens_for_file "$path")"
+    return 0
+  fi
+  LC_ALL=C awk '
+    function est(b, w) { b = b / 4; w = w * 1.3; return int(b > w ? b : w) }
+    /<!-- BEGIN (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 1; next }
+    /<!-- END (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 0; next }
+    user { pb += length($0) + 1; pw += NF; next }
+    { kb += length($0) + 1; kw += NF }
+    END { printf "%d %d\n", est(kb, kw), est(pb, pw) }
+  ' "$path"
 }
 
+# Prints "<kit><TAB><project><TAB><heading text>" for each ## or ### section of a
+# Markdown file; a section runs to the next such heading outside a code fence.
+markdown_section_estimates() {
+  [[ -f "$1" ]] || return 0
+  LC_ALL=C awk '
+    function est(b, w) { b = b / 4; w = w * 1.3; return int(b > w ? b : w) }
+    function flush() { if (name != "") printf "%d\t%d\t%s\n", est(kb, kw), est(pb, pw), name }
+    /^```/ { fence = !fence }
+    !fence && /^###? / { flush(); name = $0; sub(/^#+ /, "", name); kb = 0; kw = 0; pb = 0; pw = 0 }
+    name == "" { next }
+    /<!-- BEGIN (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 1; next }
+    /<!-- END (USER:|MANAGED: multi-agent-bootstrap:(detected-stack|detected-modules|verification-candidates|detection-warnings) )/ { kb += length($0) + 1; kw += NF; user = 0; next }
+    user { pb += length($0) + 1; pw += NF; next }
+    { kb += length($0) + 1; kw += NF }
+    END { flush() }
+  ' "$1"
+}
+
+budget_status() {  # <estimate> <amber> <gate>
+  if [[ "$1" -gt "$3" ]]; then
+    printf 'over'
+  elif [[ "$1" -gt "$2" ]]; then
+    printf 'amber'
+  else
+    printf 'ok'
+  fi
+}
+
+# Prints the largest project parts as "path N, path N" (at most three).
+largest_project_parts() {
+  [[ $# -gt 0 ]] || return 0
+  printf '%s\n' "$@" | sort -t "$(printf '\t')" -k1,1nr | head -3 |
+    awk -F '\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $2, $1 }'
+}
+
+# The total (kit + project) only warns: project content is the user's to shorten.
+# Kit text above a gate is an error.
+report_budget() {  # <label> <total> <kit> <amber> <gate> <status> <kit status> [project part...]
+  local label="$1" total="$2" kit="$3" amber="$4" gate="$5" status="$6" kit_status="$7" parts
+  shift 7
+  case "$status" in
+    over)
+      parts="$(largest_project_parts "$@")"
+      warn "$label: $total tokens exceeds gate $gate${parts:+; project content is yours to shorten: $parts}"
+      ;;
+    amber) warn "$label: $total tokens (gate $gate, amber above $amber); measure after any edit to a counted file" ;;
+    *) ok "$label: $total tokens (gate $gate, amber above $amber)" ;;
+  esac
+  case "$kit_status" in
+    over) bad "kit $label: $kit tokens exceeds gate $gate" ;;
+    amber) warn "kit $label: $kit tokens (gate $gate, amber above $amber); measure after any edit to a counted file" ;;
+    *) ok "kit $label: $kit tokens (gate $gate, amber above $amber)" ;;
+  esac
+}
+
+budget_json() {  # <total> <kit> <project> <amber> <gate> <status> <kit status>
+  printf '"estimate":%s,"kit":%s,"project":%s,"amber":%s,"gate":%s,"status":"%s","kit_status":"%s"' "$@"
+}
+
+# Core startup: what every seat reads first. On demand: core plus the workflow
+# docs and, from the handoff reference, its State values section and the largest
+# other section (a seat reads those two, not the whole reference).
 check_context_budget() {
-  local core_tokens
-  local full_tokens
-  core_tokens="$(sum_estimated_tokens \
-    AGENTS.md \
-    docs/agent-configs/project-agent-context.md \
-    docs/agent-configs/project-brief.md)"
-  full_tokens="$(sum_estimated_tokens \
+  local reference="$ROOT_DIR/docs/agent-configs/agent-handoff-reference.md"
+  local relpath kit project label tab
+  local core_kit=0 core_project=0 od_kit=0 od_project=0
+  local state_kit=0 state_project=0 largest_kit=0 largest_project=0 largest_name=""
+  local section_kit section_project section_name sections_json=""
+  local core_total od_total core_status core_kit_status od_status od_kit_status
+  local core_parts=() od_parts=()
+  tab="$(printf '\t')"
+  for relpath in \
     AGENTS.md \
     docs/agent-configs/project-agent-context.md \
     docs/agent-configs/project-brief.md \
     docs/agent-configs/agent-mode-contracts.md \
     docs/agent-configs/agent-handoff-schema.md \
     docs/agent-configs/karpathy-llm-coding-agent-config.md \
-    docs/agent-configs/llm-council-agent-workflow.md \
-    docs/agent-configs/task-journal.md)"
-
-  if [[ "$core_tokens" -gt 4000 ]]; then
-    warn "core startup context estimate: ${core_tokens} tokens exceeds gate 4000; the 4000 gate is enforced by the harness test suite"
-  elif [[ "$core_tokens" -gt 3800 ]]; then
-    warn "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800); measure after any edit to a counted file"
-  else
-    ok "core startup context estimate: ${core_tokens} tokens (gate 4000, amber above 3800)"
+    docs/agent-configs/llm-council-agent-workflow.md; do
+    read -r kit project < <(split_file_estimate "$relpath")
+    label="$relpath"
+    if [[ "$BUDGET_USER_OWNED_FILES" != *" $relpath "* ]]; then
+      label="$relpath (USER and detected blocks)"
+    fi
+    case "$relpath" in
+      AGENTS.md|docs/agent-configs/project-agent-context.md|docs/agent-configs/project-brief.md)
+        core_kit=$((core_kit + kit))
+        core_project=$((core_project + project))
+        if [[ "$project" -gt 0 ]]; then
+          core_parts+=("$project$tab$label")
+        fi
+        ;;
+    esac
+    od_kit=$((od_kit + kit))
+    od_project=$((od_project + project))
+    if [[ "$project" -gt 0 ]]; then
+      od_parts+=("$project$tab$label")
+    fi
+  done
+  while IFS="$tab" read -r section_kit section_project section_name; do
+    if [[ "$section_name" == "State values" ]]; then
+      state_kit="$section_kit"
+      state_project="$section_project"
+    elif [[ $((section_kit + section_project)) -gt $((largest_kit + largest_project)) ]]; then
+      largest_kit="$section_kit"
+      largest_project="$section_project"
+      largest_name="$section_name"
+    fi
+  done < <(markdown_section_estimates "$reference")
+  od_kit=$((od_kit + state_kit + largest_kit))
+  od_project=$((od_project + state_project + largest_project))
+  if [[ $((state_project + largest_project)) -gt 0 ]]; then
+    od_parts+=("$((state_project + largest_project))${tab}docs/agent-configs/agent-handoff-reference.md (USER and detected blocks)")
   fi
+  core_total=$((core_kit + core_project))
+  od_total=$((od_kit + od_project))
+  core_status="$(budget_status "$core_total" 3800 4000)"
+  core_kit_status="$(budget_status "$core_kit" 3800 4000)"
+  od_status="$(budget_status "$od_total" 5900 6200)"
+  od_kit_status="$(budget_status "$od_kit" 5900 6200)"
 
-  if [[ "$full_tokens" -gt 6200 ]]; then
-    warn "on-demand full workflow context estimate: ${full_tokens} tokens exceeds gate 6200; the 6200 gate is enforced by the harness test suite"
-  elif [[ "$full_tokens" -gt 5900 ]]; then
-    warn "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900); measure after any edit to a counted file"
-  else
-    ok "on-demand full workflow context estimate: ${full_tokens} tokens (gate 6200, amber above 5900)"
+  report_budget "core startup context estimate" "$core_total" "$core_kit" 3800 4000 \
+    "$core_status" "$core_kit_status" ${core_parts[@]+"${core_parts[@]}"}
+  report_budget "on-demand full workflow context estimate" "$od_total" "$od_kit" 5900 6200 \
+    "$od_status" "$od_kit_status" ${od_parts[@]+"${od_parts[@]}"}
+
+  if [[ $((state_kit + state_project)) -gt 0 ]]; then
+    sections_json='"State values"'
   fi
+  if [[ -n "$largest_name" ]]; then
+    sections_json="${sections_json:+$sections_json,}\"$(json_escape "$largest_name")\""
+  fi
+  CONTEXT_BUDGET_JSON="{\"core\":{$(budget_json "$core_total" "$core_kit" "$core_project" 3800 4000 "$core_status" "$core_kit_status")},\"on_demand\":{$(budget_json "$od_total" "$od_kit" "$od_project" 5900 6200 "$od_status" "$od_kit_status"),\"reference_sections\":[$sections_json]}}"
+}
+
+finish_report() {
+  if [[ "$OUTPUT_JSON" == "true" ]]; then
+    emit_json_report
+  else
+    printf '\nPass: %s  Warn: %s  Fail: %s\n' "$PASS" "$WARN" "$FAIL"
+  fi
+  if [[ "$FAIL" -gt 0 ]]; then
+    exit 1
+  fi
+  exit 0
 }
 
 validate_json_contracts() {
@@ -1427,6 +1860,9 @@ expected_schema_ids = {
     "agent-bootstrap-status-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-status-v1.schema.json",
     "agent-bootstrap-verify-report-v1.schema.json": "https://agent-bootstrap.local/schemas/agent-bootstrap-verify-report-v1.schema.json",
     "agent-guard-event-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-event-v2.schema.json",
+    "agent-guard-verification-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-verification-v2.schema.json",
+    "harness-project-knowledge-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-project-knowledge-v1.schema.json",
+    "harness-kit-run-report-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-kit-run-report-v1.schema.json",
 }
 for filename, schema_id in expected_schema_ids.items():
     schema = load_json(f"{schema_dir}/{filename}") or {}
@@ -1539,7 +1975,7 @@ if isinstance(doc, dict):
             "conventions",
             "source_evidence",
             "open_questions",
-        ),
+        ) + (("toolchain",) if "toolchain" in doc else ()),
         "project tech-stack contract",
     )
     require(doc.get("schema") == "agent-project-tech-stack/v1", "project tech-stack schema must be agent-project-tech-stack/v1")
@@ -1571,9 +2007,14 @@ if isinstance(doc, dict):
         for index, item in enumerate(verification):
             require(isinstance(item, dict), f"project tech-stack verification[{index}] must be an object")
             if isinstance(item, dict):
-                require_exact_keys(item, ("command", "purpose", "source"), f"project tech-stack verification[{index}]")
+                require_exact_keys(item, ("command", "purpose", "source") + (("scope",) if "scope" in item else ()), f"project tech-stack verification[{index}]")
+                if "scope" in item:
+                    require(item.get("scope") in ("fast", "full"), f"project tech-stack verification[{index}].scope must be fast or full")
                 for key in ("command", "purpose", "source"):
                     require(non_empty_string(item.get(key)), f"project tech-stack verification[{index}].{key} must be a non-empty string")
+    if "toolchain" in doc:
+        toolchain = doc.get("toolchain")
+        require(isinstance(toolchain, list) and all(non_empty_string(entry) for entry in toolchain), "project tech-stack toolchain must be an array of non-empty strings")
     evidence = doc.get("source_evidence")
     require(isinstance(evidence, list), "project tech-stack source_evidence must be an array")
     if isinstance(evidence, list):
@@ -1600,6 +2041,15 @@ if errors:
     sys.exit(1)
 PY
 }
+
+if [[ "$BUDGET_ONLY" == "true" ]]; then
+  if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
+    check_context_budget
+  else
+    ok "workflow preset is infra-only; no context budget applies"
+  fi
+  finish_report
+fi
 
 if [[ "$OUTPUT_JSON" != "true" ]]; then
   echo "Verifying generated agent infrastructure..."
@@ -1687,7 +2137,10 @@ if command -v python3 >/dev/null 2>&1; then
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1; then
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-verification-v2.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-project-knowledge-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-kit-run-report-v1.schema.json" >/dev/null 2>&1; then
     ok "schema JSON parses"
   else
     bad "schema JSON is invalid"
@@ -1783,6 +2236,7 @@ need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
 need_executable scripts/agent-guard.sh
 need_executable scripts/agent-local-only-check.sh
+need_executable scripts/harness-kit.sh
 need_executable scripts/detect-agent-tech-stack.sh
 need_executable scripts/verify-ai-deps.sh
 
@@ -1792,6 +2246,7 @@ need_bash_syntax scripts/agent-tech-stack-lib.sh
 need_bash_syntax scripts/agent-hook.sh
 need_bash_syntax scripts/agent-guard.sh
 need_bash_syntax scripts/agent-local-only-check.sh
+need_bash_syntax scripts/harness-kit.sh
 need_bash_syntax scripts/detect-agent-tech-stack.sh
 need_bash_syntax scripts/verify-ai-deps.sh
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
@@ -1948,14 +2403,7 @@ else
   warn "portable bootstrap integration smoke test missing"
 fi
 
-if [[ "$OUTPUT_JSON" == "true" ]]; then
-  emit_json_report
-else
-  printf '\nPass: %s  Warn: %s  Fail: %s\n' "$PASS" "$WARN" "$FAIL"
-fi
-if [[ "$FAIL" -gt 0 ]]; then
-  exit 1
-fi
+finish_report
 EOF
 
   replace_placeholder "$LAST_WRITTEN_FILE" "__WORKFLOW_PRESET__" "$WORKFLOW_PRESET"

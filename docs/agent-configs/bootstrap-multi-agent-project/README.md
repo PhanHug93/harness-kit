@@ -21,7 +21,7 @@ models, efforts and fallbacks only when seats are missing. The original legacy
 file remains untouched; existing seats always win and are never candidates.
 An exact old bundle default adopts the new defaults with a note. Invalid active
 configuration is preserved and reported for repair, not reset automatically.
-Filled briefs and USER overlays survive the candidate/apply upgrade path.
+Filled briefs and USER overlays survive every install, reinstall and update.
 Inspect `show`, `validate` and `.codex/codex-mode.sh status` after upgrading.
 `CODEX_MODEL_PROFILE` is a warning no-op during this compatibility release.
 @gate authorization entries are audit declarations.
@@ -167,16 +167,16 @@ working.
 
 ## Installed Shell Functions
 
-The managed shell block is:
+The managed shell block exports `AGENT_BOOTSTRAP_HOME` and defines:
 
-```bash
-export AGENT_BOOTSTRAP_HOME="$HOME/dev/agent-bootstrap"
-agent-init()    { bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "$PWD" "$@"; }
-agent-doctor()  { ./scripts/agent-hook.sh doctor; }
-agent-refresh() { agent-init --refresh-lock; }
-agent-update()  { bash "$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "$AGENT_BOOTSTRAP_HOME" "$@"; }
-agent-upgrade() { agent-update --target "$PWD" --plan "$@"; }
-```
+- `agent-init`: the generator from the project's `.harness-kit/v<lock version>/`
+  copy, or from the home when there is none;
+- `agent-next`: `agent-init --first-10`;
+- `agent-doctor`: `./scripts/agent-hook.sh doctor`;
+- `agent-refresh`: `agent-init --refresh-lock`;
+- `agent-update`: the home's Git-backed updater (`--check`, `--self-update`);
+- `agent-upgrade`: `scripts/harness-kit.sh --to latest`, or the home's
+  `harness-kit-one-shot.sh --to latest` when the project has none.
 
 ## Daily Workflow
 
@@ -199,13 +199,23 @@ Refresh lock after intentional stack/module changes:
 agent-refresh
 ```
 
-Lifecycle inspection and upgrade preview:
+Install, reinstall or update with one command. The first time, from the
+project root:
 
 ```bash
-agent-update --check
-agent-update --self-update
-agent-upgrade --plan
-agent-init --status
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+```
+
+Then `scripts/harness-kit.sh` reinstalls the installed version,
+`scripts/harness-kit.sh --to latest` updates and `--plan` previews. The entry
+fetches the release into `.harness-kit/v<version>/` and runs its
+`harness-kit-run.sh`; it creates no branch without `--branch`, never
+overwrites local edits, and prints the exact next command for each open item
+(`--resolved`, `--take-kit`, `--keep-local`, `--accept`, `--decline`).
+
+Generator lifecycle commands:
+
+```bash
 agent-init --status --json
 agent-init --first-10
 agent-init --diff
@@ -214,28 +224,21 @@ agent-init --apply-candidates
 agent-init --retirement-plan
 ```
 
-One-shot safe upgrade for an old project on another machine:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
-```
-
-That script installs the pinned harness release, creates
-`feature/upgrade-harness-kit`, runs the generator with the installed workflow
-(`full` when no harness lock exists) without `--force`, and leaves
-`*.generated.*` candidates local-only for review.
-
-`--diff` materializes a temporary copy of the target, regenerates harness files
-there, normalizes volatile timestamps and temp paths, and prints generated-file
-diffs without mutating the real target.
+`--diff` regenerates harness files into a staging directory seeded with only
+the kit outputs and their configuration (detection reads the real target in
+place), normalizes volatile timestamps and temp paths, and prints
+generated-file diffs without mutating the real target.
 `--apply-candidates` promotes the latest reviewed `*.generated.*` candidate for
-each generated path and removes older candidates for that same path.
+each generated path and removes older candidates for that same path; files with
+local edits are kept unless named with `--only PATH`. `--keep PATH` leaves a
+file untouched.
 
 Retired generated files (the `v2026.08.10.1` `.github/workflows/agent-guard.yml`
 and its template mirror) are never removed by generation, `--force`, `--diff`,
 `--upgrade-plan`, `--status`, `--apply-candidates`, `--cleanup-backups`,
-`agent-update --apply` or the one-shot defaults; those append a read-only
-retirement plan. `agent-init --apply-retirements` removes only byte-exact
+`agent-update --apply` or a plain `scripts/harness-kit.sh` run; those append a
+read-only retirement plan. The `retire-files` decision of
+`scripts/harness-kit.sh` or `agent-init --apply-retirements` removes only byte-exact
 local-only copies (add `--retirement-scope all-matching` for tracked or non-Git
 copies) after a verified adjacent `<path>.bak.retirement.<run-id>` backup.
 Edited files, links, special files and stale `*.generated.*` candidates are
@@ -280,8 +283,9 @@ Core infra, installed by default:
 - `scripts/agent-local-only-check.sh`, which blocks tracked harness files during
   pre-push.
 - `scripts/install-rtk.sh` and `scripts/rtk`.
-- local-only `.gitignore` block for generated harness files and agent/runtime
-  state.
+- local-only ignore block for generated harness files and agent/runtime
+  state, in `.git/info/exclude` by default (`--ignore-target gitignore` for
+  `.gitignore`).
 
 With `--workflow full`, it also installs:
 
@@ -357,10 +361,17 @@ Generated full-workflow projects use progressive disclosure:
 - Skills under `.agents/skills/` are loaded only when their descriptions match
   the current task.
 
-`scripts/verify-ai-deps.sh` and `.codex/codex-mode.sh doctor` report estimated
-core startup tokens and on-demand full-workflow tokens. The core startup gate
-is 4000 estimated tokens with an amber band above 3800; the full-workflow
-on-demand gate is 6200 with an amber band above 5900. Estimates use a portable heuristic: max(chars/4, words*1.3).
+`scripts/verify-ai-deps.sh` measures estimated core startup tokens and
+on-demand full-workflow tokens (core plus mode contracts, handoff schema, the
+handoff reference's `State values` section and its largest other section, and
+the Karpathy and council workflows); `.codex/codex-mode.sh doctor` reports its
+numbers. The core startup gate is 4000 estimated tokens with an amber band
+above 3800; the full-workflow on-demand gate is 6200 with an amber band above
+5900. Kit text above a gate fails the verifier; project content (the brief,
+the project agent context, USER regions and detector-filled managed blocks)
+above a gate only warns, naming the
+largest project files. Estimates use a portable heuristic: max(bytes/4,
+words*1.3).
 
 ## Closed-loop pre-final
 
@@ -404,10 +415,10 @@ security boundary for arbitrary Bash commands.
 
 Default behavior is non-destructive:
 
-- Existing target files are preserved.
-- Generated candidates are written as `*.generated.<timestamp>` and intentionally
-  remain visible in normal git/status review. Review, apply, or delete them
-  before considering a harness upgrade complete.
+- Local edits are never overwritten; a conflict keeps the local file.
+- Generated candidates are written as `*.generated.<timestamp>`; the run
+  summary and `--status` list them. Resolve each one before considering a
+  harness upgrade complete.
 - `--skip-existing` leaves existing target files untouched, including an
   existing `.gitignore`; it still creates missing files.
 - `--force` is required to overwrite intentionally.

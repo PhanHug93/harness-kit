@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/harness-kit-run-report-v1.schema.json",
+  "title": "Harness Kit Run Report",
+  "description": "One run of harness-kit-run.sh (install, reinstall or update), written to .tools/agent-state/upgrades/<stamp>/report.json. Local-only.",
+  "type": "object",
+  "required": ["schema", "mode", "from", "to", "stamp", "result", "plan_only", "phases", "files", "migrations", "verify", "next", "memory_note"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "harness-kit-run-report/v1"},
+    "mode": {"enum": ["install", "reinstall", "update", "downgrade", "unknown"], "description": "downgrade and unknown (an installed lock without a valid version) are refused."},
+    "from": {"type": "string", "description": "Installed kit version before the run; empty on install or when the lock has none."},
+    "to": {"type": "string", "description": "Kit version of this run."},
+    "stamp": {"$ref": "#/$defs/stamp"},
+    "rollback_id": {"type": "string", "description": "Generator upgrade id to pass to --rollback when it differs from stamp."},
+    "result": {"enum": ["done", "needs review", "failed"]},
+    "plan_only": {"type": "boolean"},
+    "verify_skipped": {"type": "boolean"},
+    "reason": {"type": "string", "description": "Why the run was refused or failed."},
+    "would_refuse": {"type": "string", "description": "--plan only: why the real run would be refused (the plan then ends needs review)."},
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "status", "seconds"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"enum": ["preflight", "stage", "apply", "migrate", "verify", "report"]},
+          "status": {"enum": ["ok", "needs review", "failed", "refused", "skipped"]},
+          "seconds": {"type": "integer", "minimum": 0},
+          "log": {"type": "string"}
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "required": ["counts", "conflicts", "kept", "pinned"],
+      "additionalProperties": false,
+      "properties": {
+        "counts": {
+          "type": "object",
+          "description": "Files per class: the generator's classes (create, unchanged, update, overwrite, merge, kept, conflict, unsafe, preserved, pinned) plus resolved and take-kit for this run's answers.",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "candidate"],
+            "additionalProperties": false,
+            "properties": {
+              "path": {"$ref": "#/$defs/relpath"},
+              "candidate": {"type": "string"}
+            }
+          }
+        },
+        "kept": {"type": "array", "items": {"$ref": "#/$defs/relpath"}},
+        "pinned": {"type": "array", "items": {"$ref": "#/$defs/relpath"}},
+        "stale_pins": {"type": "array", "items": {"$ref": "#/$defs/relpath"}},
+        "resolved": {"type": "array", "items": {"$ref": "#/$defs/relpath"}},
+        "taken": {"type": "array", "items": {"$ref": "#/$defs/relpath"}},
+        "cleared": {"type": "array", "items": {"$ref": "#/$defs/relpath"}, "description": "Recorded resolutions and pins cleared by --reset."}
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "required": ["applied", "pending", "declined"],
+      "additionalProperties": false,
+      "properties": {
+        "applied": {"type": "array", "items": {"$ref": "#/$defs/migration"}},
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "summary", "accept"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "summary": {"type": "string"},
+              "facts": {"type": "string"},
+              "accept": {"type": "string", "description": "Exact command that accepts this decision."},
+              "decline": {"type": "string"}
+            }
+          }
+        },
+        "declined": {"type": "array", "items": {"$ref": "#/$defs/migration"}},
+        "failed": {"type": "array", "items": {"$ref": "#/$defs/migration"}}
+      }
+    },
+    "verify": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "check": {"type": "string"},
+          "status": {"enum": ["pass", "fail", "skipped"]},
+          "log": {"type": "string"}
+        }
+      }
+    },
+    "next": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "array", "items": {"type": "string"}},
+    "memory_note": {
+      "type": "string",
+      "description": "At most three lines for agents to save in agentmemory.",
+      "pattern": "^[^\\n]*(\\n[^\\n]*){0,2}$"
+    }
+  },
+  "$defs": {
+    "stamp": {"type": "string", "pattern": "^[0-9]{8}-[0-9]{6}$"},
+    "relpath": {"type": "string", "minLength": 1},
+    "migration": {
+      "type": "object",
+      "required": ["id", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "summary": {"type": "string"},
+        "facts": {"type": "string"}
+      }
+    }
+  }
+}

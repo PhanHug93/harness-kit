@@ -42,11 +42,13 @@
         "properties": {
           "command": { "type": "string", "minLength": 1 },
           "purpose": { "type": "string", "minLength": 1 },
-          "source": { "type": "string", "minLength": 1 }
+          "source": { "type": "string", "minLength": 1 },
+          "scope": { "enum": ["fast", "full"] }
         },
         "additionalProperties": false
       }
     },
+    "toolchain": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "conventions": { "type": "array", "items": { "type": "string" } },
     "source_evidence": {
       "type": "array",

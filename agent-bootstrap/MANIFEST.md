@@ -24,7 +24,9 @@ tag or source branch to complete a feature PR.
 | File | Role | Drift Rule |
 |---|---|---|
 | `bootstrap-multi-agent-project.sh` | Bootstrap generator for target projects. | Source of truth for generated project files. |
-| `harness-kit-one-shot-upgrade.sh` | One-shot safe installer/upgrader for old projects on another machine. | Must match canonical home export. |
+| `harness-kit-one-shot.sh` | One-shot entry: fetches a kit release into `<project>/.harness-kit/v<version>/` and runs its `harness-kit-run.sh`; emitted into targets as `scripts/harness-kit.sh`. | Must match canonical home export and generated target `scripts/harness-kit.sh`. |
+| `harness-kit-one-shot-upgrade.sh` | Old name of the one-shot entry, kept for existing links. | Must be byte-identical to `harness-kit-one-shot.sh` (`scripts/release.sh --check`). |
+| `harness-kit-run.sh` | One-shot orchestrator: install, reinstall or update one project in phases (preflight, stage, apply, migrate, verify, report). | Must match canonical home export; never emitted into targets. |
 | `agent-bootstrap-update.sh` | Git-backed updater for canonical home and target upgrade planning. | Must match canonical home export. |
 | `install-agent-bootstrap-home.sh` | Exports this bundle into `$AGENT_BOOTSTRAP_HOME`. | Must copy every other file listed in this manifest; it does not copy itself. |
 | `README.md` | Operator guide for the copyable bundle. | Must match canonical home export. |
@@ -56,6 +58,9 @@ tag or source branch to complete a feature PR.
 | `schemas/agent-bootstrap-retirement-v1.schema.json` | JSON Schema for `--retirement-plan`, `--retirement-status` and `--apply-retirements` `--json` reports. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-bootstrap-verify-report-v1.schema.json` | JSON Schema for `scripts/verify-ai-deps.sh --json` output. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-guard-event-v2.schema.json` | JSON Schema for `agent-guard.sh` close-out telemetry events. | Must match canonical home export and generated target schema catalog. |
+| `schemas/agent-guard-verification-v2.schema.json` | JSON Schema for the `agent-guard.sh pre-final --run-verify` verification report (`.agents/state/last-verify-report.json`). | Must match canonical home export and generated target schema catalog. |
+| `schemas/harness-project-knowledge-v1.schema.json` | JSON Schema for `.tools/agent-state/project-knowledge.json`. | Must match canonical home export and generated target schema catalog. |
+| `schemas/harness-kit-run-report-v1.schema.json` | JSON Schema for the one-shot run report `.tools/agent-state/upgrades/<STAMP>/report.json`. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/tool-contract/shared.md` | Shared managed tool contract rendered into CLAUDE/GEMINI/Windsurf/Cursor entrypoints. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/android_kotlin.md` | Android/Kotlin overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
@@ -86,6 +91,11 @@ tag or source branch to complete a feature PR.
 | `lib/onboarding.sh` | Sourced library that emits the onboarding scaffold (full workflow). | Must match canonical home export. |
 | `lib/overlays.sh` | Sourced USER-overlay engine; preserves keyed `<!-- BEGIN USER -->` regions across regeneration. | Must match canonical home export. |
 | `lib/retirement.py` | HK-07 retired-artifact engine: read-only plan/status sections and the explicit `--apply-retirements` backup/delete path. | Must match canonical home export; never emitted into targets. |
+| `lib/knowledge.py` | Project knowledge engine for `.tools/agent-state/project-knowledge.json` (pins, resolutions, decisions, runs). | Must match canonical home export; never emitted into targets. |
+| `lib/migrations.sh` | Sourced migration runner used by `harness-kit-run.sh`. | Must match canonical home export; never emitted into targets. |
+| `migrations/next-ignore-block-to-exclude.sh` | Migration `next-ignore-block-to-exclude` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/next-retire-files.sh` | Migration `next-retire-files` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/next-untrack-local-records.sh` | Migration `next-untrack-local-records` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

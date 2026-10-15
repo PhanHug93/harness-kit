@@ -24,7 +24,7 @@ bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$tar
 agents="$(cat "$target/AGENTS.md")"
 for phrase in "## Development Records" ".agents/tasks/<task-id>/" "docs/superpowers/plans/<topic>/" \
   "in the first commit that" "docs/superpowers/plans/<topic>/journal.md" \
-  "superpowers brainstorming and writing-plans" "do not commit them"; do
+  "superpowers brainstorming and writing-plans" "plans never leave"; do
   [[ "$agents" == *"$phrase"* ]] || fail "AGENTS.md must state the development-record rule: $phrase"
 done
 
@@ -53,8 +53,14 @@ for rel in "${pushed[@]}" "${local_only[@]}"; do
 done
 
 git -C "$target" add -A
-# The kit's .gitignore block is itself local-only (reported by the check).
-git -C "$target" rm -q --cached .gitignore
+# The kit's ignore block lives in .git/info/exclude, never in a tracked file.
+exclude_file="$(git -C "$target" rev-parse --git-path info/exclude)"
+case "$exclude_file" in /*) ;; *) exclude_file="$target/$exclude_file" ;; esac
+marker='# >>> multi-agent bootstrap local state >>>'
+grep -Fq "$marker" "$exclude_file" || fail "the ignore block must be written to $exclude_file"
+if [[ -f "$target/.gitignore" ]] && grep -Fq "$marker" "$target/.gitignore"; then
+  fail "the ignore block must not be written to .gitignore by default"
+fi
 tracked="$(git -C "$target" ls-files)"
 for rel in "${pushed[@]}"; do
   grep -qxF "$rel" <<<"$tracked" || fail "$rel must be pushable"
@@ -84,5 +90,69 @@ set -e
 [[ "$out" == *".agents/tasks/checkout/task.md"* ]] || fail "the check must name the task packet: $out"
 [[ "$out" != *"journal.md"* && "$out" != *"specs/checkout/design.md"* ]] ||
   fail "pushable records must not be reported: $out"
+
+# Design case 10: a tracked plain .gitignore (without the block) passes the check.
+git -C "$target" rm -q --cached -f docs/superpowers/plans/checkout/plan.md docs/superpowers/plans/checkout/summary.md \
+  .agents/tasks/checkout/task.md
+printf 'node_modules/\n' > "$target/.gitignore"
+git -C "$target" add .gitignore
+(cd "$target" && bash scripts/agent-local-only-check.sh status >/dev/null 2>&1) ||
+  fail "a tracked plain .gitignore must pass the local-only check"
+
+# --ignore-target gitignore keeps the block in .gitignore only.
+gi_target="$TMP_ROOT/gitignore-project"
+mkdir -p "$gi_target"
+git -C "$gi_target" init -q
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$gi_target" --workflow full \
+  --ignore-target gitignore >/dev/null 2>&1
+grep -Fq "$marker" "$gi_target/.gitignore" || fail "--ignore-target gitignore must write .gitignore"
+gi_exclude="$(git -C "$gi_target" rev-parse --git-path info/exclude)"
+case "$gi_exclude" in /*) ;; *) gi_exclude="$gi_target/$gi_exclude" ;; esac
+if [[ -f "$gi_exclude" ]] && grep -Fq "$marker" "$gi_exclude"; then
+  fail "--ignore-target gitignore must not also write the exclude file"
+fi
+# A rerun keeps the block where it already is.
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$gi_target" --workflow full --force >/dev/null 2>&1
+if [[ -f "$gi_exclude" ]] && grep -Fq "$marker" "$gi_exclude"; then
+  fail "a rerun must keep the block in .gitignore"
+fi
+
+# A linked worktree writes to the common exclude file.
+wt_repo="$TMP_ROOT/wt-repo"
+mkdir -p "$wt_repo"
+git -C "$wt_repo" init -q
+git -C "$wt_repo" -c user.email=t@example.invalid -c user.name=t commit -q --allow-empty -m seed
+git -C "$wt_repo" worktree add -q "$TMP_ROOT/wt-second"
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$TMP_ROOT/wt-second" --workflow full >/dev/null 2>&1
+wt_exclude="$(git -C "$TMP_ROOT/wt-second" rev-parse --git-path info/exclude)"
+case "$wt_exclude" in /*) ;; *) wt_exclude="$TMP_ROOT/wt-second/$wt_exclude" ;; esac
+grep -Fq "$marker" "$wt_exclude" || fail "worktree block must land in the common exclude file: $wt_exclude"
+[[ "$wt_exclude" == "$wt_repo/.git/info/exclude" ]] || fail "worktree exclude must be the common one, got $wt_exclude"
+[[ ! -f "$TMP_ROOT/wt-second/.gitignore" ]] || ! grep -Fq "$marker" "$TMP_ROOT/wt-second/.gitignore" ||
+  fail "worktree must not write the block to .gitignore"
+
+# Monorepo subprojects: the block is anchored under each subproject prefix.
+mono="$TMP_ROOT/mono"
+mkdir -p "$mono/apps/a" "$mono/apps/b"
+git -C "$mono" init -q
+kit() { bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$1" --workflow full >/dev/null 2>&1; }
+ignored() { git -C "$mono" check-ignore -q "$1"; }
+kit "$mono/apps/a"
+printf 'x\n' > "$mono/AGENTS.md"; printf 'x\n' > "$mono/apps/b/AGENTS.md"; mkdir -p "$mono/apps/a/sub"; printf 'x\n' > "$mono/apps/a/sub/x.bak.1"
+ignored apps/a/AGENTS.md || fail "apps/a/AGENTS.md must be ignored"
+ignored apps/a/.agents/x || fail "apps/a/.agents/ must be ignored"
+ignored apps/a/sub/x.bak.1 || fail "slash-less patterns must still match at depth inside apps/a"
+ignored AGENTS.md && fail "root AGENTS.md must not be ignored"
+ignored apps/b/AGENTS.md && fail "apps/b/AGENTS.md must not be ignored"
+kit "$mono/apps/b"
+ignored apps/b/AGENTS.md || fail "apps/b/AGENTS.md must be ignored after generating apps/b"
+ignored AGENTS.md && fail "root AGENTS.md must stay unignored"
+mono_ex="$mono/.git/info/exclude"
+grep -Fxq "$marker apps/a/" "$mono_ex" || fail "apps/a block marker missing"
+grep -Fxq "$marker apps/b/" "$mono_ex" || fail "apps/b block marker missing"
+before="$(cat "$mono_ex")"
+kit "$mono/apps/a"; kit "$mono/apps/b"
+[[ "$(cat "$mono_ex")" == "$before" ]] || fail "rerun must be idempotent"
+[[ "$(grep -Fc "$marker" "$mono_ex")" -eq 2 ]] || fail "expected exactly two blocks"
 
 printf 'local-only-mode-test: ok\n'

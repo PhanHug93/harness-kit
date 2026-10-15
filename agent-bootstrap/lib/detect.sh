@@ -839,7 +839,7 @@ load_embedded_tech_stack_lib() {
 
 detect_tech_stack() {
   load_embedded_tech_stack_lib
-  agent_detect_tech_stack "$TARGET_DIR"
+  agent_detect_tech_stack "${DETECT_ROOT:-$TARGET_DIR}"
   TECH_STACKS=()
   MODULES=()
   VERIFY_COMMANDS=()

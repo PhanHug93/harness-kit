@@ -26,7 +26,35 @@
           "label": { "type": "string" }
         }
       }
+    },
+    "context_budget": {
+      "type": "object",
+      "required": ["core", "on_demand"],
+      "properties": {
+        "core": { "$ref": "#/$defs/budget" },
+        "on_demand": {
+          "allOf": [{ "$ref": "#/$defs/budget" }],
+          "properties": {
+            "reference_sections": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "budget": {
+      "type": "object",
+      "required": ["estimate", "kit", "project", "amber", "gate", "status", "kit_status"],
+      "properties": {
+        "estimate": { "type": "integer", "minimum": 0 },
+        "kit": { "type": "integer", "minimum": 0 },
+        "project": { "type": "integer", "minimum": 0 },
+        "amber": { "type": "integer", "minimum": 0 },
+        "gate": { "type": "integer", "minimum": 0 },
+        "status": { "enum": ["ok", "amber", "over"] },
+        "kit_status": { "enum": ["ok", "amber", "over"] }
+      }
+    }
+  }
 }

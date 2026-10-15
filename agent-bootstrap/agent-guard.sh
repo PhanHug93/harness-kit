@@ -157,7 +157,7 @@ PY
 case "${1:-}" in
   workspace-check) workspace_check; exit $? ;;
   preflight) workspace_check entry >/dev/null || true ;;
-  pre-edit|pre-final|skill-note) workspace_check quiet >/dev/null || true ;;
+  pre-edit|pre-final|baseline|skill-note) workspace_check quiet >/dev/null || true ;;
 esac
 
 POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
@@ -198,6 +198,14 @@ else
   STATE_WRITABLE=false
 fi
 CONTEXT_PACK="$STATE_DIR/context-pack.json"
+# Status lines name the real context pack: relative inside the project,
+# absolute when the state directory lives elsewhere.
+context_pack_display() {
+  case "$CONTEXT_PACK" in
+    "$PROJECT_ROOT"/*) printf '%s' "${CONTEXT_PACK#"$PROJECT_ROOT"/}" ;;
+    *) printf '%s' "$CONTEXT_PACK" ;;
+  esac
+}
 ACK_LOG="$STATE_DIR/guard-ack.log"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 VERIFY_REPORT="$STATE_DIR/last-verify-report.json"
@@ -206,10 +214,25 @@ VERIFY_TIMEOUT_SECONDS="${AGENT_GUARD_VERIFY_TIMEOUT_SECONDS:-900}"
 VERIFY_TOTAL_DEFAULT_FAST="${AGENT_GUARD_VERIFY_TOTAL_FAST_SECONDS:-300}"
 VERIFY_TOTAL_DEFAULT_FULL="${AGENT_GUARD_VERIFY_TOTAL_FULL_SECONDS:-1800}"
 VERIFY_SCOPE_DEFAULT="${AGENT_GUARD_VERIFY_SCOPE:-fast}"
+# Only the commands that use the scope (pre-final, baseline) refuse a bad
+# value, and only when no --verify-scope flag overrides it; edit hooks and
+# other commands must not fail on an unrelated setting.
+require_verify_scope_default() {
+  case "$VERIFY_SCOPE_DEFAULT" in
+    fast|full) ;;
+    *) fail "AGENT_GUARD_VERIFY_SCOPE must be fast or full (got: $VERIFY_SCOPE_DEFAULT)" ;;
+  esac
+}
 SESSION_EVENTS="$STATE_DIR/session-events.jsonl"
 EMIT_CLOSEOUT=false
 GATE_STATUS=fail
 RUN_VERIFY_FLAG=false
+# Set only by `baseline` (never inherited from the environment).
+BASELINE_KEY=""
+BASELINE_TOOLCHAIN=""
+# Set by read_tree_state: the tree that verification evidence describes.
+TREE_COMMIT=""
+TREE_DIRTY=""
 EXIT_PRE_EDIT_DENIED=3
 
 REQUIRED_CONTEXT=()
@@ -220,7 +243,7 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh workspace-check|preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
+    "Usage: scripts/agent-guard.sh workspace-check|preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|baseline [--refresh] [--advisory] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
     "" \
     "Lite context guard for generated multi-agent harness projects."
 }
@@ -988,7 +1011,7 @@ preflight() {
   load_policy
   ensure_required_context
   write_context_pack
-  printf 'agent-guard: preflight ok (context_pack=.agents/state/context-pack.json)\n'
+  printf 'agent-guard: preflight ok (context_pack=%s)\n' "$(context_pack_display)"
 }
 
 check_guard() {
@@ -1165,6 +1188,7 @@ append_pre_final_event() {
 import json
 import os
 import pathlib
+import re
 import subprocess
 import time
 
@@ -1178,7 +1202,7 @@ if ran and verify_path.is_file():
         doc = json.loads(verify_path.read_text(encoding="utf-8"))
         verification = {
             "ran": True,
-            "status": doc.get("verification_status", "none"),
+            "status": doc.get("status", "none"),
             "summary": doc.get("summary", {}),
             "available": True,
             "report_path": str(verify_path),
@@ -1208,16 +1232,42 @@ def count_changed_files(project_root):
     return sum(1 for line in result.stdout.splitlines() if line.strip())
 
 
-def estimate_tokens_for_file(path):
+def estimate_tokens(size, words):
+    # Same estimate as scripts/verify-ai-deps.sh: the larger of bytes/4 and words*1.3.
+    return int(max(size / 4, words * 1.3))
+
+
+USER_OWNED_CONTEXT = {"docs/agent-configs/project-brief.md", "docs/agent-configs/project-agent-context.md"}
+# USER regions and detector-filled managed blocks hold project content.
+PROJECT_BLOCK_MARKER = re.compile(
+    rb"<!-- (BEGIN|END) (USER:|MANAGED: multi-agent-bootstrap:"
+    rb"(detected-stack|detected-modules|verification-candidates|detection-warnings) )"
+)
+
+
+def split_tokens_for_file(project_root, relpath):
+    """(kit, project) estimates, split as scripts/verify-ai-deps.sh does."""
+    path = project_root / relpath
     if not path.is_file():
-        return 0
+        return 0, 0
     try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        data = path.read_bytes()
     except Exception:
-        return 0
-    words = len(text.split())
-    chars = len(text)
-    return int(max(chars / 4, words * 1.3))
+        return 0, 0
+    if relpath in USER_OWNED_CONTEXT:
+        return 0, estimate_tokens(len(data), len(data.split()))
+    kit = [0, 0]
+    project = [0, 0]
+    in_user = False
+    for line in data.split(b"\n")[: -1 if data.endswith(b"\n") else None]:
+        marker = PROJECT_BLOCK_MARKER.search(line)
+        if marker:
+            part, in_user = kit, marker.group(1) == b"BEGIN"
+        else:
+            part = project if in_user else kit
+        part[0] += len(line) + 1
+        part[1] += len(line.split())
+    return estimate_tokens(*kit), estimate_tokens(*project)
 
 
 def core_startup_token_estimate(project_root):
@@ -1226,7 +1276,9 @@ def core_startup_token_estimate(project_root):
         "docs/agent-configs/project-agent-context.md",
         "docs/agent-configs/project-brief.md",
     )
-    return sum(estimate_tokens_for_file(project_root / relpath) for relpath in relpaths)
+    parts = [split_tokens_for_file(project_root, relpath) for relpath in relpaths]
+    kit = sum(part[0] for part in parts)
+    return {"core_startup": kit + sum(part[1] for part in parts), "core_startup_kit": kit}
 
 
 event = {
@@ -1241,7 +1293,7 @@ event = {
         or "unknown"
     ),
     "files_changed": count_changed_files(root),
-    "token_estimate": {"core_startup": core_startup_token_estimate(root)},
+    "token_estimate": core_startup_token_estimate(root),
     "gate_status": gate,
     "verification": verification,
 }
@@ -1304,24 +1356,135 @@ closeout_trap() {
   exit "$code"
 }
 
-# Runnable vs placeholder/full-scope classification is centralized in the Python
-# runner below (single source of truth): a command is skipped when it is empty,
-# contains a token-shaped placeholder such as `<scheme>`, or starts with
-# "Add project-specific"; full-class build commands are skipped under the
-# default `fast` scope.
+# Command source and grading are centralized in the Python runner below (single
+# source of truth). Commands come from the contract's `verification[]` when it
+# declares any (class = the entry's `scope`, default fast), otherwise from the
+# detector (class guessed by `command_class`). A command is skipped when it is
+# empty, contains a token-shaped placeholder such as `<scheme>`, starts with
+# "Add project-specific", is a discovery command (`-list`, `--version`, `--help`)
+# or is full-class under the default `fast` scope. Runner exit codes: 0 pass,
+# 1 fail, 2 error, 3 budget exhausted, 4 unverified (no command ran).
+
+# Report file: last-verify-report.json, or a safe AGENT_GUARD_VERIFY_REPORT_NAME
+# so other callers (Stop hook, baseline) never overwrite pre-final evidence. The
+# suffix rule keeps other state files (context-pack.json, ...) out of reach.
+select_verify_report() {
+  local name="${AGENT_GUARD_VERIFY_REPORT_NAME:-}" pattern='^[a-z0-9-]+-(verify|report)\.json$'
+  [[ -n "$name" ]] || return 0
+  [[ "$name" =~ $pattern ]] ||
+    fail "AGENT_GUARD_VERIFY_REPORT_NAME must match ^[a-z0-9-]+-(verify|report)\\.json\$ (got: $name)"
+  VERIFY_REPORT="$STATE_DIR/$name"
+}
+
+# Sets TREE_COMMIT (HEAD, empty when none) and TREE_DIRTY (true|false) for the
+# tree that verification evidence describes. A tree whose status cannot be
+# read (no Git, timeout) is unknown, so it counts as dirty, never clean.
+read_tree_state() {
+  local state=""
+  state="$(PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
+import os
+import subprocess
+
+
+def git_output(*args):
+    try:
+        result = subprocess.run(
+            ["git", "-C", os.environ["PROJECT_ROOT"], *args],
+            env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+        )
+    except Exception:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+status_lines = git_output("status", "--porcelain")
+print((git_output("rev-parse", "--verify", "-q", "HEAD") or "").strip())
+print("true" if status_lines is None or status_lines.strip() else "false")
+PY
+)" || state=""
+  TREE_COMMIT="" TREE_DIRTY=""
+  {
+    IFS= read -r TREE_COMMIT || true
+    IFS= read -r TREE_DIRTY || true
+  } <<<"$state"
+  [[ "$TREE_DIRTY" == "false" ]] || TREE_DIRTY=true
+}
+
+# Makes VERIFY_REPORT absolute and removes a report left by an earlier run, so
+# it is never read as this run's evidence (best effort without a writable state).
+reset_verify_report() {
+  local dir abs
+  dir="$(dirname "$VERIFY_REPORT")"
+  if [[ "$STATE_WRITABLE" == "true" ]]; then
+    mkdir -p "$dir" 2>/dev/null || true
+  fi
+  if abs="$(cd "$dir" 2>/dev/null && pwd -P)"; then
+    VERIFY_REPORT="$abs/${VERIFY_REPORT##*/}"
+  fi
+  rm -f "$VERIFY_REPORT" 2>/dev/null || true
+}
+
+# Nothing ran, so it is never a pass: strict mode fails with exit 4
+# (unverified); advisory mode warns.
+no_verification_ran() {
+  local strict="$1" reason="$2" fix="$3"
+  warn "$reason; skipping verification execution"
+  if [[ "$strict" == "true" ]]; then
+    GATE_STATUS=fail
+    printf 'agent-guard: ERROR: unverified: no verification command ran (0 skipped); %s\n' "$fix" >&2
+    return 4
+  fi
+  GATE_STATUS=warn
+  warn "no verification command ran in advisory mode (unverified); gate_status=warn"
+  return 0
+}
+
+# Prints yes when the contract declares a verification entry, invalid when it
+# is unreadable JSON, otherwise no.
+contract_verification_state() {
+  [[ -f "$PROJECT_TECH_STACK_FILE" ]] || { printf 'no\n'; return 0; }
+  python3 - "$PROJECT_TECH_STACK_FILE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        doc = json.load(handle)
+except Exception:
+    print("invalid")
+    sys.exit(0)
+entries = doc.get("verification") if isinstance(doc, dict) else None
+print("yes" if isinstance(entries, list) and entries else "no")
+PY
+}
+
 run_detected_verification() {
   local strict="$1"
   local verify_scope="$2"
+  reset_verify_report
   if [[ "$STATE_WRITABLE" != "true" ]]; then
-    GATE_STATUS=warn
-    warn "state dir not writable; skipping verification execution (advisory)"
+    no_verification_ran "$strict" "state dir not writable" \
+      "set AGENT_STATE_DIR to a writable directory" || return $?
     return 0
   fi
-  [[ -x "$DETECTOR" ]] || { GATE_STATUS=warn; warn "missing detector; skipping verification execution"; return 0; }
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to run detected verification"
+  local detector_json="" code=0 total contract_state runner_mode=run
+  contract_state="$(contract_verification_state)"
+  if [[ "$contract_state" == "no" ]]; then
+    if [[ -x "$DETECTOR" ]]; then
+      detector_json="$("$DETECTOR" --json 2>/dev/null || true)"
+    else
+      # Nothing can run: the runner only records an unverified report, so a
+      # caller reading it sees "unverified" rather than a missing report.
+      runner_mode=record-unverified
+    fi
+  fi
+  [[ -n "$TREE_DIRTY" ]] || read_tree_state
   mkdir -p "$VERIFY_LOG_DIR"
-  local detector_json code=0 total
-  detector_json="$("$DETECTOR" --json 2>/dev/null || true)"
   total="${AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS:-}"
   if [[ -z "$total" ]]; then
     if [[ "$verify_scope" == "full" ]]; then
@@ -1330,6 +1493,13 @@ run_detected_verification() {
       total="$VERIFY_TOTAL_DEFAULT_FAST"
     fi
   fi
+  RUNNER_MODE="$runner_mode" \
+  TREE_COMMIT="$TREE_COMMIT" \
+  TREE_DIRTY="$TREE_DIRTY" \
+  BASELINE_KEY="$BASELINE_KEY" \
+  BASELINE_TOOLCHAIN="$BASELINE_TOOLCHAIN" \
+  CONTRACT_STATE="$contract_state" \
+  CONTRACT_PATH="$PROJECT_TECH_STACK_FILE" \
   DETECTOR_JSON="$detector_json" \
   VERIFY_REPORT="$VERIFY_REPORT" \
   VERIFY_LOG_DIR="$VERIFY_LOG_DIR" \
@@ -1359,7 +1529,15 @@ log_dir.mkdir(parents=True, exist_ok=True)
 results = []
 summary = {"pass": 0, "fail": 0, "skipped": 0, "error": 0}
 placeholder_token = re.compile(r"<[A-Za-z0-9_.:-]+>")
+# Listing targets or printing versions/help proves nothing about the change.
+discovery_flag = re.compile(r"(^|\s)(-list|--list|-version|--version|--help)(\s|$)")
 deadline = time.time() + total_timeout if total_timeout > 0 else None
+source = "detector" if os.environ.get("CONTRACT_STATE") == "no" else "contract"
+
+
+# The tree this evidence describes (read_tree_state): HEAD and local changes.
+commit = os.environ["TREE_COMMIT"]
+dirty = os.environ["TREE_DIRTY"] != "false"
 
 
 def diagnostic_escape(value):
@@ -1384,18 +1562,28 @@ def diagnostic_escape(value):
     return "".join(escaped)
 
 
-def write_report(verification_status, extra=None):
+def write_report(status, extra=None):
     report = {
-        "schema": "agent-guard-verification/v1",
+        "schema": "agent-guard-verification/v2",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "scope": scope,
-        "verification_status": verification_status,
+        "source": source,
+        "commit": commit,
+        "dirty": dirty,
+        "status": status,
         "summary": summary,
-        "commands": results,
+        "results": results,
+        "budget_seconds": total_timeout,
     }
+    # Baseline runs record their cache key and toolchain fingerprint.
+    if os.environ.get("BASELINE_KEY"):
+        report["baseline_key"] = os.environ["BASELINE_KEY"]
+        report["toolchain"] = json.loads(os.environ.get("BASELINE_TOOLCHAIN") or '"undeclared"')
     if extra:
         report.update(extra)
-    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    partial = report_path.with_name(report_path.name + ".tmp")
+    partial.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    os.replace(partial, report_path)
 
 
 def write_error_report(message):
@@ -1403,16 +1591,39 @@ def write_error_report(message):
     write_report("error", {"error": message})
 
 
-try:
-    detection = json.loads(os.environ.get("DETECTOR_JSON") or "{}")
-except Exception as exc:
-    write_error_report(f"detector JSON is invalid: {exc}")
-    sys.exit(2)
+def load_commands():
+    """Return (command, declared class) pairs; the class is None for detector guesses."""
+    if source == "contract":
+        try:
+            contract = json.loads(pathlib.Path(os.environ["CONTRACT_PATH"]).read_text(encoding="utf-8"))
+        except Exception as exc:
+            write_error_report(f"project tech-stack contract is invalid: {exc}")
+            sys.exit(2)
+        entries = contract.get("verification") if isinstance(contract, dict) else None
+        if not isinstance(entries, list) or not entries:
+            write_error_report("project tech-stack contract changed during verification")
+            sys.exit(2)
+        pairs = []
+        for entry in entries:
+            entry = entry if isinstance(entry, dict) else {}
+            pairs.append((entry.get("command"), "full" if entry.get("scope") == "full" else "fast"))
+        return pairs
+    try:
+        detection = json.loads(os.environ.get("DETECTOR_JSON") or "{}")
+    except Exception as exc:
+        write_error_report(f"detector JSON is invalid: {exc}")
+        sys.exit(2)
+    detected = detection.get("verification_commands") if isinstance(detection, dict) else None
+    if not isinstance(detected, list):
+        write_error_report("detector JSON has no verification_commands array")
+        sys.exit(2)
+    return [(command, None) for command in detected]
 
-commands = detection.get("verification_commands")
-if not isinstance(commands, list):
-    write_error_report("detector JSON has no verification_commands array")
-    sys.exit(2)
+
+if os.environ.get("RUNNER_MODE") == "record-unverified":
+    write_report("unverified")
+    sys.exit(4)
+commands = load_commands()
 
 
 def path_for_report(path):
@@ -1439,7 +1650,7 @@ def command_class(command):
     return "fast"
 
 
-for index, command in enumerate(commands, 1):
+for index, (command, declared_class) in enumerate(commands, 1):
     if (
         not isinstance(command, str)
         or not command
@@ -1447,27 +1658,33 @@ for index, command in enumerate(commands, 1):
         or command.startswith("Add project-specific")
     ):
         summary["skipped"] += 1
-        results.append({"command": command, "status": "skipped", "reason": "placeholder_or_non_runnable"})
+        results.append({"command": command, "source": source, "status": "skipped", "reason": "placeholder_or_non_runnable"})
         print(f"agent-guard: warn: skipped verification command: {command}", file=sys.stderr)
         continue
-    klass = command_class(command)
+    klass = declared_class or command_class(command)
+    if discovery_flag.search(command):
+        summary["skipped"] += 1
+        results.append({"command": command, "source": source, "status": "skipped", "reason": "discovery", "class": klass})
+        print(f"agent-guard: warn: skipped discovery command (not evidence): {command}", file=sys.stderr)
+        continue
     if scope == "fast" and klass == "full":
         summary["skipped"] += 1
-        results.append({"command": command, "status": "skipped", "reason": "scope_fast", "class": klass})
+        results.append({"command": command, "source": source, "status": "skipped", "reason": "scope_fast", "class": klass})
         print(f"agent-guard: warn: skipped full-scope verification command: {command}", file=sys.stderr)
         continue
     if deadline is not None:
         remaining = deadline - time.time()
         if remaining <= 0:
             summary["skipped"] += 1
-            results.append({"command": command, "status": "skipped", "reason": "budget_exhausted", "class": klass})
+            results.append({"command": command, "source": source, "status": "skipped", "reason": "budget_exhausted", "class": klass})
             print(f"agent-guard: warn: skipped verification command after total budget exhausted: {command}", file=sys.stderr)
             continue
         effective_timeout = max(1, min(timeout, int(math.ceil(remaining))))
     else:
         effective_timeout = timeout
     started = time.time()
-    log_path = log_dir / f"verify-{int(started)}-{index}.log"
+    # The pid keeps logs of concurrent runs started in the same second apart.
+    log_path = log_dir / f"verify-{int(started)}-{os.getpid()}-{index}.log"
     with log_path.open("w", encoding="utf-8") as log:
         log.write(f"$ {command}\n")
         start_error = None
@@ -1477,7 +1694,7 @@ for index, command in enumerate(commands, 1):
             argv = []
         if not argv:
             summary["skipped"] += 1
-            results.append({"command": command, "status": "skipped", "reason": "unparseable_command", "class": klass})
+            results.append({"command": command, "source": source, "status": "skipped", "reason": "unparseable_command", "class": klass})
             print(f"agent-guard: warn: skipped unparseable verification command: {command}", file=sys.stderr)
             continue
         try:
@@ -1527,6 +1744,7 @@ for index, command in enumerate(commands, 1):
         status = "timeout" if timed_out else "fail"
     item = {
         "command": command,
+        "source": source,
         "class": klass,
         "status": status,
         "exit_code": exit_code,
@@ -1566,51 +1784,50 @@ if budget_exhausted:
     print(f"agent-guard: ERROR: verification budget exhausted ({summary['pass']} passed, {summary['skipped']} skipped)", file=sys.stderr)
     sys.exit(3)
 if executed == 0:
-    write_report("none")
-    print(f"agent-guard: warn: no runnable verification commands ({summary['skipped']} skipped); gate=pass-with-warn", file=sys.stderr)
-    sys.exit(0)
+    write_report("unverified")
+    print(f"agent-guard: ERROR: unverified: no verification command ran ({summary['skipped']} skipped); fill verification[] in docs/superpowers/specs/project-tech-stack.json", file=sys.stderr)
+    sys.exit(4)
 write_report("pass")
 print(f"agent-guard: verification ok ({summary['pass']} passed, {summary['skipped']} skipped)")
 PY
-  local verification_status
-  verification_status="$(python3 - "$VERIFY_REPORT" <<'PY' 2>/dev/null || true
-import json
-import sys
-try:
-    print(json.load(open(sys.argv[1], encoding="utf-8")).get("verification_status", "none"))
-except Exception:
-    print("error")
-PY
-)"
-  if [[ "$code" -ne 0 ]]; then
-    if [[ "$code" -eq 2 ]]; then
-      if [[ "$strict" == "true" ]]; then
-        GATE_STATUS=fail
-        return "$code"
-      fi
-      GATE_STATUS=warn
-      warn "verification could not run (error); gate_status=warn"
-      return 0
+  if [[ "$runner_mode" == "record-unverified" ]]; then
+    if [[ -f "$VERIFY_REPORT" ]]; then
+      printf 'agent-guard: verify_report=%s\n' "$VERIFY_REPORT"
     fi
-    if [[ "$strict" == "true" ]]; then
-      GATE_STATUS=fail
-      return "$code"
-    fi
-    GATE_STATUS=warn
-    warn "verification failed in advisory mode (gate_status=warn)"
+    no_verification_ran "$strict" "missing detector" \
+      "fill verification[] in docs/superpowers/specs/project-tech-stack.json" || return $?
     return 0
   fi
-  if [[ "$verification_status" == "none" || "$verification_status" == "skipped" ]]; then
-    GATE_STATUS=warn
-  elif [[ "$verification_status" == "pass" ]]; then
-    GATE_STATUS=pass
+  # The runner has returned: only now is the verification recorded as run.
+  RUN_VERIFY_FLAG=true
+  if [[ -f "$VERIFY_REPORT" ]]; then
+    printf 'agent-guard: verify_report=%s\n' "$VERIFY_REPORT"
+  else
+    # No report means no evidence: an error, never a pass or a plain failure.
+    printf 'agent-guard: ERROR: verification report was not written (runner exit %s)\n' "$code" >&2
+    code=2
   fi
+  if [[ "$code" -eq 0 ]]; then
+    GATE_STATUS=pass
+    return 0
+  fi
+  if [[ "$strict" == "true" ]]; then
+    GATE_STATUS=fail
+    return "$code"
+  fi
+  GATE_STATUS=warn
+  case "$code" in
+    2) warn "verification could not run (error); gate_status=warn" ;;
+    4) warn "no verification command ran in advisory mode (unverified); gate_status=warn" ;;
+    *) warn "verification failed in advisory mode (gate_status=warn)" ;;
+  esac
+  return 0
 }
 
 pre_final() {
   local strict=true
   local run_verify=false
-  local verify_scope="$VERIFY_SCOPE_DEFAULT"
+  local verify_scope=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --strict)
@@ -1641,7 +1858,15 @@ pre_final() {
         ;;
     esac
   done
-  RUN_VERIFY_FLAG="$run_verify"
+  if [[ -z "$verify_scope" ]]; then
+    require_verify_scope_default
+    verify_scope="$VERIFY_SCOPE_DEFAULT"
+  fi
+  if [[ "$run_verify" == "true" ]]; then
+    select_verify_report
+  fi
+  # RUN_VERIFY_FLAG stays false until the runner returns, so an aborted or
+  # skipped run is logged as unavailable rather than reading an older report.
   EMIT_CLOSEOUT=true
   trap closeout_trap EXIT
   GATE_STATUS=pass
@@ -1661,7 +1886,226 @@ pre_final() {
   if [[ "$run_verify" == "true" ]]; then
     run_detected_verification "$strict" "$verify_scope"
   fi
-  printf 'agent-guard: pre-final ok (context_pack=.agents/state/context-pack.json)\n'
+  printf 'agent-guard: pre-final ok (context_pack=%s)\n' "$(context_pack_display)"
+}
+
+# Prints three lines: the baseline key, the cached "<status> <commit>" (or
+# "miss") and the toolchain fingerprint as JSON ("undeclared" when the contract
+# declares none). Key: SHA-256 of HEAD, the contract's verification[] and the
+# output of each toolchain[] command. Only a pass/fail/unverified report for a
+# clean tree and the same scope is reused; a dirty tree or an error runs again.
+baseline_probe() {
+  REFRESH="$1" VERIFY_SCOPE="$2" TOOLCHAIN_TIMEOUT="$3" BASELINE_REPORT="$VERIFY_REPORT" \
+  TREE_COMMIT="$TREE_COMMIT" TREE_DIRTY="$TREE_DIRTY" \
+  CONTRACT_PATH="$PROJECT_TECH_STACK_FILE" PROJECT_ROOT="$PROJECT_ROOT" \
+  python3 - <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import shlex
+import signal
+import subprocess
+import tempfile
+
+root = pathlib.Path(os.environ["PROJECT_ROOT"])
+timeout = int(os.environ["TOOLCHAIN_TIMEOUT"])
+commit = os.environ["TREE_COMMIT"]
+dirty = os.environ["TREE_DIRTY"] != "false"
+try:
+    contract = json.loads(pathlib.Path(os.environ["CONTRACT_PATH"]).read_text(encoding="utf-8"))
+except Exception:
+    contract = None
+contract = contract if isinstance(contract, dict) else {}
+verification = contract.get("verification")
+toolchain = contract.get("toolchain")
+toolchain = [c for c in toolchain if isinstance(c, str) and c.strip()] if isinstance(toolchain, list) else []
+
+
+def probe(command):
+    """Return (rc, output). Output goes to a file, not a pipe, so a daemon the
+    command leaves behind (adb, gradle) cannot hold the probe open."""
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        argv = []
+    if not argv:
+        return 127, "unparseable command"
+    with tempfile.TemporaryFile() as capture:
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=root,
+                stdin=subprocess.DEVNULL,
+                stdout=capture,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return 127, f"failed to start: {exc}"
+        try:
+            rc = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # Partial output is not stable, so a timeout records no output.
+            return "timeout", ""
+        capture.seek(0)
+        return rc, capture.read(2048).decode("utf-8", errors="replace")
+
+
+entries = []
+for command in toolchain:
+    rc, output = probe(command)
+    entries.append(f"{command}\n{rc}\n{output}")
+fingerprint = "".join(entry + "\n" for entry in entries)
+material = commit + "\n" + json.dumps(verification, sort_keys=True) + "\n" + fingerprint
+key = hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+cached = "miss"
+if os.environ["REFRESH"] != "true" and not dirty:
+    try:
+        doc = json.loads(pathlib.Path(os.environ["BASELINE_REPORT"]).read_text(encoding="utf-8"))
+    except Exception:
+        doc = None
+    if (
+        isinstance(doc, dict)
+        and doc.get("baseline_key") == key
+        and doc.get("scope") == os.environ["VERIFY_SCOPE"]
+        and doc.get("dirty") is False
+        and doc.get("status") in ("pass", "fail", "unverified")
+    ):
+        cached = f"{doc['status']} {doc.get('commit') or 'none'}"
+print(key)
+print(cached)
+print(json.dumps(entries if entries else "undeclared"))
+PY
+}
+
+# Exit code for a baseline status: pass 0, fail 1, error 2, unverified 4
+# (advisory: 0 with a warning). Red is never softened.
+baseline_exit() {
+  local status="$1" strict="$2"
+  case "$status" in
+    pass) return 0 ;;
+    fail) return 1 ;;
+    unverified)
+      if [[ "$strict" == "true" ]]; then
+        return 4
+      fi
+      warn "baseline unverified in advisory mode (no verification command ran)"
+      return 0
+      ;;
+    *) return 2 ;;
+  esac
+}
+
+# Runs the pre-final verification runner on the working tree (HEAD when it is
+# clean) into baseline-report.json and reuses that report while the key
+# (commit, verification[], toolchain) and the scope hold and the tree is clean
+# (see baseline_probe). AGENT_GUARD_TOOLCHAIN_TIMEOUT (seconds, default 30)
+# bounds each toolchain[] command.
+baseline() {
+  local strict=true refresh=false verify_scope=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --strict) strict=true; shift ;;
+      --advisory) strict=false; shift ;;
+      --refresh) refresh=true; shift ;;
+      --verify-scope)
+        verify_scope="${2:-}"
+        case "$verify_scope" in
+          fast|full) ;;
+          *) fail "--verify-scope must be fast or full" ;;
+        esac
+        shift 2
+        ;;
+      -*) fail "unknown baseline option: $1" ;;
+      *) fail "baseline does not accept path arguments" ;;
+    esac
+  done
+  if [[ -z "$verify_scope" ]]; then
+    require_verify_scope_default
+    verify_scope="$VERIFY_SCOPE_DEFAULT"
+  fi
+  local toolchain_timeout="${AGENT_GUARD_TOOLCHAIN_TIMEOUT:-30}"
+  [[ "$toolchain_timeout" =~ ^[1-9][0-9]{0,5}$ ]] ||
+    fail "AGENT_GUARD_TOOLCHAIN_TIMEOUT must be a positive integer (got: $toolchain_timeout)"
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required for baseline"
+  VERIFY_REPORT="$STATE_DIR/baseline-report.json"
+  # One tree state for both the key and the report.
+  read_tree_state
+  if [[ "$TREE_DIRTY" == "true" ]]; then
+    warn "baseline on a dirty tree (working tree, not HEAD)"
+  fi
+  local probe key cached toolchain status code=0 commit="$TREE_COMMIT" dirty="$TREE_DIRTY"
+  probe="$(baseline_probe "$refresh" "$verify_scope" "$toolchain_timeout")" ||
+    fail "could not compute the baseline key"
+  {
+    IFS= read -r key
+    IFS= read -r cached
+    IFS= read -r toolchain
+  } <<<"$probe"
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || fail "could not compute the baseline key"
+  # A tree that changed under the toolchain probes is not the tree the key
+  # describes: run, and record it as dirty so the result is never reused.
+  read_tree_state
+  if [[ "$TREE_COMMIT" != "$commit" || "$TREE_DIRTY" != "$dirty" ]]; then
+    warn "the tree changed during the toolchain probes; this baseline will not be reused"
+    cached=miss
+    TREE_DIRTY=true
+  fi
+  if [[ "$cached" != "miss" ]]; then
+    # One line only, so `baseline | grep -q cached` cannot hit SIGPIPE.
+    status="${cached%% *}"
+    printf 'agent-guard: baseline %s (cached, %s)\n' "$status" "${cached#* }"
+    baseline_exit "$status" "$strict"
+    return
+  fi
+  BASELINE_KEY="$key"
+  BASELINE_TOOLCHAIN="$toolchain"
+  # Strict here so a red result keeps its exit code; advisory applies below.
+  run_detected_verification true "$verify_scope" || code=$?
+  # A report already recorded as dirty is never reused; a clean one must
+  # still describe the tree after the run.
+  commit="$TREE_COMMIT" dirty="$TREE_DIRTY"
+  read_tree_state
+  if [[ "$dirty" == "false" ]] && [[ "$TREE_COMMIT" != "$commit" || "$TREE_DIRTY" != "$dirty" ]]; then
+    warn "the tree changed during the baseline run; this baseline will not be reused"
+    mark_report_dirty
+  fi
+  case "$code" in
+    0) status=pass ;;
+    1|3) status=fail ;;
+    4) status=unverified ;;
+    *) status=error ;;
+  esac
+  printf 'agent-guard: baseline %s (%s)\n' "$status" "${commit:-none}"
+  baseline_exit "$status" "$strict"
+}
+
+# Rewrites VERIFY_REPORT with dirty:true (atomically) so it is never reused.
+mark_report_dirty() {
+  [[ -f "$VERIFY_REPORT" ]] || return 0
+  VERIFY_REPORT="$VERIFY_REPORT" python3 - <<'PY' || warn "could not mark the baseline report dirty"
+import json
+import os
+import pathlib
+
+path = pathlib.Path(os.environ["VERIFY_REPORT"])
+report = json.loads(path.read_text(encoding="utf-8"))
+if isinstance(report, dict):
+    report["dirty"] = True
+    partial = path.with_name(path.name + ".tmp")
+    partial.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    os.replace(partial, path)
+PY
 }
 
 status() {
@@ -1669,7 +2113,7 @@ status() {
   printf 'policy=docs/agent-configs/context-policy.json\n'
   printf 'policy_sha256=%s\n' "$(hash_file "$POLICY_FILE")"
   if [[ -f "$CONTEXT_PACK" ]]; then
-    printf 'context_pack=.agents/state/context-pack.json\n'
+    printf 'context_pack=%s\n' "$(context_pack_display)"
     printf 'context_pack_policy_sha256=%s\n' "$(context_pack_policy_hash)"
   else
     printf 'context_pack=missing\n'
@@ -1710,7 +2154,7 @@ import os
 
 path = os.environ["SESSION_EVENTS"]
 gate = {"pass": 0, "warn": 0, "fail": 0}
-vstat = {"pass": 0, "fail": 0, "none": 0, "skipped": 0, "error": 0}
+vstat = {"pass": 0, "fail": 0, "none": 0, "skipped": 0, "error": 0, "unverified": 0}
 skill_usage = {}
 total = 0
 try:
@@ -1742,7 +2186,8 @@ try:
 except FileNotFoundError:
     pass
 
-none_rate = (vstat["none"] / total) if total else 0.0
+# Close-outs where no verification ran: not requested (none) or nothing runnable.
+none_rate = ((vstat["none"] + vstat["unverified"]) / total) if total else 0.0
 report = {
     "schema": "agent-guard-stats/v1",
     "total_events": total,
@@ -1759,9 +2204,9 @@ else:
     print(
         "  verification: "
         f"pass={vstat['pass']} fail={vstat['fail']} none={vstat['none']} "
-        f"skipped={vstat['skipped']} error={vstat['error']}"
+        f"skipped={vstat['skipped']} error={vstat['error']} unverified={vstat['unverified']}"
     )
-    print(f"  verification:none rate: {none_rate:.0%}  (repos with no runnable fast tests)")
+    print(f"  verification:none rate: {none_rate:.0%}  (close-outs where no verification ran: none or unverified)")
     if skill_usage:
         usage = " ".join(f"{skill}={count}" for skill, count in sorted(skill_usage.items()))
         print(f"  skill_usage: {usage}")
@@ -1784,6 +2229,10 @@ case "${1:-}" in
   pre-final)
     shift || true
     pre_final "$@"
+    ;;
+  baseline)
+    shift || true
+    baseline "$@"
     ;;
   skill-note)
     shift || true

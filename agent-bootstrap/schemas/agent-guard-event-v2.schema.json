@@ -20,7 +20,8 @@
           "required": ["core_startup"],
           "additionalProperties": false,
           "properties": {
-            "core_startup": { "type": "integer", "minimum": 0 }
+            "core_startup": { "type": "integer", "minimum": 0 },
+            "core_startup_kit": { "type": "integer", "minimum": 0 }
           }
         },
         "gate_status": { "enum": ["pass", "warn", "fail"] },
@@ -31,7 +32,7 @@
           "properties": {
             "ran": { "type": "boolean" },
             "available": { "type": "boolean" },
-            "status": { "enum": ["pass", "fail", "none", "skipped", "error"] },
+            "status": { "enum": ["pass", "fail", "none", "skipped", "error", "unverified"] },
             "summary": { "type": "object" },
             "report_path": { "type": "string", "minLength": 1 },
             "error": { "type": "string", "minLength": 1 }

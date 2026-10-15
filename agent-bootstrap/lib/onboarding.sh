@@ -124,12 +124,9 @@ EOF_CMD
 # Project Brief
 
 <!-- UNFILLED -->
-<!-- Run project onboarding to populate. See docs/agent-configs/project-onboarding.md -->
+<!-- Fill via docs/agent-configs/project-onboarding.md -->
 
-Last verified: <commit-sha> / <date> (update when you re-onboard)
-
-> Deep, durable project context for agents. Generated empty by bootstrap; filled
-> by the onboarding step. Keep it current when architecture/conventions change.
+Last verified: <commit-sha> / <date>
 
 ## What this project is
 
@@ -213,6 +210,7 @@ EOF_TECH_STACK_SPEC
   "generated_files": [],
   "protected_paths": [],
   "verification": [],
+  "toolchain": [],
   "conventions": [],
   "source_evidence": [],
   "open_questions": []
@@ -228,11 +226,12 @@ verifiable tasks. Plans are local-only, as are draft specs and analyses for
 work that has not started: only `<topic>/journal.md` is pushed. Move a draft
 spec to `docs/superpowers/specs/<topic>/` in the first commit that implements it.
 
-## Optional durable decisions
+## Journal
 
-When a task-specific decision should survive local collaboration-packet loss or
-context compaction, optionally keep a concise append-only
-`<topic>/journal.md`. See `docs/agent-configs/task-journal.md`; journals do not
-select the active task.
+`<topic>/journal.md` keeps concise, dated, append-only entries that survive
+packet loss and context compaction. The committing seat adds one
+with each commit that changes tracked files; the seat recording closure adds
+the final `## Outcome` entry. See `docs/agent-configs/task-journal.md`; journals
+do not select the active task.
 EOF_PLANS
 }
