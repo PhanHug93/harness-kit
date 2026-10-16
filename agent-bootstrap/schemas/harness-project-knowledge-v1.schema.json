@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/harness-project-knowledge-v1.schema.json",
+  "title": "Harness Project Knowledge",
+  "type": "object",
+  "required": ["schema", "kit", "ignore_target", "files", "migrations", "runs"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "harness-project-knowledge/v1"},
+    "kit": {
+      "type": "object",
+      "required": ["version", "source", "lock_sha256", "contract_sha256", "baseline_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "version": {"type": "string"},
+        "source": {"type": "string"},
+        "lock_sha256": {"$ref": "#/$defs/hash"},
+        "contract_sha256": {"$ref": "#/$defs/hash"},
+        "baseline_sha256": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "ignore_target": {"enum": ["exclude", "gitignore"]},
+    "files": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["owner", "baseline_sha256", "local_sha256", "new_sha256", "state", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "owner": {"enum": ["kit", "user", "overlay"]},
+          "baseline_sha256": {"$ref": "#/$defs/hash"},
+          "local_sha256": {"$ref": "#/$defs/hash"},
+          "new_sha256": {"$ref": "#/$defs/hash"},
+          "state": {"enum": ["clean", "patched", "pinned"]},
+          "reason": {"type": "string"},
+          "resolution": {
+            "type": "object",
+            "required": ["kind", "local_sha256", "at", "stale"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"enum": ["resolved", "take-kit", "keep-local"]},
+              "local_sha256": {"$ref": "#/$defs/hash"},
+              "at": {"type": "string"},
+              "stale": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "facts_sha256", "at"],
+        "additionalProperties": false,
+        "properties": {
+          "status": {"enum": ["pending", "accepted", "declined", "applied", "failed"]},
+          "facts_sha256": {"type": "string"},
+          "at": {"type": "string"}
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["stamp", "mode", "from", "to", "result"],
+        "additionalProperties": false,
+        "properties": {
+          "stamp": {"type": "string"},
+          "mode": {"enum": ["install", "reinstall", "update"]},
+          "from": {"type": "string"},
+          "to": {"type": "string"},
+          "result": {"enum": ["done", "needs review", "failed"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^([0-9a-f]{64})?$"}
+  }
+}

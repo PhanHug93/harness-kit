@@ -1114,8 +1114,8 @@ import sys
 
 document = json.load(open(sys.argv[1], encoding="utf-8"))
 assert document["scope"] == "fast", document
-assert any(item["command"] == "flutter build appbundle --release" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
-assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
+assert any(item["command"] == "flutter build appbundle --release" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["results"]), document
+assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["results"]), document
 PY
   then
     failures+=("nested Flutter commands are full-scope in fast guard report")
@@ -1136,7 +1136,7 @@ import sys
 report = json.load(open(sys.argv[1], encoding="utf-8"))
 assert report["scope"] == "full", report
 for command in ("flutter test", "flutter analyze", "flutter build appbundle --release", "./android/gradlew -p android testDebugUnitTest"):
-    assert any(item["command"] == command and item["status"] == "pass" for item in report["commands"]), report
+    assert any(item["command"] == command and item["status"] == "pass" for item in report["results"]), report
 root = pathlib.Path(sys.argv[3]).resolve()
 records = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()]
 expected = [
@@ -1161,40 +1161,41 @@ PY
     failures+=("Flutter iOS unsigned release argv")
   fi
 
+  # The generic workspace yields only a discovery command (`xcodebuild -list`)
+  # and a `<scheme>` placeholder: neither is evidence, so the run is unverified.
+  generic_guard_rc=0
   (
     cd "$generated_generic"
     PATH="$generated_generic/native-stubs:$PATH" NATIVE_VERIFICATION_LOG="$native_log" \
       fixture_workspace scripts/agent-guard.sh pre-final --run-verify --verify-scope full >"$TMP_DIR/out/native-generic-full.out" 2>"$TMP_DIR/out/native-generic-full.err"
-  ) || failures+=("generic Xcode full guard execution")
+  ) || generic_guard_rc=$?
+  [[ "$generic_guard_rc" -eq 4 ]] || failures+=("generic Xcode full guard must exit 4 (unverified)")
   cp "$generated_generic/.agents/state/last-verify-report.json" "$TMP_DIR/out/native-generic-report.json" ||
     failures+=("generic Xcode verification report")
   if ! python3 - "$TMP_DIR/out/native-generic-report.json" <<'PY'
 import json
+import shlex
 import sys
 
 document = json.load(open(sys.argv[1], encoding="utf-8"))
-assert any(item["command"].startswith("xcodebuild -list") and item["status"] == "pass" for item in document["commands"]), document
+assert document["status"] == "unverified", document
+listing = [item for item in document["results"] if item["command"].startswith("xcodebuild -list")]
+assert listing and all(item["status"] == "skipped" and item["reason"] == "discovery" for item in listing), document
+assert shlex.split(listing[0]["command"]) == ["xcodebuild", "-list", "-workspace", "Main O'clock Workspace.xcworkspace"], listing
 PY
   then
-    failures+=("generic Xcode list command was not executed")
+    failures+=("generic Xcode list command must be skipped as discovery with workspace quoting intact")
   fi
-  if ! python3 - "$native_log" "$generated_generic" <<'PY'
+  if ! python3 - "$native_log" <<'PY'
 import json
 import pathlib
 import sys
 
-log_path = pathlib.Path(sys.argv[1])
-expected_root = pathlib.Path(sys.argv[2]).resolve()
-records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-assert any(
-    record["tool"] == "xcodebuild"
-    and record["argv"] == ["-list", "-workspace", "Main O'clock Workspace.xcworkspace"]
-    and pathlib.Path(record["cwd"]).resolve() == expected_root
-    for record in records
-), records
+records = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+assert not any(record["tool"] == "xcodebuild" and "-list" in record["argv"] for record in records), records
 PY
   then
-    failures+=("generic Xcode workspace argv/cwd")
+    failures+=("generic Xcode discovery command must not run")
   fi
 
   native_failure_err="$TMP_DIR/out/native-guard-failure.err"
@@ -1216,8 +1217,8 @@ import json
 import sys
 
 document = json.load(open(sys.argv[1], encoding="utf-8"))
-assert document["verification_status"] == "fail", document
-assert any(item["command"] == "flutter test" and item["status"] == "fail" and item["exit_code"] == 17 for item in document["commands"]), document
+assert document["status"] == "fail", document
+assert any(item["command"] == "flutter test" and item["status"] == "fail" and item["exit_code"] == 17 for item in document["results"]), document
 PY
   then
     failures+=("guard failure report status/accounting")
@@ -1306,7 +1307,7 @@ import json
 import sys
 
 document = json.load(open(sys.argv[1], encoding="utf-8"))
-assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["commands"]), document
+assert any(item["command"] == "./android/gradlew -p android testDebugUnitTest" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in document["results"]), document
 PY
       then
         mutation_class_assertion_rc=0
@@ -1927,7 +1928,9 @@ for canonical_file in \
   VERSION \
   MANIFEST.md \
   bootstrap-multi-agent-project.sh \
+  harness-kit-one-shot.sh \
   harness-kit-one-shot-upgrade.sh \
+  harness-kit-run.sh \
   agent-bootstrap-update.sh \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
@@ -1955,6 +1958,9 @@ for canonical_file in \
   schemas/agent-bootstrap-retirement-v1.schema.json \
   schemas/agent-bootstrap-verify-report-v1.schema.json \
   schemas/agent-guard-event-v2.schema.json \
+  schemas/agent-guard-verification-v2.schema.json \
+  schemas/harness-project-knowledge-v1.schema.json \
+  schemas/harness-kit-run-report-v1.schema.json \
   templates/base/README.md \
   templates/tool-contract/shared.md \
   templates/overlays/android_kotlin.md \
@@ -1984,7 +1990,12 @@ for canonical_file in \
   lib/writers-docs.sh \
   lib/onboarding.sh \
   lib/overlays.sh \
-  lib/retirement.py; do
+  lib/retirement.py \
+  lib/knowledge.py \
+  lib/migrations.sh \
+  migrations/next-ignore-block-to-exclude.sh \
+  migrations/next-retire-files.sh \
+  migrations/next-untrack-local-records.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \
@@ -2458,12 +2469,17 @@ chmod +x "$LOCAL_ONLY_DIR/scripts/agent-local-only-check.sh"
 	python3 -m json.tool "$TMP_DIR/.claude/settings.json" >/dev/null || fail "generated settings.json is not valid JSON after Stop hook"
 	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "agentmemory-mcp" "full bootstrap AGENTS agentmemory routing"
 	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "advisory" "AGENTS notes non-Claude close-out surfaces stay advisory"
-need_contains "$(cat "$TMP_DIR/.gitignore")" "AGENTS.md" "full bootstrap gitignore keeps AGENTS local-only"
-need_contains "$(cat "$TMP_DIR/.gitignore")" ".agents/" "full bootstrap gitignore keeps generated skills local-only"
-need_contains "$(cat "$TMP_DIR/.gitignore")" "scripts/agent-local-only-check.sh" "full bootstrap gitignore keeps local-only checker local"
-need_contains "$(cat "$TMP_DIR/.gitignore")" "AGENTS.md.generated.*" "full bootstrap gitignore keeps harness candidates local-only"
-need_not_contains "$(cat "$TMP_DIR/.gitignore")" "!.agents/skills/**" "full bootstrap gitignore must not track generated skills"
-need_not_contains "$(cat "$TMP_DIR/.gitignore")" "*.generated.*" "full bootstrap gitignore must not ignore unrelated generated source files"
+EXCLUDE_DEFAULT_DIR="$FIXTURE_DIR/exclude-default"
+mkdir -p "$EXCLUDE_DEFAULT_DIR"
+git -C "$EXCLUDE_DEFAULT_DIR" init -q
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$EXCLUDE_DEFAULT_DIR" --workflow full >/dev/null
+[[ ! -f "$EXCLUDE_DEFAULT_DIR/.gitignore" ]] || need_not_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.gitignore")" "multi-agent bootstrap local state" "default install must not write the block to .gitignore"
+need_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "AGENTS.md" "full bootstrap exclude file keeps AGENTS local-only"
+need_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" ".agents/" "full bootstrap exclude file keeps generated skills local-only"
+need_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "scripts/agent-local-only-check.sh" "full bootstrap exclude file keeps local-only checker local"
+need_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "AGENTS.md.generated.*" "full bootstrap exclude file keeps harness candidates local-only"
+need_not_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "!.agents/skills/**" "full bootstrap exclude file must not track generated skills"
+need_not_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "*.generated.*" "full bootstrap exclude file must not ignore unrelated generated source files"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "/Users/admin/" "generated agentmemory skill must not contain author machine path"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "codex-cliproxy-provider" "generated agentmemory skill must not name author-only repo"
 need_not_contains "$(sed -n '1,20p' "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Android/iOS" "generated agentmemory skill description must be stack agnostic"
@@ -2550,12 +2566,19 @@ for operator_readme in "$ROOT_DIR/README.md" "$ROOT_DIR/agent-bootstrap/README.m
   need_contains "$(cat "$operator_readme")" "not security controls" "operator README security-control limitation"
   need_contains "$(cat "$operator_readme")" "Do not assume Claude Code hooks run in Cowork." "operator README Cowork hook limitation"
 done
-startup_tokens=$(( \
-  $(estimate_tokens_for_file "$TMP_DIR/AGENTS.md") + \
-  $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-agent-context.md") + \
-  $(estimate_tokens_for_file "$TMP_DIR/docs/agent-configs/project-brief.md") \
-))
-[[ "$startup_tokens" -le 4000 ]] || fail "core startup context too large: ${startup_tokens} estimated tokens"
+# The generated verifier owns the budget: kit text above a gate fails, project
+# content only warns. Ratchet: the kit's own text stays out of amber here.
+budget_json="$(cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json --context-budget)" ||
+  fail "bootstrap fixture kit text exceeds a context gate: $budget_json"
+python3 - "$budget_json" <<'PY_FIXTURE_BUDGET' || fail "bootstrap fixture context budget: $budget_json"
+import json, sys
+budget = json.loads(sys.argv[1])["context_budget"]
+for key, amber in (("core", 3800), ("on_demand", 5900)):
+    part = budget[key]
+    assert part["kit"] <= amber and part["kit_status"] == "ok", part
+    assert part["estimate"] == part["kit"] + part["project"], part
+assert budget["on_demand"]["reference_sections"][0] == "State values", budget
+PY_FIXTURE_BUDGET
 assert_mobile_optimization_absent "$TMP_DIR" "android full bootstrap default"
 
 ANDROID_MOBILE_SKILL_DIR="$FIXTURE_DIR/android-mobile-skill"
@@ -2702,20 +2725,20 @@ mode_contracts="$(cat "$TMP_DIR/docs/agent-configs/agent-mode-contracts.md")"
 
 need_contains "$handoff_contract" '"source_task": null' "handoff optional source task"
 need_contains "$handoff_contract" '"blocks": []' "handoff blocks default"
-need_contains "$handoff_contract" 'Missing `source_task` is equivalent to `null`' "handoff missing source task default"
-need_contains "$handoff_contract" 'Missing `blocks` is equivalent to `[]`' "handoff missing blocks default"
-need_contains "$handoff_contract" 'The task-id portion must name an existing packet when it is available.' "handoff source task packet reference"
+need_contains "$handoff_contract" '`source_task` (missing: `null`) is `null`, a task id or `<task-id>#<finding-id>`' "handoff missing source task default"
+need_contains "$handoff_contract" '`blocks` (missing: `[]`) lists unique ids of tasks that cannot continue while this packet is active.' "handoff missing blocks default"
+need_contains "$handoff_contract" "with an existing packet's id when available" "handoff source task packet reference"
 need_contains "$handoff_contract" 'Existing `claude-codex-collaboration/v1` packets remain valid' "handoff existing protocol compatibility"
-need_contains "$handoff_contract" "A closed packet's \`blocks\` edges are inactive; no edit to the blocked packet is required." "handoff closed blocks edges"
-need_contains "$handoff_contract" 'Missing referenced packets do not invalidate the current packet; agents record uncertainty and continue.' "handoff missing referenced packets"
-need_contains "$handoff_contract" 'Continue the current task when the root cause and implementation scope are unchanged.' "handoff continue current task"
-need_contains "$handoff_contract" 'Open a child task only for a distinct finding with independently closable scope.' "handoff child task scope"
-need_contains "$handoff_contract" 'Record the split rationale in `task.md`. Review retries remain in the same packet.' "handoff split rationale"
-need_contains "$handoff_contract" 'For one exact `source_task` value, at most one active child may block the same target.' "handoff duplicate active child rule"
-need_contains "$handoff_contract" 'A task cannot source from or block itself.' "handoff self relation rule"
-need_contains "$handoff_contract" 'Active blocking edges must be acyclic.' "handoff acyclic blocking rule"
-need_contains "$handoff_contract" 'Relations are authoring conventions.' "handoff relations authoring convention"
-need_contains "$handoff_contract" 'No guard, hook, or runtime reads `source_task` or `blocks` in this phase.' "handoff relations runtime boundary"
+need_contains "$handoff_contract" "A closed packet's edges are inactive; nothing is written in reverse or to the blocked packet." "handoff closed blocks edges"
+need_contains "$handoff_contract" 'A missing referenced packet invalidates nothing: record the uncertainty and continue.' "handoff missing referenced packets"
+need_contains "$handoff_contract" 'continue the current task while the root cause and implementation scope are unchanged, keeping review retries in it' "handoff continue current task"
+need_contains "$handoff_contract" 'open a child task only for a distinct finding with independently closable scope' "handoff child task scope"
+need_contains "$handoff_contract" 'recording the split rationale in `task.md`' "handoff split rationale"
+need_contains "$handoff_contract" 'per exact `source_task` value, at most one active child may block a target' "handoff duplicate active child rule"
+need_contains "$handoff_contract" 'no task sources from or blocks itself' "handoff self relation rule"
+need_contains "$handoff_contract" 'active blocking edges are acyclic' "handoff acyclic blocking rule"
+need_contains "$handoff_contract" 'Conventions the writer keeps and the reviewer checks' "handoff relations authoring convention"
+need_contains "$handoff_contract" 'no guard, hook or runtime reads these fields' "handoff relations runtime boundary"
 need_contains "$handoff_contract" 'Other evidence is allowed when linked from `task.md`' "handoff allows supporting artifacts"
 task_journal="$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")"
 need_contains "$handoff_contract" '## Outcome' "handoff closure outcome heading"
@@ -2723,13 +2746,13 @@ need_contains "$handoff_contract" '- Summary: <change or finding>' "handoff clos
 need_contains "$handoff_contract" '- Evidence: <test/report/review path>' "handoff closure outcome evidence field"
 need_contains "$handoff_contract" '- Effect on source: <source task decision/action>' "handoff closure outcome effect field"
 need_contains "$handoff_contract" 'The fields are prose, not enums, and do not drive an automatic transition.' "handoff closure outcome prose rule"
-need_contains "$handoff_contract" 'manually mirror its Summary, Evidence, and Effect on source into the optional task journal' "handoff closure outcome journal mirror guidance"
+need_contains "$handoff_contract" 'journal entry (`docs/agent-configs/task-journal.md`) mirrors its Summary,' "handoff closure outcome journal mirror guidance"
 need_contains "$task_journal" 'Manually mirror `task.md` Summary, Evidence, and Effect on source' "task journal closure outcome copy guidance"
-need_contains "$task_journal" 'Mirroring is optional, not a closure gate.' "task journal optional outcome mirror"
+need_contains "$task_journal" 'with each commit that changes tracked files' "task journal entry with each tracked commit"
 handoff_core="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md")"
 need_contains "$handoff_core" "docs/agent-configs/agent-handoff-reference.md" "handoff core points to the per-seat reference"
 need_not_contains "$handoff_core" "Packet mapping examples" "handoff core keeps per-seat examples out"
-need_not_contains "$handoff_core" "### \`codex-review.md\`" "handoff core keeps review formats out"
+need_not_contains "$handoff_core" "### \`gate-review.md\`" "handoff core keeps review formats out"
 need_contains "$mode_contracts" "Every acceptance criterion names its test" "gate requires named acceptance tests"
 need_contains "$mode_contracts" "a real HTTP 401" "gate requires production-boundary fixtures"
 
@@ -2747,38 +2770,31 @@ artifacts = re.findall(r"^\d+\. `([^`]+)`$", section, flags=re.MULTILINE)
 expected = [
     "state.json",
     "task.md",
-    "codex-review.md",
+    "gate-review.md",
     "implementation.md",
-    "claude-review.md",
+    "verify-review.md",
+    "audit-review.md",
     "user-decision.md",
 ]
 if artifacts != expected:
     raise SystemExit(f"handoff artifact set mismatch: {artifacts!r}")
 
-review_marker = "### `codex-review.md`"
-implementation_marker = "### `implementation.md`"
-if review_marker not in text or implementation_marker not in text:
-    raise SystemExit("handoff contract missing codex-review artifact section")
-review_section = text.split(review_marker, 1)[1].split(implementation_marker, 1)[0]
-phase_headings = re.findall(r"^## (.+)$", review_section, flags=re.MULTILINE)
-required_headings = [
-    "Pre-coding technical review",
-    "Final technical review",
-]
-if phase_headings != required_headings:
-    raise SystemExit(f"codex-review phase headings mismatch: {phase_headings!r}")
-for heading in required_headings:
-    phase_body = review_section.split(f"## {heading}", 1)[1]
-    next_heading = re.search(r"^## ", phase_body, flags=re.MULTILINE)
-    if next_heading:
-        phase_body = phase_body[:next_heading.start()]
-    if not re.search(r"^### Attempt 1$", phase_body, flags=re.MULTILINE):
-        raise SystemExit(f"codex-review {heading!r} missing numbered Attempt 1")
+# Each review file is named by its seat and holds exactly one review heading.
+for name, heading in (("gate-review.md", "Pre-coding technical review"), ("verify-review.md", "Final technical review")):
+    review_marker = f"### `{name}`"
+    if review_marker not in text:
+        raise SystemExit(f"handoff contract missing {name} artifact section")
+    review_section = text.split(review_marker, 1)[1].split("\n### `", 1)[0]
+    phase_headings = re.findall(r"^## (.+)$", review_section, flags=re.MULTILINE)
+    if phase_headings != [heading]:
+        raise SystemExit(f"{name} phase headings mismatch: {phase_headings!r}")
+    if not re.search(r"^### Attempt 1$", review_section, flags=re.MULTILINE):
+        raise SystemExit(f"{name} missing numbered Attempt 1")
     for field in ("reviewer_model: <actual-model>", "model_source:"):
-        if field not in phase_body:
-            raise SystemExit(f"codex-review {heading!r} missing {field!r}")
-if "fresh_session_attestation: yes | no" not in review_section:
-    raise SystemExit("final technical review missing fresh_session_attestation")
+        if field not in review_section:
+            raise SystemExit(f"{name} missing {field!r}")
+    if name == "verify-review.md" and "fresh_session_attestation: yes | no" not in review_section:
+        raise SystemExit("final technical review missing fresh_session_attestation")
 PY_HANDOFF_ARTIFACTS
 
 for state_field in \
@@ -2815,18 +2831,17 @@ need_contains "$handoff_contract" "policy_exception=gate_coding" "handoff gate-c
 need_contains "$handoff_contract" 'Only `state.json` and `task.md` are created initially' "handoff lazy artifact creation"
 need_contains "$handoff_contract" 'ACTIVE` is a cache' "handoff ACTIVE cache rule"
 need_contains "$handoff_contract" 'state.json` is authoritative' "handoff authoritative state rule"
-need_contains "$handoff_contract" "exactly one open task" "handoff single-open-task selection"
+need_contains "$handoff_contract" 'select the only task that is not `closed`' "handoff single-open-task selection"
 need_contains "$handoff_contract" 'stale `ACTIVE`' "handoff stale ACTIVE repair rule"
-need_contains "$handoff_contract" "Multiple open tasks require the user to choose" "handoff multiple-open-task stop"
+need_contains "$handoff_contract" "require the user to choose" "handoff multiple-open-task stop"
 need_contains "$handoff_contract" "Never select the newest task automatically" "handoff no-newest selection rule"
 need_contains "$handoff_contract" "ignored, ephemeral" "handoff packet durability limitation"
 need_contains "$handoff_contract" "ownership and append-only behavior are conventions" "handoff convention limitation"
 need_contains "$handoff_contract" 'Capture `base_commit` on first entry into implementation' "handoff base commit timing"
 need_contains "$handoff_contract" "Prior attempts remain" "handoff prior attempt preservation"
 need_contains "$handoff_contract" "next numbered attempt" "handoff numbered remediation attempts"
-need_contains "$handoff_contract" "Review history is append-only and immutable within each top-level section." "handoff sectioned review history"
-need_contains "$handoff_contract" 'The first final review adds the `## Final technical review` heading.' "handoff first final-review heading"
-need_contains "$handoff_contract" 'On resumed specification review, insert the next numbered pre-coding `### Attempt <n>` immediately before Final; preserve prior attempts.' "handoff resumed specification-review placement"
+need_contains "$handoff_contract" "Review history is append-only and immutable; each round appends the next numbered" "handoff sectioned review history"
+need_contains "$handoff_contract" "State sufficiency matches the latest attempt." "handoff state sufficiency follows the latest gate attempt"
 need_contains "$handoff_contract" 'When `@gate` returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
 need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
 need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
@@ -2842,21 +2857,22 @@ need_contains "$mode_contracts" '- `technical_review` · `@gate` -> `analysis` |
 need_contains "$mode_contracts" '- `implementation` · `@build` -> `verification` | `resolution`' "implementation transitions"
 need_contains "$mode_contracts" '- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`' "verification transitions"
 need_contains "$mode_contracts" '- `cross_review` · `@audit` -> `implementation` | `resolution`' "cross-review transitions"
-need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` | user-selected prior phase' "resolution transitions"
+need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` (recorded by the active seat on the user'"'"'s decision) | user-selected prior phase' "resolution transitions"
 need_contains "$mode_contracts" "awaiting_user" "mode contracts awaiting-user invariant"
 need_contains "$mode_contracts" 'only with `resolution` · `@owner`' "mode contracts awaiting-user owner restriction"
 need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
 need_contains "$mode_contracts" '`@gate` owns the blocking adequacy verdict' "mode contracts Sol adequacy ownership"
 need_contains "$mode_contracts" '`@build` may downgrade `yes`' "mode contracts Luna downgrade"
 need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
-need_contains "$mode_contracts" 'After two unsuccessful remediation returns, ask the user whether another bounded pass is worth its cost.' "mode remediation checkpoint"
+need_contains "$mode_contracts" '`revision_rounds` counts returns to `implementation` only' "mode remediation checkpoint"
+need_contains "$mode_contracts" 'asks whether another bounded pass is worth its cost.' "mode remediation bounded cost"
 need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
-need_contains "$mode_contracts" "The user may authorize another pass in the same task." "mode remediation same-task authorization"
+need_contains "$mode_contracts" "The user may authorize another pass in the same task" "mode remediation same-task authorization"
 need_contains "$mode_contracts" "Do not create a child task or a new lifecycle state solely because the checkpoint was reached." "mode remediation no forced child or state"
 need_contains "$mode_contracts" "runner, status, reason, and real report" "mode contracts verification evidence"
 need_contains "$mode_contracts" "evidence to check, not to re-run" "mode contracts executing-host pass rule"
 need_contains "$mode_contracts" "re-runs only a check whose" "mode contracts verify re-runs only on missing or doubtful evidence"
-need_contains "$mode_contracts" "Seats do not spawn extra reviewer helpers." "mode contracts no helper reviewers"
+need_contains "$mode_contracts" "Seats do not spawn reviewers beyond the doubt-driven skill" "mode contracts no helper reviewers"
 need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
 need_contains "$mode_contracts" "state/review consistency" "mode contracts Claude consistency check"
 need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
@@ -2912,10 +2928,11 @@ capture_task3_codex_launch() {
   rm -f "$TASK3_CAPTURE" "$TASK3_OUTPUT"
   if ! (
     unset CODEX_HARNESS_SESSION CODEX_MODEL_PROFILE CODEX_MODEL_OVERRIDE
-    unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
+    unset CODEX_PLANNING_MODEL_OVERRIDE CODEX_GATING_MODEL_OVERRIDE CODEX_CODING_MODEL_OVERRIDE CODEX_REVIEWING_MODEL_OVERRIDE
     unset CODEX_USE_FALLBACK CODEX_REASONING_EFFORT
     cd "$TMP_DIR"
-    fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$@" "$TASK3_CODEX_MODE" "$mode"
+    # The @build close-out (pre-final after Codex) is covered by test-verification-evidence.sh.
+    fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" CODEX_SKIP_CLOSEOUT=1 "$@" "$TASK3_CODEX_MODE" "$mode"
   ) >"$TASK3_OUTPUT" 2>&1; then
     fail "$label failed to launch fake Codex: $(cat "$TASK3_OUTPUT")"
   fi
@@ -2932,14 +2949,19 @@ capture_task3_codex_launch() {
   need_contains "$output" "Model source: $expected_source" "$label launch model source"
 }
 
-capture_task3_codex_launch "planning route" planning gpt-6-astra default ultra
+capture_task3_codex_launch "gate seat" @gate gpt-6-astra default ultra
+need_contains "$(cat "$TASK3_CAPTURE")" "MODE LOCK: TECHNICAL-REVIEW" "gate seat technical review lock"
+rm -f "$TASK3_CAPTURE"
+task3_planning_out="$( (unset CODEX_HARNESS_SESSION CODEX_MODEL_OVERRIDE CODEX_USE_FALLBACK; cd "$TMP_DIR" && fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" planning) 2>&1 || true)"
+need_contains "$task3_planning_out" "seat @spec is occupied by claude" "planning route opens @spec"
+[[ ! -e "$TASK3_CAPTURE" ]] || fail "planning launched Codex for a claude-held @spec"
 capture_task3_codex_launch "coding route" coding gpt-5.6-luna default xhigh
 capture_task3_codex_launch "reviewing route" reviewing gpt-6-astra default ultra
 reviewing_seed="$(cat "$TASK3_CAPTURE")"
-severity_rule="Severity must name its trigger condition and frequency, or mark itself as an estimate."
-need_contains "$reviewing_seed" "$severity_rule" "reviewing seed severity trigger obligation"
-need_contains "$mode_contracts" 'The `Severity trigger` finding obligation is defined by the reviewing launcher.' "mode contract reviewing obligation pointer"
-need_not_contains "$mode_contracts" "$severity_rule" "mode contract reviewing obligation duplication"
+severity_rule="Severity names its trigger condition and frequency, or is marked as an estimate."
+need_contains "$reviewing_seed" "mode contracts' severity rule" "reviewing seed points to the contract severity rule"
+need_contains "$mode_contracts" "$severity_rule" "mode contract severity rule"
+need_not_contains "$reviewing_seed" "$severity_rule" "reviewing seed restates the severity rule"
 for withdrawn_rule in \
   "at most three blockers" \
   "hypothesis for why that construct exists" \
@@ -2958,9 +2980,10 @@ PY_TASK3_CATALOG
 capture_task3_codex_launch "coding route override" coding custom-coder CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=custom-coder
 capture_task3_codex_launch "global override precedence" coding global-model CODEX_MODEL_OVERRIDE xhigh CODEX_MODEL_OVERRIDE=global-model CODEX_CODING_MODEL_OVERRIDE=custom-coder CODEX_USE_FALLBACK=1
 capture_task3_codex_launch "reasoning override" coding gpt-5.6-luna default high CODEX_REASONING_EFFORT=high
-capture_task3_codex_launch "gate coding audit" coding gpt-6-astra CODEX_CODING_MODEL_OVERRIDE ultra CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
-need_contains "$(cat "$TASK3_CAPTURE")" "policy_exception=gate_coding authorization=user_session" "Sol coding seed audit record"
-need_contains "$(cat "$TASK3_OUTPUT")" "policy_exception=gate_coding authorization=user_session" "Sol coding printed audit record"
+capture_task3_codex_launch "build on the gate model" coding gpt-6-astra CODEX_CODING_MODEL_OVERRIDE ultra CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
+need_contains "$(cat "$TASK3_CAPTURE")" "model_overlap=gate" "model overlap seed fact"
+need_contains "$(cat "$TASK3_OUTPUT")" "WARN: model_overlap=gate" "model overlap printed warning"
+need_not_contains "$(cat "$TASK3_CAPTURE")$(cat "$TASK3_OUTPUT")" "authorization=" "launcher never writes an authorization"
 
 write_task3_invalid_profile() {
   python3 - "$TASK3_VALID_PROFILE" "$TASK3_PROFILE_FILE" "$1" <<'PY_INVALID_SEATS'
@@ -3231,12 +3254,17 @@ need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "bootstrap JSON contr
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "project tech-stack contract validates" "generated verifier project tech-stack contract validation"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"schema":"agent-bootstrap-verify-report/v1"' "generated verifier json schema"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"fail":0' "generated verifier json fail count"
-on_demand_tokens="$(sed -n 's/.*on-demand full workflow context estimate: \([0-9][0-9]*\) tokens.*/\1/p' "$TMP_DIR/out/bootstrap-verify.json" | head -1)"
-[[ -n "$on_demand_tokens" ]] || fail "generated verifier JSON did not report on-demand context estimate"
-core_tokens_reported="$(sed -n 's/.*core startup context estimate: \([0-9][0-9]*\) tokens.*/\1/p' "$TMP_DIR/out/bootstrap-verify.json" | head -1)"
-[[ -n "$core_tokens_reported" ]] || fail "generated verifier JSON did not report core context estimate"
-[[ "$core_tokens_reported" -le 4000 ]] || fail "core startup context exceeds gate 4000: ${core_tokens_reported} estimated tokens"
-[[ "$on_demand_tokens" -le 6200 ]] || fail "on-demand workflow context too close to budget: ${on_demand_tokens} estimated tokens"
+python3 - "$TMP_DIR/out/bootstrap-verify.json" "$TMP_DIR/out/bootstrap-verify.out" <<'PY_VERIFY_BUDGET' ||
+import json, sys
+budget = json.load(open(sys.argv[1]))["context_budget"]
+human = open(sys.argv[2], encoding="utf-8").read()
+for key, label in (("core", "core startup context estimate"), ("on_demand", "on-demand full workflow context estimate")):
+    part = budget[key]
+    assert part["kit"] <= part["amber"] and part["kit_status"] == "ok", part
+    assert f"{label}: {part['estimate']} tokens" in human, (label, part)
+    assert f"kit {label}: {part['kit']} tokens" in human, (label, part)
+PY_VERIFY_BUDGET
+  fail "generated verifier JSON context_budget must match its report and keep kit text out of amber"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-agent-guard-preflight.out")" "agent-guard: preflight ok" "agent guard preflight output"
 [[ -f "$TMP_DIR/.agents/state/context-pack.json" ]] || fail "agent guard did not write context pack"
 need_contains "$(cat "$TMP_DIR/.agents/state/context-pack.json")" '"schema":"agent-context-pack/v1"' "agent guard context pack schema"
@@ -3479,11 +3507,11 @@ import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
-assert doc["schema"] == "agent-guard-verification/v1", doc
+assert doc["schema"] == "agent-guard-verification/v2", doc
 assert doc["scope"] == "fast", doc
 assert doc["summary"]["fail"] == 0, doc
-assert any(item["command"] == "npm test" and item["status"] == "pass" for item in doc["commands"]), doc
-assert any(item["command"] == "npm run build" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in doc["commands"]), doc
+assert any(item["command"] == "npm test" and item["status"] == "pass" for item in doc["results"]), doc
+assert any(item["command"] == "npm run build" and item["status"] == "skipped" and item["reason"] == "scope_fast" for item in doc["results"]), doc
 PY
 [[ ! -e "$VERIFY_OK_DIR/.agents/state/build-ran.marker" ]] || fail "default pre-final --run-verify should not run full-scope build commands"
 (
@@ -3498,7 +3526,7 @@ import sys
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
 assert doc["scope"] == "full", doc
 assert doc["summary"]["fail"] == 0, doc
-assert any(item["command"] == "npm run build" and item["status"] == "pass" for item in doc["commands"]), doc
+assert any(item["command"] == "npm run build" and item["status"] == "pass" for item in doc["results"]), doc
 PY
 
 EXTERNAL_STATE_DIR="$TMP_DIR/external-agent-state"
@@ -3558,14 +3586,15 @@ printf '%s\n' "verify fail" >&2
 exit 7
 EOF_VERIFY_FAIL_SCRIPT
 chmod +x "$VERIFY_FAIL_DIR/scripts/verify-fail.sh"
+# A Git repository before generation, so the local-only block goes to
+# .git/info/exclude and nothing harness-owned is committed.
+git -C "$VERIFY_FAIL_DIR" init -q
 bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$VERIFY_FAIL_DIR" --workflow full >/dev/null
 (
   cd "$VERIFY_FAIL_DIR"
-  git init -q
   git config user.email "agent-bootstrap-test@example.invalid"
   git config user.name "Agent Bootstrap Test"
   git add -A
-  git rm --cached -- .gitignore >/dev/null 2>&1 || true
   git commit -qm baseline
   fixture_workspace scripts/agent-guard.sh preflight >/dev/null
 )
@@ -3578,9 +3607,9 @@ import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
-assert doc["verification_status"] == "fail", doc
+assert doc["status"] == "fail", doc
 assert doc["summary"]["fail"] == 1, doc
-assert any(item["command"] == "npm test" and item["status"] == "fail" and item["exit_code"] == 7 for item in doc["commands"]), doc
+assert any(item["command"] == "npm test" and item["status"] == "fail" and item["exit_code"] == 7 for item in doc["results"]), doc
 PY
 python3 - "$VERIFY_FAIL_DIR/.agents/state/session-events.jsonl" <<'PY'
 import json
@@ -3610,11 +3639,15 @@ if (cd "$VERIFY_FAIL_DIR" && PATH="$FAKE_NPM_DIR:$PATH" AGENT_GUARD_PREPUSH_SCOP
   fail "generated pre-push hook passed with a failing verification command"
 fi
 need_contains "$(cat "$TMP_DIR/out/bootstrap-prepush-verify-fail.err")" "verification failed" "generated pre-push blocks failing verification"
+closeout_rc=0
 (
   cd "$VERIFY_FAIL_DIR"
+  # close-out verifies only changes made after the session's SessionStart snapshot.
+  printf '%s' '{"session_id":"closeout-fixture"}' | fixture_workspace scripts/agent-hook.sh claude-session-start >/dev/null
   printf '%s\n' "dirty close-out trigger" >> README.md
-  printf '%s' '{"stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
-) && fail "close-out did not block stop (exit 2) on failing verification"
+  printf '%s' '{"session_id":"closeout-fixture","stop_hook_active":false}' | PATH="$FAKE_NPM_DIR:$PATH" fixture_workspace scripts/agent-hook.sh close-out >"$TMP_DIR"/out/bootstrap-closeout-fail.out 2>"$TMP_DIR"/out/bootstrap-closeout-fail.err
+) || closeout_rc=$?
+[[ "$closeout_rc" -eq 2 ]] || fail "close-out did not block stop (exit 2) on failing verification (got $closeout_rc)"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-closeout-fail.err")" "verification" "close-out reports the failure reason to the model"
 
 VERIFY_PLACEHOLDER_DIR="$FIXTURE_DIR/verify-prefinal-placeholder"
@@ -3639,15 +3672,15 @@ import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
-assert doc["verification_status"] == "none", doc
-assert any("<scheme>" in item["command"] and item["status"] == "skipped" for item in doc["commands"]), doc
+assert doc["status"] == "unverified", doc
+assert any("<scheme>" in item["command"] and item["status"] == "skipped" for item in doc["results"]), doc
 PY
 python3 - "$VERIFY_PLACEHOLDER_DIR/.agents/state/session-events.jsonl" <<'PY'
 import json
 import sys
 
 last = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()][-1]
-assert last["verification"]["status"] == "none", last
+assert last["verification"]["status"] == "unverified", last
 assert last["gate_status"] == "warn", last
 PY
 
@@ -3721,14 +3754,14 @@ import json
 import sys
 
 report = json.load(open(sys.argv[1], encoding="utf-8"))
-assert report["verification_status"] == "error", report
+assert report["status"] == "error", report
 assert report["summary"]["fail"] == 0, report
 assert report["summary"]["error"] == 1, report
 assert any(
     item["command"] == "definitely-missing-agent-bootstrap-command"
     and item["status"] == "error"
     and item["reason"] == "failed_to_start"
-    for item in report["commands"]
+    for item in report["results"]
 ), report
 last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
 assert last["gate_status"] == "fail", last
@@ -3781,9 +3814,9 @@ import json
 import sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
-assert doc["verification_status"] == "fail", doc
-assert any(item.get("status") == "timeout" for item in doc["commands"]), doc
-assert any(item.get("reason") == "budget_exhausted" for item in doc["commands"]), doc
+assert doc["status"] == "fail", doc
+assert any(item.get("status") == "timeout" for item in doc["results"]), doc
+assert any(item.get("reason") == "budget_exhausted" for item in doc["results"]), doc
 last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
 assert last["gate_status"] == "fail", last
 assert last["verification"]["status"] == "fail", last
@@ -3885,31 +3918,31 @@ assert len(rows) == 4, stderr
 for index, _, _, _, escaped_log in actual:
     log = root / escaped_log.replace(r"\t", "\t")
     assert log.resolve().parent == (state / "verify-logs").resolve(), log
-    assert re.fullmatch(rf"verify-[0-9]+-{index}\.log", log.name), log
+    assert re.fullmatch(rf"verify-[0-9]+-[0-9]+-{index}\.log", log.name), log
 assert "SECRET" not in stderr and "REPEATED" not in stderr and "ARG" not in stderr, stderr
 assert all("\t" not in line and "\r" not in line for line in stderr.splitlines()), stderr
 
 report = json.loads((state / "last-verify-report.json").read_text(encoding="utf-8"))
-assert report["verification_status"] == "error", report
+assert report["status"] == "error", report
 assert report["summary"] == {"pass": 1, "fail": 3, "skipped": 2, "error": 1}, report
-assert [item["status"] for item in report["commands"]] == [
+assert [item["status"] for item in report["results"]] == [
     "pass", "fail", "error", "timeout", "fail", "skipped", "skipped"
 ], report
 for index, _, exit_code, timeout, escaped_log in actual:
-    item = report["commands"][index - 1]
+    item = report["results"][index - 1]
     decoded_log = escaped_log.replace(r"\t", "\t")
     assert item["exit_code"] == exit_code, item
     assert item["log_path"] == decoded_log, (item, decoded_log)
     assert (root / item["log_path"]).is_file(), item
     assert (item["status"] == "timeout") == (timeout == "yes"), item
-pass_item = report["commands"][0]
+pass_item = report["results"][0]
 assert pass_item["status"] == "pass", pass_item
 pass_log = root / pass_item["log_path"]
 assert pass_log.resolve().parent == (state / "verify-logs").resolve(), pass_item
-assert re.fullmatch(r"verify-[0-9]+-1\.log", pass_log.name), pass_item
+assert re.fullmatch(r"verify-[0-9]+-[0-9]+-1\.log", pass_log.name), pass_item
 assert (root / pass_item["log_path"]).is_file(), pass_item
-assert "log_path" not in report["commands"][5]
-assert "log_path" not in report["commands"][6]
+assert "log_path" not in report["results"][5]
+assert "log_path" not in report["results"][6]
 PY
 
 VERIFY_ERROR_DIR="$FIXTURE_DIR/verify-error"
@@ -3939,7 +3972,7 @@ import json
 import sys
 
 report = json.load(open(sys.argv[1], encoding="utf-8"))
-assert report["verification_status"] == "error", report
+assert report["status"] == "error", report
 last = [json.loads(line) for line in open(sys.argv[2], encoding="utf-8") if line.strip()][-1]
 assert last["gate_status"] == "warn", last
 assert last["verification"]["status"] == "error", last
@@ -4337,7 +4370,11 @@ bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR"
 need_not_contains "$(cat "$CANDIDATE_DIR/.gitignore")" "*.generated.*" "generated candidates must not be ignored"
 (cd "$CANDIDATE_DIR" && scripts/verify-ai-deps.sh >"$TMP_DIR"/out/bootstrap-candidate-verify.out)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-candidate-verify.out")" "pending generated candidate" "generated verifier pending candidate warning"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-apply-candidates.out
+# Without a baseline the edited hook counts as local edits: plain apply keeps
+# it, and naming it with --only promotes the candidate.
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --apply-candidates >"$TMP_DIR"/out/bootstrap-apply-candidates-plain.out
+need_contains "$(cat "$TMP_DIR/out/bootstrap-apply-candidates-plain.out")" "kept local edits: scripts/agent-hook.sh" "plain apply-candidates keeps local edits"
+bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --apply-candidates --only scripts/agent-hook.sh >"$TMP_DIR"/out/bootstrap-apply-candidates.out
 need_contains "$(cat "$TMP_DIR/out/bootstrap-apply-candidates.out")" "Applied generated candidate" "apply-candidates output"
 [[ -z "$(find "$CANDIDATE_DIR" -name '*.generated.*' -print -quit)" ]] || fail "--apply-candidates left generated candidates behind"
 candidate_status_after_apply="$(bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$CANDIDATE_DIR" --status --json)"
@@ -4515,5 +4552,18 @@ bash "$ROOT_DIR/scripts/test-local-only-mode.sh"
 
 note "HK-07 retirement lifecycle"
 python3 "$ROOT_DIR/scripts/test-agent-retirement.py"
+
+note "verification evidence: contract commands, unverified, baseline, session hook"
+bash "$ROOT_DIR/scripts/test-verification-evidence.sh"
+
+note "one-shot entry, project knowledge and migrations"
+bash "$ROOT_DIR/scripts/test-harness-kit-entry.sh"
+python3 "$ROOT_DIR/scripts/test-harness-knowledge.py"
+bash "$ROOT_DIR/scripts/test-harness-migrations.sh"
+
+note "one-shot staging and orchestrator"
+bash "$ROOT_DIR/scripts/test-harness-kit-staging.sh"
+bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh"
+bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh"
 
 printf 'bootstrap-test: ok (%s)\n' "$TMP_DIR"

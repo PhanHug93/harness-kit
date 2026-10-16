@@ -223,12 +223,12 @@ write_shell_functions() {
 
 # >>> agent-bootstrap >>>
 export AGENT_BOOTSTRAP_HOME=$export_path
-agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; }
+agent-init()    { local v; v="\$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' docs/agent-configs/agent-bootstrap.lock.json 2>/dev/null | head -n 1)"; if [ -n "\$v" ] && [ -f ".harness-kit/v\$v/agent-bootstrap/bootstrap-multi-agent-project.sh" ]; then bash ".harness-kit/v\$v/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; else bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; fi; }
 agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
 agent-update()  { bash "\$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "\$AGENT_BOOTSTRAP_HOME" "\$@"; }
-agent-upgrade() { agent-update --target "\$PWD" --plan "\$@"; }
+agent-upgrade() { if [ -x scripts/harness-kit.sh ]; then scripts/harness-kit.sh --to latest "\$@"; else bash "\$AGENT_BOOTSTRAP_HOME/harness-kit-one-shot.sh" --to latest "\$@"; fi; }
 # <<< agent-bootstrap <<<
 EOF_ZSHRC
 
@@ -303,7 +303,9 @@ main() {
   copy_file "VERSION" "VERSION"
   copy_file "MANIFEST.md" "MANIFEST.md"
   copy_file "bootstrap-multi-agent-project.sh" "bootstrap-multi-agent-project.sh"
+  copy_file "harness-kit-one-shot.sh" "harness-kit-one-shot.sh"
   copy_file "harness-kit-one-shot-upgrade.sh" "harness-kit-one-shot-upgrade.sh"
+  copy_file "harness-kit-run.sh" "harness-kit-run.sh"
   copy_file "agent-bootstrap-update.sh" "agent-bootstrap-update.sh"
   copy_file "agent-tech-stack-lib.sh" "agent-tech-stack-lib.sh"
   copy_file "agent-hook.sh" "agent-hook.sh"
@@ -331,6 +333,9 @@ main() {
   copy_file "schemas/agent-bootstrap-retirement-v1.schema.json" "schemas/agent-bootstrap-retirement-v1.schema.json"
   copy_file "schemas/agent-bootstrap-verify-report-v1.schema.json" "schemas/agent-bootstrap-verify-report-v1.schema.json"
   copy_file "schemas/agent-guard-event-v2.schema.json" "schemas/agent-guard-event-v2.schema.json"
+  copy_file "schemas/agent-guard-verification-v2.schema.json" "schemas/agent-guard-verification-v2.schema.json"
+  copy_file "schemas/harness-project-knowledge-v1.schema.json" "schemas/harness-project-knowledge-v1.schema.json"
+  copy_file "schemas/harness-kit-run-report-v1.schema.json" "schemas/harness-kit-run-report-v1.schema.json"
   copy_file "templates/base/README.md" "templates/base/README.md"
   copy_file "templates/tool-contract/shared.md" "templates/tool-contract/shared.md"
   copy_file "templates/overlays/android_kotlin.md" "templates/overlays/android_kotlin.md"
@@ -361,6 +366,11 @@ main() {
   copy_file "lib/onboarding.sh" "lib/onboarding.sh"
   copy_file "lib/overlays.sh" "lib/overlays.sh"
   copy_file "lib/retirement.py" "lib/retirement.py"
+  copy_file "lib/knowledge.py" "lib/knowledge.py"
+  copy_file "lib/migrations.sh" "lib/migrations.sh"
+  copy_file "migrations/next-ignore-block-to-exclude.sh" "migrations/next-ignore-block-to-exclude.sh"
+  copy_file "migrations/next-retire-files.sh" "migrations/next-retire-files.sh"
+  copy_file "migrations/next-untrack-local-records.sh" "migrations/next-untrack-local-records.sh"
   write_source_metadata
   init_history
 
@@ -375,12 +385,12 @@ Add this managed block manually, or rerun with --write-zshrc:
 
 # >>> agent-bootstrap >>>
 export AGENT_BOOTSTRAP_HOME=$export_path
-agent-init()    { bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; }
+agent-init()    { local v; v="\$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' docs/agent-configs/agent-bootstrap.lock.json 2>/dev/null | head -n 1)"; if [ -n "\$v" ] && [ -f ".harness-kit/v\$v/agent-bootstrap/bootstrap-multi-agent-project.sh" ]; then bash ".harness-kit/v\$v/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; else bash "\$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target "\$PWD" "\$@"; fi; }
 agent-next()    { agent-init --first-10; }
 agent-doctor()  { ./scripts/agent-hook.sh doctor; }
 agent-refresh() { agent-init --refresh-lock; }
 agent-update()  { bash "\$AGENT_BOOTSTRAP_HOME/agent-bootstrap-update.sh" --home "\$AGENT_BOOTSTRAP_HOME" "\$@"; }
-agent-upgrade() { agent-update --target "\$PWD" --plan "\$@"; }
+agent-upgrade() { if [ -x scripts/harness-kit.sh ]; then scripts/harness-kit.sh --to latest "\$@"; else bash "\$AGENT_BOOTSTRAP_HOME/harness-kit-one-shot.sh" --to latest "\$@"; fi; }
 # <<< agent-bootstrap <<<
 
 Then run: source "$ZSHRC_PATH"

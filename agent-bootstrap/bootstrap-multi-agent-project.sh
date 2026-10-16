@@ -5,12 +5,22 @@ TARGET_DIR="$(pwd -P)"
 PROJECT_NAME="$(basename "$TARGET_DIR")"
 PROJECT_NAME_EXPLICIT=false
 STAMP="$(date +%Y%m%d-%H%M%S)"
+# An orchestrator names the run (backups, candidates, upgrade journal) itself.
+if [[ -n "${AGENT_BOOTSTRAP_STAMP:-}" ]]; then
+  if [[ ! "$AGENT_BOOTSTRAP_STAMP" =~ ^[0-9]{8}-[0-9]{6}$ ]]; then
+    echo "ERROR: AGENT_BOOTSTRAP_STAMP must look like YYYYMMDD-HHMMSS: $AGENT_BOOTSTRAP_STAMP" >&2
+    exit 2
+  fi
+  STAMP="$AGENT_BOOTSTRAP_STAMP"
+fi
 AGENT_BOOTSTRAP_VERSION="2026.10.13.2"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
+IGNORE_TARGET=""
 WORKFLOW_EXPLICIT=false
 APPLY_ONLY=""
+KEEP_PATHS=""
 ROLLBACK_ID=""
 DRY_RUN=false
 BACKUP=true
@@ -64,6 +74,7 @@ usage() {
     "  --refresh-lock       Refresh only docs/agent-configs/agent-bootstrap.lock.json." \
     "  --apply-candidates   Promote latest *.generated.* candidates into place." \
     "  --only PATH          With --apply-candidates, promote only PATH (repeatable)." \
+    "  --keep PATH          Leave PATH untouched: no write and no candidate (repeatable)." \
     "  --rollback ID        Undo the generation or candidate apply recorded as upgrade ID." \
     "  --cleanup-backups    Remove harness-stamped .bak/.generated leftovers." \
     "  --status             Report installed harness state for the target." \
@@ -79,6 +90,7 @@ usage() {
     "  --json               Machine-readable output for --status, --upgrade-plan and retirement actions." \
     "  --workflow PRESET    Optional workflow philosophy: infra or full." \
     "  --add-skill NAME     Add optional skill template to the target (mobile-optimization)." \
+    "  --ignore-target T    Where the local-only ignore block goes: exclude (.git/info/exclude, default) or gitignore." \
     "  --no-backup          Overwrite existing generated files without .bak copy." \
     "  --version            Print bootstrap version." \
     "  -h, --help           Show help."
@@ -88,6 +100,19 @@ retirement_usage_error() {
   echo "ERROR: $*" >&2
   usage >&2
   exit 2
+}
+
+# --only and --keep name files relative to the target root.
+option_relpath() {
+  local flag="$1" rel="$2"
+  while [[ "$rel" == ./* ]]; do
+    rel="${rel#./}"
+  done
+  if [[ -z "$rel" || "$rel" == /* || "/$rel/" == */../* || "/$rel/" == */./* || "/$rel/" == *//* ]]; then
+    echo "ERROR: $flag needs a path relative to the target root: $2" >&2
+    exit 2
+  fi
+  printf '%s\n' "$rel"
 }
 
 ORIGINAL_ARGS=("$@")
@@ -128,7 +153,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --only)
-      APPLY_ONLY+="${2:?missing value for --only}"$'\n'
+      APPLY_ONLY+="$(option_relpath --only "${2:?missing value for --only}")"$'\n'
+      shift 2
+      ;;
+    --keep)
+      KEEP_PATHS+="$(option_relpath --keep "${2:?missing value for --keep}")"$'\n'
       shift 2
       ;;
     --rollback)
@@ -199,6 +228,17 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2
       ;;
+    --ignore-target)
+      case "${2:?missing value for --ignore-target}" in
+        exclude|gitignore|none) IGNORE_TARGET="$2" ;;
+        *)
+          echo "ERROR: invalid --ignore-target: $2 (expected exclude or gitignore)" >&2
+          usage >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      ;;
     --no-backup)
       BACKUP=false
       shift
@@ -219,6 +259,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Internal, like AGENT_BOOTSTRAP_WRITE_LOG: a preview generates into a staging
+# directory holding only the harness's own files, so detection (and the legacy
+# seats input) read the real project tree instead. Honoured only for those
+# internal (logged) generations.
+DETECT_ROOT="$TARGET_DIR"
+if [[ -n "${AGENT_BOOTSTRAP_DETECT_ROOT:-}" ]] &&
+  [[ -n "${AGENT_BOOTSTRAP_WRITE_LOG:-}" || -n "${AGENT_BOOTSTRAP_PLAN_LOG:-}" ]]; then
+  if [[ "$AGENT_BOOTSTRAP_DETECT_ROOT" != /* || ! -d "$AGENT_BOOTSTRAP_DETECT_ROOT" ]]; then
+    echo "ERROR: AGENT_BOOTSTRAP_DETECT_ROOT must be an absolute existing directory" >&2
+    exit 2
+  fi
+  DETECT_ROOT="$(cd "$AGENT_BOOTSTRAP_DETECT_ROOT" && pwd -P)"
+fi
+
+# Test instrumentation only: one line per generation and per staging seed.
+bootstrap_trace() {
+  [[ -n "${AGENT_BOOTSTRAP_TRACE_FILE:-}" ]] || return 0
+  printf '%s\n' "$*" >> "$AGENT_BOOTSTRAP_TRACE_FILE"
+}
+
 # HK-07: reject malformed retirement combinations in any argument order before
 # dispatch or writes. Unrelated existing combinations keep last-action-wins.
 validate_retirement_arguments() {
@@ -229,7 +289,7 @@ validate_retirement_arguments() {
       continue
     fi
     case "$arg" in
-      --project-name|--target|--only|--workflow|--add-skill|--retirement-scope|--status-version) skip=true ;;
+      --project-name|--target|--only|--keep|--workflow|--ignore-target|--add-skill|--retirement-scope|--status-version) skip=true ;;
       --rollback)
         # An action that takes a value (the upgrade id).
         skip=true
@@ -612,12 +672,30 @@ validate_requested_optional_skills() {
 }
 
 optional_skill_generation_args() {
+  # Preview and plan runs use a scratch copy: carry the resolved ignore
+  # location so they neither guess again nor report the exclude file as drift.
+  resolve_ignore_target
+  printf '%s\n' "--ignore-target"
+  if [[ "$IGNORE_RESOLVED" == "exclude" ]]; then
+    printf '%s\n' "none"
+  else
+    printf '%s\n' "gitignore"
+  fi
   if optional_skill_selected mobile-optimization &&
     { detected_stack_has android_kotlin || detected_stack_has ios_swift; }; then
     printf '%s\n' "--add-skill"
     printf '%s\n' "mobile-optimization"
   fi
   return 0
+}
+
+# --keep for every pin, one argument per line, for staged generations.
+keep_generation_args() {
+  local rel
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    printf '%s\n%s\n' --keep "$rel"
+  done <<<"$KEEP_PATHS"
 }
 
 optional_skill_allowlist_paths() {
@@ -709,7 +787,10 @@ pending_generated_candidate_count() (
   allowed_list="$(mktemp)"
   count=0
   trap 'rm -f "$candidate_list" "$allowed_list"' EXIT HUP INT TERM
-  generated_file_allowlist > "$allowed_list"
+  if ! generated_file_allowlist > "$allowed_list"; then
+    printf 'unknown'
+    return 0
+  fi
   bootstrap_find_pruned "$TARGET_DIR" -type f -name '*.generated.*' -print 2>/dev/null > "$candidate_list"
   while IFS= read -r candidate; do
     [[ -n "$candidate" ]] || continue
@@ -824,6 +905,9 @@ print_status() {
     onboarding="$(printf '%s\n' "$fields" | sed -n 's/^onboarding_status=//p')"
     pending="$(printf '%s\n' "$fields" | sed -n 's/^pending_generated_candidates=//p')"
     generated_drift="$(printf '%s\n' "$fields" | sed -n 's/^generated_file_drift=//p')"
+    # The v1 schema types the count as an integer: an unknown count (no
+    # allowlist) stays 0 there, while the text form says unknown.
+    case "$pending" in ''|*[!0-9]*) pending=0 ;; esac
     printf '{"schema":"agent-bootstrap-status/v1","target":"%s","project":"%s","lock_schema":"%s","bundle_version":"%s","installed_version":"%s","channel":"%s","workflow_preset":"%s","installed_skills":"%s","skill_mobile_optimization_installed_from_version":"%s","skill_mobile_optimization_content_hash":"%s","skill_mobile_optimization_skew":"%s","detector_lock_status":"%s","onboarding_status":"%s","pending_generated_candidates":%s,"generated_file_drift":"%s"}\n' \
       "$(json_escape "$target")" \
       "$(json_escape "$project")" \
@@ -858,69 +942,6 @@ snapshot_required_path() {
   esac
 }
 
-snapshot_resolved_path() {
-  AGENT_SNAPSHOT_PATH="$1" python3 - <<'PY'
-import os
-print(os.path.realpath(os.environ["AGENT_SNAPSHOT_PATH"]))
-PY
-}
-
-copy_snapshot_regular_children() {
-  local source="$1"
-  local dest="$2"
-  local relpath="$3"
-  local resolved child child_rel
-  bootstrap_existing_directory_is_eligible "$source" || return 1
-  resolved="$(snapshot_resolved_path "$source")"
-  while IFS= read -r child; do
-    [[ -n "$child" ]] || continue
-    child_rel="$relpath/$(basename "$child")"
-    snapshot_path_is_personal "$child_rel" && continue
-    if ! bootstrap_existing_file_is_eligible "$child"; then
-      snapshot_required_path "$child_rel" && return 1
-      continue
-    fi
-    mkdir -p "$dest/$(dirname "$child_rel")"
-    cp -p "$child" "$dest/$child_rel"
-  done < <(find "$resolved" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -print 2>/dev/null)
-}
-
-copy_snapshot_directory_link_contents() {
-  local source="$1"
-  local dest="$2"
-  local relpath="$3"
-  local resolved nested nested_source
-  case "$relpath" in
-    docs/agent-configs|docs/superpowers/specs)
-      copy_snapshot_regular_children "$source" "$dest" "$relpath"
-      ;;
-    docs|docs/superpowers)
-      bootstrap_existing_directory_is_eligible "$source" || return 1
-      resolved="$(snapshot_resolved_path "$source")"
-      if [[ "$relpath" == "docs" ]]; then
-        for nested in agent-configs superpowers/specs; do
-          nested_source="$resolved/$nested"
-          if [[ -d "$nested_source" ]]; then
-            copy_snapshot_regular_children "$nested_source" "$dest" "$relpath/$nested" || return 1
-          elif [[ -e "$nested_source" || -L "$nested_source" ]]; then
-            return 1
-          fi
-        done
-      else
-        nested_source="$resolved/specs"
-        if [[ -d "$nested_source" ]]; then
-          copy_snapshot_regular_children "$nested_source" "$dest" "$relpath/specs"
-        elif [[ -e "$nested_source" || -L "$nested_source" ]]; then
-          return 1
-        fi
-      fi
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-}
-
 # Copies the listed (NUL-separated) relpaths from the target into a snapshot in
 # one process; a cp per file dominated large trees.
 snapshot_copy_files() {
@@ -949,40 +970,199 @@ snapshot_path_is_personal() {
   return 1
 }
 
-copy_target_for_diff() {
-  local dest="$1"
-  local relpath source target required=false copy_list status=0
+# Creates a preview scratch directory under $TMPDIR and prints its canonical
+# spelling (no /private alias or `//` from a TMPDIR ending in a slash), so
+# sanitize_for_diff recognises it in generated output.
+scratch_dir_create() {
+  local prefix="$1" label="$2" dir
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/$prefix.XXXXXX")" || dir=""
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    printf 'ERROR: could not create a preview %s directory under %s\n' "$label" "${TMPDIR:-/tmp}" >&2
+    return 1
+  fi
+  (cd "$dir" && pwd -P) || {
+    rmdir "$dir" 2>/dev/null
+    return 1
+  }
+}
+
+# Removes only a directory this run created: an absolute path named after its
+# mktemp prefix, never through a link and never an empty or other path.
+scratch_dir_remove() {
+  local dir="$1" prefix="$2"
+  case "$dir" in
+    /*/"$prefix".*) ;;
+    *) return 0 ;;
+  esac
+  [[ -d "$dir" && ! -L "$dir" ]] || return 0
+  rm -rf "$dir"
+}
+
+# EXIT only cleans up; HUP, INT and TERM clean up and exit with 128+signal.
+scratch_dir_traps() {
+  local cleanup="scratch_dir_remove \"\$$1\" $2"
+  # shellcheck disable=SC2064  # the variable name and prefix are fixed here
+  trap "$cleanup" EXIT
+  # shellcheck disable=SC2064
+  trap "$cleanup; exit 129" HUP
+  # shellcheck disable=SC2064
+  trap "$cleanup; exit 130" INT
+  # shellcheck disable=SC2064
+  trap "$cleanup; exit 143" TERM
+}
+
+# Preview actions share one scratch directory per invocation. The main shell
+# owns it, so the inventory cached inside one subshell serves the next.
+PREVIEW_SCRATCH=""
+
+preview_scratch_init() {
+  PREVIEW_SCRATCH="$(scratch_dir_create agent-preview scratch)" || {
+    PREVIEW_SCRATCH=""
+    return 1
+  }
+  scratch_dir_traps PREVIEW_SCRATCH agent-preview
+}
+
+# Opens the scratch root of one staging generation in the calling subshell:
+# removed when it exits, or kept and reported with AGENT_BOOTSTRAP_KEEP_STAGING=1
+# (tests only). Callers stop when it fails.
+STAGING_ROOT=""
+
+staging_root_open() {
+  STAGING_ROOT="$(scratch_dir_create agent-staging staging)" || {
+    STAGING_ROOT=""
+    return 1
+  }
+  if [[ "${AGENT_BOOTSTRAP_KEEP_STAGING:-}" == "1" ]]; then
+    printf 'agent-bootstrap: kept staging %s\n' "$STAGING_ROOT/target" >&2
+  else
+    scratch_dir_traps STAGING_ROOT agent-staging
+  fi
+}
+
+# Every path generation writes for this target, recorded by one --dry-run on
+# the real tree (which writes nothing) and cached for the rest of the
+# invocation.
+generated_output_inventory() {
+  local cache arg
+  if [[ -z "$PREVIEW_SCRATCH" ]]; then
+    printf 'ERROR: preview scratch directory is not initialised\n' >&2
+    return 1
+  fi
+  cache="$PREVIEW_SCRATCH/inventory"
+  # A failure is cached too: it is reported once per invocation.
+  [[ ! -e "$cache.failed" ]] || return 1
+  if [[ ! -e "$cache.ready" ]]; then
+    : > "$cache"
+    set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$TARGET_DIR" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup --dry-run
+    while IFS= read -r arg; do
+      [[ -n "$arg" ]] || continue
+      set -- "$@" "$arg"
+    done < <(optional_skill_generation_args)
+    if ! AGENT_BOOTSTRAP_WRITE_LOG="$cache" "$@" >"$PREVIEW_SCRATCH/inventory.out" 2>&1; then
+      cat "$PREVIEW_SCRATCH/inventory.out" >&2
+      printf 'ERROR: could not inventory the generated files\n' >&2
+      : > "$cache.failed"
+      return 1
+    fi
+    sort -u "$cache" > "$cache.sorted" && mv "$cache.sorted" "$cache"
+    : > "$cache.ready"
+  fi
+  cat "$cache"
+}
+
+# What generation reads back from its own target, given the inventory: the
+# outputs, the user-owned files, the lock, the seats data, .gitignore when the
+# ignore block lives there, and the *.generated.* candidates beside the
+# outputs. The legacy model-profiles.json is read in place (DETECT_ROOT).
+staging_seed_candidates() {
+  local inventory="$1" relpath candidate
+  resolve_ignore_target
+  {
+    [[ -z "$inventory" ]] || printf '%s\n' "$inventory"
+    printf '%s\n' \
+      docs/agent-configs/project-agent-context.md \
+      docs/agent-configs/project-brief.md \
+      docs/superpowers/specs/project-tech-stack.md \
+      docs/superpowers/specs/project-tech-stack.json \
+      docs/agent-configs/agent-bootstrap.lock.json \
+      docs/agent-configs/seats.json
+    [[ "$IGNORE_RESOLVED" != "gitignore" ]] || printf '%s\n' .gitignore
+    while IFS= read -r relpath; do
+      [[ -n "$relpath" ]] || continue
+      for candidate in "$TARGET_DIR/$relpath".generated.*; do
+        bootstrap_entry_exists "$candidate" || continue
+        printf '%s\n' "${candidate#"$TARGET_DIR"/}"
+      done
+    done <<< "$inventory"
+  } | sort -u
+}
+
+# Refuses, as a staged preview does, when a required configuration input
+# (stdin: candidate relpaths) exists but is unsafe to read. The allowlist of
+# --apply-candidates and --cleanup-backups keeps this refusal without staging.
+preview_required_inputs_are_safe() {
+  local relpath source required=false
+  while IFS= read -r relpath; do
+    [[ -n "$relpath" ]] || continue
+    snapshot_required_path "$relpath" || continue
+    snapshot_path_is_personal "$relpath" && continue
+    source="$TARGET_DIR/$relpath"
+    bootstrap_entry_exists "$source" || continue
+    bootstrap_existing_file_is_eligible "$source" && continue
+    printf 'warn: omitted unsafe preview entry: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
+    required=true
+  done
+  if [[ "$required" == "true" ]]; then
+    printf 'ERROR: required preview configuration was unsafe or unavailable\n' >&2
+    return 1
+  fi
+}
+
+# Seeds a staging target with only the staging_seed_candidates that exist
+# (--baseline adds the harness baseline for the upgrade plan). Detection reads
+# the real tree (AGENT_BOOTSTRAP_DETECT_ROOT), so project sources and personal
+# files never reach $TMPDIR.
+seed_staging() {
+  local dest="$1" with_baseline="${2:-}"
+  local work inventory relpath source baseline required=false status=0 count=0
   mkdir -p "$dest"
-  copy_list="$(mktemp "${TMPDIR:-/tmp}/agent-snapshot.XXXXXX")"
+  # Beside the staging target, so the caller's cleanup also covers it.
+  work="$(mktemp -d "$(dirname "$dest")/seed.XXXXXX")"
+  if ! inventory="$(generated_output_inventory)"; then
+    rm -rf "$work"
+    return 1
+  fi
+  staging_seed_candidates "$inventory" > "$work/paths"
 
-  (cd "$TARGET_DIR" && bootstrap_find_pruned . -type d -print0) | (cd "$dest" && xargs -0 mkdir -p .)
-
-  while IFS= read -r -d '' relpath; do
-    relpath="${relpath#./}"
+  while IFS= read -r relpath; do
     [[ -n "$relpath" ]] || continue
     snapshot_path_is_personal "$relpath" && continue
     source="$TARGET_DIR/$relpath"
-    target="$dest/$relpath"
-    if [[ -L "$source" && -d "$source" ]]; then
-      if bootstrap_existing_directory_is_eligible "$source"; then
-        mkdir -p "$target"
-        if ! copy_snapshot_directory_link_contents "$source" "$dest" "$relpath"; then
-          required=true
-        fi
-      else
-        printf 'warn: omitted unsafe directory link from preview: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
-        snapshot_required_path "$relpath" && required=true
-      fi
-    elif bootstrap_existing_file_is_eligible "$source"; then
+    bootstrap_entry_exists "$source" || continue
+    if bootstrap_existing_file_is_eligible "$source"; then
       printf '%s\0' "$relpath" >&3
+      count=$((count + 1))
     else
       printf 'warn: omitted unsafe preview entry: %s\n' "$(bootstrap_path_diagnostic "$source")" >&2
       snapshot_required_path "$relpath" && required=true
     fi
-  done 3>"$copy_list" < <(cd "$TARGET_DIR" && bootstrap_find_pruned . \( -type f -o -type l \) -print0)
+  done 3>"$work/copy" < "$work/paths"
+  snapshot_copy_files "$dest" < "$work/copy" || status=1
 
-  snapshot_copy_files "$dest" < "$copy_list" || status=1
-  rm -f "$copy_list"
+  baseline="$TARGET_DIR/$HARNESS_BASELINE_DIR/files"
+  if [[ "$with_baseline" == "--baseline" && -d "$baseline" ]] && harness_state_path_is_safe "$baseline"; then
+    while IFS= read -r relpath; do
+      relpath="${relpath#./}"
+      if [[ -f "$baseline/$relpath" && ! -L "$baseline/$relpath" ]] && harness_state_path_is_safe "$baseline/$relpath"; then
+        mkdir -p "$dest/$HARNESS_BASELINE_DIR/files/$(dirname "$relpath")"
+        cp -p "$baseline/$relpath" "$dest/$HARNESS_BASELINE_DIR/files/$relpath"
+      fi
+    done < <(cd "$baseline" && find . -type f -print)
+  fi
+  # Project files only; the baseline is harness state.
+  bootstrap_trace "seed $count"
+  rm -rf "$work"
   [[ "$status" -eq 0 ]] || return 1
 
   if [[ "$required" == "true" ]]; then
@@ -1030,21 +1210,21 @@ sanitize_for_diff() {
 
 print_generated_diff() (
   local tmp_root tmp_target write_log relpath diff_found old_sanitized new_sanitized arg old_unsafe
-  tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
+  staging_root_open || return 1
+  tmp_root="$STAGING_ROOT"
   tmp_target="$tmp_root/target"
   DIFF_TMP_TARGET="$tmp_target"
   write_log="$tmp_root/generated-files.txt"
   diff_found=false
-  copy_target_for_diff "$tmp_target"
+  seed_staging "$tmp_target" || return 1
   : > "$write_log"
 
   set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup
   while IFS= read -r arg; do
     [[ -n "$arg" ]] || continue
     set -- "$@" "$arg"
-  done < <(optional_skill_generation_args)
-  AGENT_BOOTSTRAP_WRITE_LOG="$write_log" \
+  done < <(optional_skill_generation_args; keep_generation_args)
+  AGENT_BOOTSTRAP_DETECT_ROOT="$TARGET_DIR" AGENT_BOOTSTRAP_WRITE_LOG="$write_log" \
     "$@" \
     >"$tmp_root/generate.out"
 
@@ -1104,25 +1284,11 @@ generated_file_drift_status() {
 }
 
 generated_file_allowlist() (
-  local tmp_root tmp_target write_log arg
-  tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
-  tmp_target="$tmp_root/target"
-  write_log="$tmp_root/generated-files.txt"
-  copy_target_for_diff "$tmp_target"
-  : > "$write_log"
-
-  set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --force --no-backup
-  while IFS= read -r arg; do
-    [[ -n "$arg" ]] || continue
-    set -- "$@" "$arg"
-  done < <(optional_skill_generation_args)
-  AGENT_BOOTSTRAP_WRITE_LOG="$write_log" \
-    "$@" \
-    >"$tmp_root/generate.out"
-
+  local inventory
+  inventory="$(generated_output_inventory)" || return 1
+  staging_seed_candidates "$inventory" | preview_required_inputs_are_safe || return 1
   {
-    cat "$write_log"
+    [[ -z "$inventory" ]] || printf '%s\n' "$inventory"
     optional_skill_allowlist_paths
   } | sort -u | exclude_retired_artifact_paths
 )
@@ -1140,16 +1306,27 @@ exclude_retired_artifact_paths() {
 
 # HK-07: append the read-only retirement plan to ordinary actions. It never
 # applies a retirement and returns 1 only for an inspection/enumeration error.
-# Internal preview/allowlist generations (AGENT_BOOTSTRAP_WRITE_LOG) skip it.
+# Internal preview, inventory and plan generations (AGENT_BOOTSTRAP_WRITE_LOG,
+# AGENT_BOOTSTRAP_PLAN_LOG) skip it: their target is not the project.
 print_retirement_section() {
-  [[ -z "${AGENT_BOOTSTRAP_WRITE_LOG:-}" ]] || return 0
+  [[ -z "${AGENT_BOOTSTRAP_WRITE_LOG:-}" && -z "${AGENT_BOOTSTRAP_PLAN_LOG:-}" ]] || return 0
   printf '\n'
   python3 "$LIB_DIR/retirement.py" section --target "$TARGET_DIR" --scope "$RETIREMENT_SCOPE" \
     --context "$1" --bootstrap "$BOOTSTRAP_SCRIPT_PATH"
 }
 
+# A candidate's file has local edits when it differs from its harness baseline
+# or has none; plain --apply-candidates leaves it for an explicit --only.
+candidate_base_has_local_edits() {
+  local base="$1" rel="$2"
+  bootstrap_existing_file_is_eligible "$base" || return 1
+  harness_baseline_readable "$rel" || return 0
+  ! cmp -s "$base" "$(harness_baseline_file "$rel")"
+}
+
 apply_generated_candidates() (
   local candidate_list applied_list allowed_list candidate base rel_candidate rel_base applied_any skipped target_parent
+  local kept_bases=$'\n'
   candidate_list="$(mktemp)"
   applied_list="$(mktemp)"
   allowed_list="$(mktemp)"
@@ -1179,6 +1356,13 @@ apply_generated_candidates() (
     fi
     if bootstrap_user_owned_file_is_filled "$base"; then
       printf 'Skipped user-owned generated candidate %s -> %s\n' "$rel_candidate" "$rel_base"
+      continue
+    fi
+    if [[ -z "$APPLY_ONLY" ]] && candidate_base_has_local_edits "$base" "$rel_base"; then
+      if [[ "$kept_bases" != *$'\n'"$rel_base"$'\n'* ]]; then
+        printf 'kept local edits: %s (name it with --only to replace)\n' "$rel_base"
+        kept_bases+="$rel_base"$'\n'
+      fi
       continue
     fi
     target_parent="$(dirname "$base")"
@@ -1223,7 +1407,7 @@ apply_generated_candidates() (
     printf '%s\n' "$base" >> "$applied_list"
   done < "$candidate_list"
 
-  if [[ "$applied_any" != "true" && "$skipped" -eq 0 ]]; then
+  if [[ "$applied_any" != "true" && "$skipped" -eq 0 && "$kept_bases" == $'\n' ]]; then
     printf 'No generated candidates to apply.\n'
   fi
   while IFS= read -r rel_base; do
@@ -1280,42 +1464,50 @@ cleanup_backups() {
 }
 
 print_upgrade_plan_json() (
-  # Classify every generated file by replaying generation on a temporary copy
-  # of the target (with its harness baseline); nothing in the target changes.
-  local tmp_root tmp_target plan_log arg baseline relpath
-  tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT HUP INT TERM
+  # Classify every generated file by replaying generation on a staging target
+  # seeded with the harness files and baseline; nothing in the target changes.
+  local tmp_root tmp_target plan_log arg baseline
+  staging_root_open || return 1
+  tmp_root="$STAGING_ROOT"
   tmp_target="$tmp_root/target"
   plan_log="$tmp_root/plan.tsv"
-  copy_target_for_diff "$tmp_target" || return 1
+  seed_staging "$tmp_target" --baseline || return 1
   baseline="$TARGET_DIR/$HARNESS_BASELINE_DIR/files"
-  if [[ -d "$baseline" ]] && harness_state_path_is_safe "$baseline"; then
-    while IFS= read -r relpath; do
-      relpath="${relpath#./}"
-      if [[ -f "$baseline/$relpath" && ! -L "$baseline/$relpath" ]] && harness_state_path_is_safe "$baseline/$relpath"; then
-        mkdir -p "$tmp_target/$HARNESS_BASELINE_DIR/files/$(dirname "$relpath")"
-        cp -p "$baseline/$relpath" "$tmp_target/$HARNESS_BASELINE_DIR/files/$relpath"
-      fi
-    done < <(cd "$baseline" && find . -type f -print)
-  fi
   : > "$plan_log"
   set -- "$BOOTSTRAP_SCRIPT_PATH" --target "$tmp_target" --project-name "$PROJECT_NAME" --workflow "$WORKFLOW_PRESET" --no-backup
   while IFS= read -r arg; do
     [[ -n "$arg" ]] || continue
     set -- "$@" "$arg"
-  done < <(optional_skill_generation_args)
-  if ! AGENT_BOOTSTRAP_PLAN_LOG="$plan_log" "$@" >"$tmp_root/generate.out" 2>&1; then
+  done < <(optional_skill_generation_args; keep_generation_args)
+  if ! AGENT_BOOTSTRAP_DETECT_ROOT="$TARGET_DIR" AGENT_BOOTSTRAP_PLAN_LOG="$plan_log" "$@" >"$tmp_root/generate.out" 2>&1; then
     cat "$tmp_root/generate.out" >&2
     return 1
   fi
   python3 - "$TARGET_DIR" "$plan_log" "$AGENT_BOOTSTRAP_VERSION" "$(read_lock_value version)" "$WORKFLOW_PRESET" \
-    "$([[ -d "$baseline" ]] && printf present || printf missing)" <<'PY'
+    "$([[ -d "$baseline" ]] && printf present || printf missing)" "$baseline" <<'PY'
 import collections
+import hashlib
 import json
 import os
 import sys
 
-target, plan_log, bundle, installed, workflow, baseline = sys.argv[1:7]
+target, plan_log, bundle, installed, workflow, baseline, baseline_dir = sys.argv[1:8]
+
+
+def digest(path, root=None):
+    """sha256 of a regular file, or None; under root no component may be a link."""
+    if root is not None:
+        current = root
+        for part in os.path.relpath(path, root).split(os.sep):
+            current = os.path.join(current, part)
+            if part in ("", ".", "..") or os.path.islink(current):
+                return None
+    if os.path.islink(path) or not os.path.isfile(path):
+        return None
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
 actions = {}
 with open(plan_log, encoding="utf-8") as handle:
     for line in handle:
@@ -1329,7 +1521,10 @@ for rel in sorted(actions):
     real = os.path.join(target, rel)
     if action == "create" and (os.path.lexists(real)):
         action = "unsafe"
-    files.append({"path": rel, "action": action})
+    files.append({"path": rel, "action": action,
+                  "baseline_sha256": digest(os.path.join(baseline_dir, rel), target),
+                  "local_sha256": digest(real, target),
+                  "new_sha256": digest(os.path.join(plan_log + ".new", rel))})
 print(json.dumps({
     "schema": "agent-bootstrap-upgrade-plan/v1",
     "target": target,
@@ -1437,23 +1632,34 @@ PY
 }
 
 print_upgrade_plan() {
-  local status_fields
+  local status_fields keep_args="" rel
   status_fields="$(current_status_fields)"
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    keep_args+=" --keep $(shell_quote "$rel")"
+  done <<<"$KEEP_PATHS"
   printf 'Upgrade plan\n'
   printf '%s\n' "$status_fields"
   printf '\n'
   printf 'Preview generated-file changes:\n'
-  printf '  bash %s --target %s --workflow %s --diff\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")" "$WORKFLOW_PRESET"
+  printf '  bash %s --target %s --workflow %s --diff%s\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")" "$WORKFLOW_PRESET" "$keep_args"
   printf 'Apply non-destructively (writes *.generated.* candidates for conflicts):\n'
-  printf '  bash %s --target %s --workflow %s\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")" "$WORKFLOW_PRESET"
+  printf '  bash %s --target %s --workflow %s%s\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")" "$WORKFLOW_PRESET" "$keep_args"
   printf 'Promote reviewed generated candidates into place:\n'
   printf '  bash %s --target %s --apply-candidates\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
   printf 'Validate target after review/apply:\n'
   printf '  scripts/verify-ai-deps.sh\n'
-  printf 'Per-file plan (update, merge, conflict, kept) as JSON:\n'
-  printf '  bash %s --target %s --upgrade-plan --json\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
+  printf 'Per-file plan (update, merge, conflict, kept, pinned) as JSON:\n'
+  printf '  bash %s --target %s --upgrade-plan --json%s\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")" "$keep_args"
   printf 'Undo an upgrade by the id it printed:\n'
   printf '  bash %s --target %s --rollback <upgrade-id>\n' "$BOOTSTRAP_SCRIPT_PATH" "$(shell_quote "$TARGET_DIR")"
+  if [[ -n "$keep_args" ]]; then
+    printf '\n'
+    printf 'Pinned files (left untouched, no candidate):\n'
+    while IFS= read -r rel; do
+      [[ -z "$rel" ]] || printf '  pinned %s\n' "$rel"
+    done <<<"$KEEP_PATHS"
+  fi
   if optional_skill_installed mobile-optimization; then
     printf '\n'
     printf 'Optional skills installed from lock:\n'
@@ -1520,6 +1726,9 @@ main() {
   load_installed_optional_skills
   validate_requested_optional_skills
   case "$ACTION" in
+    status|diff|upgrade-plan|apply-candidates|cleanup-backups) preview_scratch_init || exit 1 ;;
+  esac
+  case "$ACTION" in
     status)
       if [[ "$JSON_OUTPUT" == "true" && "$STATUS_VERSION" == "2" ]]; then
         local status_json
@@ -1579,6 +1788,12 @@ main() {
     exit 0
   fi
 
+  if [[ "$DRY_RUN" == "true" ]]; then
+    bootstrap_trace "generate dry-run"
+  else
+    bootstrap_trace "generate"
+  fi
+
   if workflow_enabled; then
     write_agent_seats
     seed_agent_seats
@@ -1611,7 +1826,7 @@ main() {
   else
     write_infra_tool_entrypoints
   fi
-  append_gitignore_block
+  write_ignore_block
   harness_journal_finalize
 
   log "Generated multi-agent files."

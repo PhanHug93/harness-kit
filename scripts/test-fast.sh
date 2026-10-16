@@ -7,7 +7,8 @@ set -uo pipefail
 # runs in CI for every pull request and release tag; run it locally only to
 # reproduce a CI failure or when CI cannot run.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race local-only)
+CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race local-only
+  verification-evidence entry knowledge migrations staging oneshot matrix)
 
 usage() {
   printf '%s\n' \
@@ -35,6 +36,13 @@ run_check() {
     path-policy) bash "$ROOT_DIR/scripts/test-path-policy.sh" ;;
     guard-race) bash "$ROOT_DIR/scripts/test-guard-concurrency.sh" ;;
     local-only) bash "$ROOT_DIR/scripts/test-local-only-mode.sh" ;;
+    verification-evidence) bash "$ROOT_DIR/scripts/test-verification-evidence.sh" ;;
+    entry) bash "$ROOT_DIR/scripts/test-harness-kit-entry.sh" ;;
+    knowledge) python3 -B "$ROOT_DIR/scripts/test-harness-knowledge.py" ;;
+    migrations) bash "$ROOT_DIR/scripts/test-harness-migrations.sh" ;;
+    staging) bash "$ROOT_DIR/scripts/test-harness-kit-staging.sh" ;;
+    oneshot) bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh" ;;
+    matrix) bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh" ;;
   esac
 }
 

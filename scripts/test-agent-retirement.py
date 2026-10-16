@@ -1212,74 +1212,49 @@ def case_refresh_lock(c, work, bundle=BUNDLE):
     c.check("R2 refresh-lock leaves retired files and candidates untouched", {rel: ident(target / rel) for rel in watched} == before)
 
 
-def make_cache(path, *, helper=True, move_head=False):
-    """Local harness checkout tagged at the bundle version (no network)."""
-    path.mkdir(parents=True)
-    shutil.copytree(BUNDLE, path / "agent-bootstrap", symlinks=True)
-    if not helper:
-        (path / "agent-bootstrap/lib/retirement.py").unlink()
-    init_git(path, commit_readme=False)
-    run_ok(["git", "-C", path, "add", "agent-bootstrap"])
-    run_ok(["git", "-C", path, "commit", "-q", "-m", "fixture release"])
-    run_ok(["git", "-C", path, "tag", "v" + VERSION])
-    if move_head:
-        (path / "later.txt").write_text("later\n")
-        run_ok(["git", "-C", path, "add", "later.txt"])
-        run_ok(["git", "-C", path, "commit", "-q", "-m", "later"])
-    return run_ok(["git", "-C", path, "rev-parse", "HEAD"]).stdout.strip()
+def project_tree(root):
+    """tree() without the kit copy and run state the one-shot keeps in the target."""
+    return {rel: value for rel, value in tree(root).items()
+            if rel.split(os.sep)[0] not in (".harness-kit", ".tools")}
 
 
 def case_r12_dry_run(c, work, bundle=BUNDLE):
+    """R12 with the one-shot entry: --dry-run is --plan, which never deletes;
+    --apply-retirements is ignored with a plan; nothing is fetched."""
     target = synth(work / "r12-target")
-    sub = target / "nested/dir"
-    sub.mkdir(parents=True)
     git_log = work / "r12-git.log"
     env = dict(ENV, PATH=f"{GIT_SHIM_DIR}:{ENV['PATH']}", RETIREMENT_PROBE_LOG=str(git_log))
     home, cache = work / "r12-home", work / "r12-cache-missing"
-    before, index_before = tree(target), ident(target / ".git/index")
+    before, index_before = project_tree(target), ident(target / ".git/index")
     source_status = run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=all"]).stdout
-    policy_digest = sha_file(bundle / "policies/retired-artifacts-v1.json")
 
-    proc = run([ONE_SHOT, "--dry-run", "--source-dir", ROOT, "--target", sub, "--home", home, "--cache-dir", cache], env=env)
+    proc = run([ONE_SHOT, "--dry-run", "--source-dir", ROOT, "--target", target, "--home", home, "--cache-dir", cache], env=env)
     out = proc.stdout + proc.stderr
     c.check("R12 dry-run with local source exits 0", proc.returncode == 0, out[-2000:])
-    c.check("R12 dry-run plans at the Git root", f"target_git_root={target}" in out and f"target={target}" in out, out[-2000:])
-    c.check("R12 dry-run shows source identity", all(t in out for t in (f"version={VERSION}", "ref=v" + VERSION,
-                                                                       "retirement_policy_sha256=" + policy_digest)), out[-2000:])
-    c.check("R12 dry-run prints the retirement plan", "Retirement plan" in out and "state=eligible" in out)
+    c.check("R12 dry-run is a plan of this kit version", f"mode: install {VERSION} (plan only)" in proc.stdout
+            and "--dry-run now means --plan" in proc.stderr, out[-2000:])
+    c.check("R12 dry-run reports the plan", "RESULT: done (plan only, nothing applied)" in proc.stdout
+            and (target / ".tools/agent-state/upgrades").is_dir(), out[-2000:])
     proc = run([ONE_SHOT, "--dry-run", "--apply-retirements", "--retirement-scope", "all-matching", "--source-dir", ROOT,
                 "--target", target, "--home", home, "--cache-dir", cache], env=env)
-    c.check("R12 dry-run apply is plan only", proc.returncode == 0 and "dry_run=true" in proc.stdout, proc.stdout[-1500:] + proc.stderr[-800:])
-    c.check("R12 dry-run wrote nothing to the target", tree(target) == before and ident(target / ".git/index") == index_before)
+    out = proc.stdout + proc.stderr
+    c.check("R12 dry-run apply is plan only", proc.returncode == 0 and "plan only" in proc.stdout
+            and "--apply-retirements is ignored with --plan" in proc.stderr, out[-2000:])
+    c.check("R12 dry-run never deletes a retired file", all((target / rel).is_file() for rel in PATHS))
+    c.check("R12 dry-run wrote nothing outside .harness-kit/ and .tools/",
+            project_tree(target) == before and ident(target / ".git/index") == index_before,
+            tree_delta(before, project_tree(target)))
     c.check("R12 dry-run created no home/cache", not home.exists() and not cache.exists())
     c.check("R12 dry-run wrote nothing to the source", run(["git", "-C", ROOT, "status", "--porcelain", "--untracked-files=all"]).stdout == source_status)
 
-    proc = run([ONE_SHOT, "--dry-run", "--target", target, "--home", home, "--cache-dir", cache], env=env)
-    out = proc.stdout + proc.stderr
-    c.check("R12 unavailable local source exits 1 with --source-dir guidance", proc.returncode == 1
-            and "retirement plan is unavailable" in out and "--source-dir" in out, out[-1500:])
-    c.check("R12 unavailable source creates nothing", not home.exists() and not cache.exists() and tree(target) == before)
-
-    good = work / "r12-cache-good"
-    head = make_cache(good)
-    proc = run([ONE_SHOT, "--dry-run", "--target", target, "--home", home, "--cache-dir", good], env=env)
-    c.check("R12 cache already at the requested ref plans offline", proc.returncode == 0 and "Retirement plan" in proc.stdout
-            and f"source_commit={head}" in proc.stdout, proc.stdout[-1500:] + proc.stderr[-800:])
-    c.check("R12 cache HEAD unchanged", run_ok(["git", "-C", good, "rev-parse", "HEAD"]).stdout.strip() == head)
-    for name, kwargs in (("moved-head", {"move_head": True}), ("missing-helper", {"helper": False})):
-        stale = work / ("r12-cache-" + name)
-        head = make_cache(stale, **kwargs)
-        proc = run([ONE_SHOT, "--dry-run", "--target", target, "--home", home, "--cache-dir", stale], env=env)
-        c.check(f"R12 stale cache ({name}) is not used", proc.returncode == 1 and "unavailable" in proc.stdout + proc.stderr,
-                proc.stdout[-800:] + proc.stderr[-800:])
-        c.check(f"R12 stale cache ({name}) not checked out", run_ok(["git", "-C", stale, "rev-parse", "HEAD"]).stdout.strip() == head)
     plain = synth(work / "r12-plain", git=False)
     proc = run([ONE_SHOT, "--dry-run", "--source-dir", ROOT, "--target", plain, "--home", home, "--cache-dir", cache], env=env)
-    c.check("R12 dry-run refuses a non-Git target like the real run", proc.returncode == 1)
+    c.check("R12 dry-run refuses a non-Git target like the real run", proc.returncode == 1, proc.stderr[-800:])
     log = git_log.read_text() if git_log.exists() else ""
-    forbidden = [line for line in log.splitlines() if re.search(r"\b(fetch|clone|checkout|switch|init|ls-remote)\b", line)]
+    forbidden = [line for line in log.splitlines() if re.search(r"^git (.* )?(fetch|clone|checkout|switch|init|ls-remote)( |$)", line)]
     c.check("R12 dry-run never fetches, clones, checks out or switches", not forbidden, forbidden)
-    c.check("R12 target and home still unwritten", tree(target) == before and not home.exists())
+    c.check("R12 retired files and home still unwritten", all((target / rel).read_bytes() == HIST for rel in PATHS)
+            and not home.exists())
 
 
 # --------------------------------------------------------------------------
@@ -1375,7 +1350,9 @@ def observer_case(c, work, action, mode):
         lock.unlink()
         os.symlink(work / (label + "-outside/lock.json"), lock)
     before = {rel: ident(target / rel) for rel in watched}
-    proc = boot(target, action)
+    # Plain --apply-candidates keeps a base without a baseline; --only promotes it.
+    only = ["--only", "AGENTS.md"] if action == "--apply-candidates" else []
+    proc = boot(target, action, *only)
     expect = {"attention": 0, "retirement-error": 1, "ordinary-failure": 1}[mode]
     c.check(f"R11 {label}: exit {expect}", proc.returncode == expect, f"rc={proc.returncode}\n{proc.stdout[-800:]}\n{proc.stderr[-800:]}")
     c.check(f"R11 {label}: retired files and candidates untouched", {rel: ident(target / rel) for rel in watched} == before)
@@ -1425,6 +1402,9 @@ def slow_updater(c, work):
 
 
 def one_shot(c, work, label, flags, *, expect, prepare=None, apply_expected=False):
+    """A real one-shot update of the historical target through the entry script.
+    The legacy target has no baseline, so its changed kit files are conflicts
+    (exit 3 when nothing fails); retirement is the retire-files decision."""
     target = copy_target(HIST_TARGET, work / ("one-shot-" + label))
     watched = watched_paths(target, work / ("one-shot-" + label + "-outside"))
     if prepare:
@@ -1436,39 +1416,51 @@ def one_shot(c, work, label, flags, *, expect, prepare=None, apply_expected=Fals
     proc = run([ONE_SHOT, "--source-dir", ROOT, "--target", target, "--home", home, "--skip-verify", "--allow-dirty", *flags], env=env)
     out = proc.stdout + proc.stderr
     c.check(f"R12 one-shot {label}: exit {expect}", proc.returncode == expect, out[-2500:])
-    c.check(f"R12 one-shot {label}: always shows a retirement plan", "Retirement plan" in out)
+    match = re.search(r"^report: (.+)$", proc.stdout, re.M)
+    report = json.loads((target / match.group(1)).read_text()) if match else {}
+    c.check(f"R12 one-shot {label}: writes a run report", bool(report), out[-1500:])
+    decisions = {status: [m["id"] for m in report.get("migrations", {}).get(status, [])]
+                 for status in ("applied", "pending", "declined", "failed")}
     probe = log.read_text() if log.exists() else ""
-    c.check(f"R14 one-shot {label}: reached the installed engine", f"{home}/lib/retirement.py section" in probe, probe[-800:])
+    c.check(f"R14 one-shot {label}: reached the kit copy's engine",
+            f"/.harness-kit/v{VERSION}/agent-bootstrap/lib/retirement.py" in probe, probe[-800:])
+    c.check(f"R12 one-shot {label}: no home install", not home.exists())
     after = {rel: ident(target / rel) for rel in watched}
     if not apply_expected:
+        c.check(f"R12 one-shot {label}: retirement stays a pending decision", "next-retire-files" in decisions["pending"], decisions)
         c.check(f"R12 one-shot {label}: never deletes", after == before, [r for r in watched if before[r] != after[r]])
         c.check(f"R12 one-shot {label}: never reaches apply", " apply --target" not in probe)
     else:
         c.check(f"R12 one-shot {label}: candidates untouched", all(after[r] == before[r] for r in watched if r not in PATHS))
-    return target, out, before, after
+    return target, out, report, decisions, before, after
 
 
 def slow_one_shot_default(c, work):
-    target, out, before, after = one_shot(c, work, "default", [], expect=0)
-    c.check("R2 one-shot human status shows retirement state", "Retirement status" in out)
-    c.check("R2 one-shot diff never proposes retired paths", f"--- {WORKFLOW}" not in out and f"--- {TEMPLATE}" not in out)
-    lines = [line for line in out.splitlines() if line.startswith('{"schema":"agent-bootstrap-status/')]
-    doc = json.loads(lines[-1]) if lines else None
-    validate_report(c, "R14 one-shot default status JSON", doc, STATUS_V1_ID)
-    c.check("R14 one-shot default status JSON stays v1", doc is not None and "retirement" not in doc)
+    target, out, report, decisions, before, after = one_shot(c, work, "default", [], expect=3)
+    plan = report and json.loads((target / ".tools/agent-state/upgrades" / report["stamp"] / "plan.json").read_text())
+    planned = [item["path"] for item in (plan or {}).get("files", [])]
+    c.check("R2 one-shot never generates retired paths", planned and WORKFLOW not in planned and TEMPLATE not in planned)
+    c.check("R12 one-shot console names the retire-files decision", "--accept next-retire-files" in out, out[-1500:])
 
 
 def slow_one_shot_flags(c, work):
-    one_shot(c, work, "flags-no-apply", ["--no-branch", "--apply-candidates", "--retirement-scope", "all-matching"], expect=0)
+    target, out, report, decisions, before, after = one_shot(
+        c, work, "flags-no-apply", ["--no-branch", "--apply-candidates", "--retirement-scope", "all-matching"], expect=3)
+    c.check("R12 one-shot old flags print their notes", all(note in out for note in (
+        "--no-branch is now the default", "--apply-candidates is replaced", "--retirement-scope is no longer used",
+        "--allow-dirty is now the default")), out[-1500:])
 
 
 def slow_one_shot_apply3(c, work):
-    target, out, before, after = one_shot(c, work, "apply-exit3", ["--no-branch", "--apply-retirements"], expect=3,
-                                          prepare=lambda t: put(t / TEMPLATE, flip_byte(HIST)), apply_expected=True)
+    target, out, report, decisions, before, after = one_shot(
+        c, work, "apply-exit3", ["--no-branch", "--apply-retirements"], expect=3,
+        prepare=lambda t: put(t / TEMPLATE, flip_byte(HIST)), apply_expected=True)
     fresh = [name for name in backups(target, WORKFLOW) if not name.endswith("20200101T000000Z-0123456789abcdef")]
     c.check("R12 one-shot apply retired the exact local-only workflow", after[WORKFLOW] is None and len(fresh) == 1)
     c.check("R12 one-shot apply preserved the modified template", after[TEMPLATE] == before[TEMPLATE])
-    c.check("R12 one-shot exit 3 continues status", "status after generation" in out)
+    c.check("R12 one-shot retirement with a preserved file is applied", decisions["applied"] == ["next-retire-files"], decisions)
+    c.check("R12 one-shot exit 3 comes from the remaining conflicts", report.get("result") == "needs review"
+            and report["files"]["conflicts"], report.get("result"))
 
 
 def slow_one_shot_apply1(c, work):
@@ -1481,13 +1473,17 @@ def slow_one_shot_apply1(c, work):
         holder["parent"] = target / Path(WORKFLOW).parent
         os.chmod(holder["parent"], 0o555)
     try:
-        target, out, before, after = one_shot(c, work, "apply-exit1", ["--no-branch", "--apply-retirements"], expect=1,
-                                              prepare=prepare, apply_expected=True)
+        target, out, report, decisions, before, after = one_shot(
+            c, work, "apply-exit1", ["--no-branch", "--apply-retirements"], expect=1, prepare=prepare, apply_expected=True)
     finally:
         if "parent" in holder:
             os.chmod(holder["parent"], 0o755)
     c.check("R12 one-shot apply failure keeps the original", after[WORKFLOW] == before[WORKFLOW])
-    c.check("R12 one-shot apply failure stops further actions", "status after generation" not in out, out[-1500:])
+    c.check("R12 one-shot apply failure is a failed migration", decisions["failed"] == ["next-retire-files"]
+            and report.get("result") == "failed", decisions)
+    c.check("R12 one-shot apply failure stops further actions",
+            [p["status"] for p in report.get("phases", []) if p["name"] in ("migrate", "verify")] == ["failed", "skipped"],
+            report.get("phases"))
 
 
 def slow_idempotence(c, work):
@@ -1588,7 +1584,8 @@ def entrypoint_allowlist_mutant(c, work, bundle):
     target = copy_target(HIST_TARGET, work / "allowlist-target")
     watched = watched_paths(target, work / "allowlist-outside")
     before = {rel: ident(target / rel) for rel in watched}
-    boot(target, "--apply-candidates", bundle=bundle)
+    # Named explicitly: plain --apply-candidates keeps a base without a baseline.
+    boot(target, "--apply-candidates", "--only", WORKFLOW, bundle=bundle)
     c.check("R6 apply-candidates never promotes a retired base", {rel: ident(target / rel) for rel in watched} == before)
 
 

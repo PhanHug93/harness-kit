@@ -249,6 +249,9 @@ def base_env(fake_bin: Path, codex_log: Path, hook_log: Path) -> Dict[str, str]:
         if key.startswith("CODEX_"):
             del env[key]
     env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", os.defpath)
+    # The @build close-out (pre-final after Codex exits) is exercised once in
+    # test_launch_matrix and in scripts/test-verification-evidence.sh.
+    env["CODEX_SKIP_CLOSEOUT"] = "1"
     env["CODEX_CAPTURE_FILE"] = str(codex_log)
     env["HOOK_CAPTURE_FILE"] = str(hook_log)
     env["HOOK_PREFLIGHT_CAPTURE_FILE"] = str(hook_log.with_name("hook-preflight.log"))
@@ -386,9 +389,9 @@ def test_resolve_and_model_info(target: Path, env: Dict[str, str]) -> None:
 
 def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_log: Path) -> None:
     expected = {
-        "planning": ("gpt-6-astra", "ultra", "planning"),
-        "@gate": ("gpt-6-astra", "ultra", "planning"),
-        "gate": ("gpt-6-astra", "ultra", "planning"),
+        "planning": ("gpt-5.6-luna", "xhigh", "planning"),
+        "@gate": ("gpt-6-astra", "ultra", "gating"),
+        "gate": ("gpt-6-astra", "ultra", "gating"),
         "coding": ("gpt-5.6-luna", "xhigh", "coding"),
         "@build": ("gpt-5.6-luna", "xhigh", "coding"),
         "build": ("gpt-5.6-luna", "xhigh", "coding"),
@@ -448,11 +451,35 @@ def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_
         seed = "\n".join(captured_args(codex_log))
         check("docs/agent-configs/agent-mode-contracts.md" in seed, f"seed variant {seat} {flow_flag} lost mode contract pointer")
         check("docs/agent-configs/agent-handoff-schema.md" in seed, f"seed variant {seat} {flow_flag} lost handoff schema pointer")
-        if seat == "@verify":
+        if seat in ("@gate", "@verify"):
             check(
-                "Severity must name its trigger condition and frequency, or mark itself as an estimate." in seed,
-                f"seed variant {seat} {flow_flag} lost severity trigger obligation",
+                "mode contracts' severity rule" in seed,
+                f"seed variant {seat} {flow_flag} lost the pointer to the contract severity rule",
             )
+        if seat == "@gate":
+            check("MODE LOCK: TECHNICAL-REVIEW" in seed, f"seed variant {seat} {flow_flag} lost the technical review lock")
+            check("MODE LOCK: PLANNING" not in seed, f"seed variant {seat} {flow_flag} still carries the planning lock")
+
+    # The close-out writes guard state, so it runs on a copy of the fixture.
+    closeout_target = target.parent / "closeout-target"
+    shutil.copytree(target, closeout_target)
+    closeout_env = {k: v for k, v in env.items() if k != "CODEX_SKIP_CLOSEOUT"}
+    seeded = run([str(closeout_target / "scripts" / "agent-guard.sh"), "preflight"], cwd=closeout_target, env=env)
+    check(seeded.returncode == 0, f"could not seed the close-out fixture's context pack: {seeded.stderr}")
+    result = invoke(closeout_target, ["@build", "bounded prompt"], env)
+    check(result.returncode == 0, f"@build launch with CODEX_SKIP_CLOSEOUT=1 failed: {result.stderr}")
+    check("close-out" not in result.stderr, "CODEX_SKIP_CLOSEOUT=1 still ran the close-out")
+    exec_args = captured_args(codex_log)
+    result = invoke(closeout_target, ["@build", "bounded prompt"], closeout_env)
+    check(result.returncode == 0, f"@build close-out changed Codex's exit code: {result.stderr}")
+    check(captured_args(codex_log) == exec_args, "the child launch passed Codex different arguments than exec")
+    # This fixture declares no verification command, so strict pre-final is unverified (4).
+    check("@build close-out: pre-final exit 4: agent-guard: ERROR: unverified" in result.stderr,
+          f"@build close-out did not report the unverified pre-final: {result.stderr[-800:]}")
+    check("@build close-out: verify_report=" in result.stderr, "@build close-out omitted the report path")
+    result = invoke(closeout_target, ["@verify"], closeout_env)
+    check(result.returncode == 0, f"@verify launch failed: {result.stderr}")
+    check("close-out" not in result.stderr, "@verify ran the @build close-out")
 
     result = invoke(target, ["@build"], {**env, "CODEX_USE_FALLBACK": "1"})
     check(result.returncode == 0, "fallback launch failed")
@@ -511,13 +538,18 @@ def test_conflict_and_non_codex(target: Path, env: Dict[str, str], codex_log: Pa
         },
     )
     result = invoke(target, ["@build"], env)
-    check(result.returncode == 0, "conflicting build launch was refused")
-    marker = "policy_exception=gate_coding authorization=user_session"
-    check(marker in result.stderr, "conflicting build launch omitted the policy exception")
+    check(result.returncode == 0, "overlapping build launch was refused")
+    marker = "model_overlap=gate"
+    check(marker in result.stderr and "WARN" in result.stderr, "overlapping build launch omitted the overlap warning")
+    check(marker in "\n".join(captured_args(codex_log)), "overlapping build seed omitted the overlap fact")
+    check(
+        "authorization=" not in result.stderr + "\n".join(captured_args(codex_log)),
+        "launcher wrote an authorization nobody gave",
+    )
 
     result = invoke(target, ["@build"], {**env, "CODEX_MODEL_OVERRIDE": "gpt-5.4"})
-    check(result.returncode == 0, "override-away conflict launch failed")
-    check(marker not in result.stderr, "conflict was calculated from the declared model")
+    check(result.returncode == 0, "override-away overlap launch failed")
+    check("model_overlap=" not in result.stderr, "overlap was calculated from the declared model")
 
     edit_seat(
         target,
@@ -531,12 +563,13 @@ def test_conflict_and_non_codex(target: Path, env: Dict[str, str], codex_log: Pa
         },
     )
     result = invoke(target, ["@build"], {**env, "CODEX_MODEL_OVERRIDE": "gpt-6-astra"})
-    check(result.returncode == 0 and marker in result.stderr, "override-into conflict was not audited")
+    check(result.returncode == 0 and marker in result.stderr, "override-into overlap was not recorded")
 
     edit_seat(target, "spec", {"host": "claude"})
     result = invoke(target, ["@spec"], env)
     check(result.returncode == 2, "non-Codex seat did not return rc 2")
     check("occupied by claude" in result.stderr, "non-Codex refusal lacks host guidance")
+    check("scripts/agent-seats.sh set spec --host codex" in result.stderr, "non-Codex refusal lacks the move hint")
     check(not codex_log.exists(), "non-Codex seat launched Codex")
 
     edit_seat(target, "spec", {"host": "codex", "model": "gpt-5.6-luna", "effort": "xhigh"})
@@ -698,10 +731,10 @@ def patch_launcher(path: Path, mutation: str) -> None:
         needle = '2>"$error_file"'
         check(needle in text, "merge-stderr mutation boundary is absent")
         text = text.replace(needle, "2>&1", 1)
-    elif mutation == "bypass-conflict":
-        needle = '"$SEATS_SCRIPT" conflict "$seat_id" "$effective_model" 2>"$conflict_stderr"'
-        check(needle in text, "conflict mutation boundary is absent")
-        text = text.replace(needle, 'printf "%s\\n" "0"', 1)
+    elif mutation == "bypass-overlap":
+        needle = '"$SEATS_SCRIPT" model-overlap --quiet "$seat_id" "$effective_model" 2>"$overlap_stderr"'
+        check(needle in text, "overlap mutation boundary is absent")
+        text = text.replace(needle, 'printf ""', 1)
     elif mutation == "skip-explicit-effort":
         needle = 'validate_explicit_effort "$EFFECTIVE_MODEL" "$explicit_effort" "$supported_efforts"'
         check(needle in text, "explicit effort mutation boundary is absent")
@@ -720,8 +753,8 @@ def mutation_target(base_target: Path, work: Path, mutation: str) -> Path:
 
 def test_mutations(base_target: Path, work: Path, env: Dict[str, str]) -> List[str]:
     caught: List[str] = []
-    marker = "policy_exception=gate_coding authorization=user_session"
-    for mutation in ("merge-stderr", "bypass-conflict", "skip-explicit-effort"):
+    marker = "model_overlap=gate"
+    for mutation in ("merge-stderr", "bypass-overlap", "skip-explicit-effort"):
         target = mutation_target(base_target, work, mutation)
         mutant_env = dict(env)
         mutant_env["CODEX_CAPTURE_FILE"] = str(work / (mutation + ".codex.log"))
@@ -744,7 +777,7 @@ def test_mutations(base_target: Path, work: Path, env: Dict[str, str]) -> List[s
                 caught.append(mutation)
                 continue
             raise CheckFailure("merge-stderr mutant was not caught by eight-line validation")
-        elif mutation == "bypass-conflict":
+        elif mutation == "bypass-overlap":
             edit_seat(
                 target,
                 "build",
@@ -758,12 +791,12 @@ def test_mutations(base_target: Path, work: Path, env: Dict[str, str]) -> List[s
             )
             result = invoke(target, ["@build"], mutant_env)
             try:
-                check(result.returncode == 0, "conflicting launch was refused")
-                check(marker in result.stderr, "conflicting launch omitted the policy exception")
+                check(result.returncode == 0, "overlapping launch was refused")
+                check(marker in result.stderr, "overlapping launch omitted the overlap fact")
             except CheckFailure:
                 caught.append(mutation)
                 continue
-            raise CheckFailure("bypass-conflict mutant was not caught")
+            raise CheckFailure("bypass-overlap mutant was not caught")
         else:
             result = invoke(
                 target,
@@ -810,7 +843,7 @@ def run_red() -> int:
                 "lossless eight-line reader": "while IFS= read -r" in content,
                 "model-info lookup": "model-info" in content,
                 "launch_model seed": "launch_model=" in content,
-                "gate_coding audit": "gate_coding" in content,
+                "model_overlap fact": "model_overlap=" in content,
                 "CODEX_MODEL_PROFILE warning no-op": "warning" in content and "CODEX_MODEL_PROFILE" in content,
             }
             failures.extend(name for name, passed in probes.items() if passed is False)

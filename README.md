@@ -18,20 +18,113 @@ The full workflow gives each participant a clear responsibility:
 5. `@audit` performs an independent cross-review.
 6. `@owner` accepts, revises, escalates, or closes the task.
 
-Coding cannot start until the technical review records that the task is ready
-for the configured coding model. The coding pass may send an apparently ready
-task back for clarification, but it cannot turn a blocking verdict into an
-approval. After two unsuccessful remediation returns, the user decides whether
-another bounded pass is worth its cost.
+By the protocol, coding starts only after the technical review records that the
+task is ready for the configured coding model. This is a recorded agreement,
+not a lock: no script stops `@build` from starting without that verdict. The
+coding pass may send an apparently ready task back for clarification, but it
+cannot turn a blocking verdict into an approval. After two unsuccessful
+remediation returns, the user decides whether another bounded pass is worth its
+cost.
 
 This is a coordination protocol, not an autonomous agent runner. The user opens
 each host session; Harness Kit does not launch one AI host from another.
 
-## Install on a new machine
+## Install, reinstall and update
 
-Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`.
+Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`. The
+project must be a Git work tree.
 
-Export the bundle to its canonical home and install the shell helpers:
+One command installs, reinstalls or updates a project. The first time, run the
+entry script from the project root. It installs release `2026.10.13.2`:
+
+```bash
+cd /path/to/project
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+```
+
+The line above needs a release newer than `2026.10.13.2`; releases up to that
+one ship only `harness-kit-one-shot-upgrade.sh` with the earlier flow. Until the
+next tag, run the entry from a checkout of `main` with `--source-dir` (see
+Other options below).
+
+End the line with `| bash -s -- --to latest` to install the newest release
+instead. The install adds `scripts/harness-kit.sh`, so later runs need no curl:
+
+```bash
+scripts/harness-kit.sh              # reinstall the installed version
+scripts/harness-kit.sh --to latest  # update to the newest release
+scripts/harness-kit.sh --plan       # preview a run; writes only local kit state
+```
+
+The entry fetches the release into `.harness-kit/v<ver>/` and runs that
+version's `harness-kit-run.sh`. The run picks its mode from the installed lock:
+install (no lock), reinstall (same version) or update (older version). A
+downgrade is refused, and the run suggests `--rollback <STAMP>` instead. Each
+run goes through preflight, stage, apply, migrate, verify and report. It
+creates or switches no branch unless you pass `--branch feature/<slug>` or
+`--branch bugfix/<slug>`, and it never overwrites a file you edited (see
+[Safe generation and upgrades](#safe-generation-and-upgrades)).
+
+After the first install, finish onboarding:
+
+```bash
+bash scripts/install-rtk.sh
+scripts/agent-onboarding.sh next
+```
+
+Open an agent session and run `/project-onboarding`, then run the readiness
+check, `scripts/agent-onboarding.sh check`.
+
+rtk is intentionally hard-pinned to the bundle's audited version so projects
+do not drift with an unreviewed upstream release.
+
+### Read the result
+
+The console summary has at most 12 lines: the mode and versions, one line per
+phase, `RESULT: done | needs review | failed`, the exact next command for each
+open item, and the report path. The full report is
+`.tools/agent-state/upgrades/<STAMP>/report.json` (`harness-kit-run-report/v1`);
+`--json` prints it instead of the summary. Exit codes: `0` done, `3` needs
+review (a conflict or a pending decision), `1` refused or failed, `2` usage
+error.
+
+Run the next commands the summary prints. They take this form:
+
+```bash
+scripts/harness-kit.sh --resolved <path> --reason "<why>"  # keep your file; the kit output becomes its baseline
+scripts/harness-kit.sh --take-kit <path>    # take the kit's file; yours is backed up
+scripts/harness-kit.sh --keep-local <path>  # pin your file; later runs leave it alone
+scripts/harness-kit.sh --accept <id>        # apply a pending migration decision
+scripts/harness-kit.sh --decline <id>       # decline it until its facts change
+scripts/harness-kit.sh --rollback <STAMP>   # undo the run recorded as STAMP
+```
+
+Other options:
+
+- `--reset`: the kit output wins for every kit-owned file (with backups and
+  rollback); the brief, the tech-stack contract, `seats.json` and USER overlays
+  stay.
+- `--knowledge`: print what the kit knows about the project, from
+  `.tools/agent-state/project-knowledge.json`.
+- `--workflow infra|full` (first install; default `full`) and
+  `--ignore-target exclude|gitignore` (default `exclude`).
+- `--project-verify` also runs the project's fast verification;
+  `--skip-verify` skips the harness checks.
+- `--source-dir DIR` copies the release from a local harness-kit checkout
+  instead of fetching it. Offline, run
+  `bash /path/to/harness-kit/agent-bootstrap/harness-kit-one-shot.sh --source-dir /path/to/harness-kit`
+  for a first install, or `scripts/harness-kit.sh --source-dir /path/to/harness-kit --to latest`
+  to update to the checkout's version.
+
+Old options keep working and print a note: `--no-branch` and `--allow-dirty`
+are now the defaults, `--dry-run` means `--plan`, `--apply-retirements`
+accepts the retire-files decision, and `--apply-candidates` points to
+`--take-kit` and `--resolved`. The old entry name
+`harness-kit-one-shot-upgrade.sh` stays as an identical copy.
+
+### Shell helpers
+
+To keep a canonical kit copy and the shell helpers on a machine:
 
 ```bash
 git clone https://github.com/PhanHug93/harness-kit.git
@@ -40,104 +133,11 @@ agent-bootstrap/install-agent-bootstrap-home.sh --write-zshrc
 source ~/.zshrc
 ```
 
-Apply the full workflow to a project:
-
-```bash
-cd /path/to/project
-agent-init --workflow full
-bash scripts/install-rtk.sh
-scripts/agent-hook.sh doctor
-scripts/agent-guard.sh preflight
-scripts/agent-onboarding.sh next
-```
-
-Open an agent session and run `/project-onboarding`, then finish the readiness
-check:
-
-```bash
-scripts/agent-onboarding.sh check
-```
-
-The same first-run guidance remains available through `agent-init --first-10`
-or `agent-init --next`.
-
-rtk is intentionally hard-pinned to the bundle's audited version so projects
-do not drift with an unreviewed upstream release.
-
-## Upgrade an existing project to 2026.10.13.2
-
-### Option A: one-shot pinned upgrade
-
-Use this when upgrading from another machine or when the canonical Harness Kit
-home is missing or stale.
-
-1. Start in the target project's Git repository with important work committed.
-2. Run the pinned release upgrader:
-
-   ```bash
-   cd /path/to/project
-   curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot-upgrade.sh | bash
-   ```
-
-3. The upgrader installs release `2026.10.13.2` into
-   `$HOME/dev/agent-bootstrap`, creates an upgrade branch, and generates
-   reviewable candidates instead of overwriting existing managed files.
-4. Inspect the result before accepting candidates:
-
-   ```bash
-   agent-init --status
-   agent-init --status --json
-   agent-init --diff
-   agent-init --upgrade-plan
-   ```
-
-5. Apply only after reviewing the generated differences:
-
-   ```bash
-   agent-init --apply-candidates
-   ```
-
-6. Refresh local tools and verify the upgraded target:
-
-   ```bash
-   bash scripts/install-rtk.sh
-   scripts/agent-hook.sh doctor
-   scripts/agent-guard.sh preflight
-   scripts/agent-guard.sh pre-final --run-verify
-   scripts/verify-ai-deps.sh --json
-   ```
-
-7. Review `git status` before committing project-owned changes. Only project
-   files, specs of started work and plan journals are pushed; harness files and
-   work in progress stay local. See
-   [What is pushed and what stays local](#what-is-pushed-and-what-stays-local).
-
-### Option B: update an existing canonical installation
-
-Use this when the `agent-update`, `agent-upgrade`, and `agent-init` shell helpers
-are already available:
-
-```bash
-cd /path/to/project
-agent-update --check
-agent-update --self-update
-agent-upgrade --plan
-agent-init --status
-agent-init --diff
-agent-init --apply-candidates
-scripts/agent-hook.sh doctor
-scripts/agent-guard.sh preflight
-scripts/agent-guard.sh pre-final --run-verify
-scripts/verify-ai-deps.sh --json
-```
-
-The safe order is always:
-
-> check → update the bundle → plan → inspect differences → apply candidates → verify
-
-Do not use `--force` as a routine upgrade path. It is an explicit overwrite
-mode; normal upgrades preserve existing managed files and propose changes beside
-them as `*.generated.<timestamp>` candidates.
+In a project, `agent-upgrade` runs `scripts/harness-kit.sh --to latest` (or the
+home's entry script when the project has none). `agent-init` runs the generator
+of the project's kit copy in `.harness-kit/`, or the home's when there is none;
+`agent-init --first-10` prints the first-run path. `agent-update --check`
+compares the home with the latest release tag.
 
 ## Claude Desktop/Cowork setup
 
@@ -195,18 +195,22 @@ this compatibility release; configure seats instead.
   scripts.
 - Project brief and tech-stack templates backed by source evidence.
 - `agentmemory-mcp` and `doubt-driven` skills.
-- A local-only `.gitignore` block, a versioned bootstrap lock, and a pre-push
-  check that reports already-tracked local-only files (see the next section).
+- A local-only ignore block, a versioned bootstrap lock, and a pre-push check
+  that reports already-tracked local-only files (see the next section).
 
 Running without `--workflow full` installs the smaller `infra` preset.
 
 ## What is pushed and what stays local
 
 Local-only mode: what was done goes to Git, while work in progress and the
-harness itself stay on the developer's machine. The generated `.gitignore`
-block keeps local files out of `git add -A`, and the pre-push check
-(`scripts/agent-local-only-check.sh`, installed by `scripts/install-git-hooks.sh`)
-names any of them that are already tracked.
+harness itself stay on the developer's machine. The local-only ignore block
+goes to `.git/info/exclude` by default, so harness files never show in
+`git status` and no tracked file changes; the entry script adds `/.harness-kit/`
+and `/.tools/` there before it writes anything. `--ignore-target gitignore`
+writes the block to `.gitignore` instead. A project that already has the block
+in `.gitignore` keeps it there until it accepts the `ignore-block-to-exclude`
+decision. The pre-push check (`scripts/agent-local-only-check.sh`, installed by
+`scripts/install-git-hooks.sh`) names local files that are already tracked.
 
 **Pushed:**
 
@@ -222,7 +226,7 @@ names any of them that are already tracked.
 |---|---|
 | Agent entry files | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules` |
 | Agent configuration | `docs/agent-configs/`, `.agents/`, `.claude/`, `.codex/`, `.cursor/rules/`, `.windsurf/rules/` |
-| Harness scripts | `scripts/agent-{tech-stack-lib,hook,guard,seats,onboarding,local-only-check}.sh`, `scripts/detect-agent-tech-stack.sh`, `scripts/verify-ai-deps.sh`, `scripts/install-{git-hooks,rtk}.sh`, `scripts/rtk`, `scripts/githooks/` |
+| Harness scripts | `scripts/agent-{tech-stack-lib,hook,guard,seats,onboarding,local-only-check}.sh`, `scripts/detect-agent-tech-stack.sh`, `scripts/verify-ai-deps.sh`, `scripts/install-{git-hooks,rtk}.sh`, `scripts/harness-kit.sh`, `scripts/rtk`, `scripts/githooks/` |
 | Onboarding scaffolds | `docs/superpowers/specs/README.md`, `docs/superpowers/specs/project-tech-stack.{md,json}`, `docs/superpowers/plans/README.md` |
 | Work in progress | Task packets in `.agents/tasks/<task-id>/` (`task.md`, `state.json`, reports, evidence); draft specs, analyses and plans in `docs/superpowers/plans/<topic>/`; `docs/superpowers/reviews/`, `archive/` and every other `docs/superpowers/` folder |
 | Kit copies and candidates | `/.harness-kit/`, `/agent-bootstrap/`, the kit's `*.generated.*` candidates, and a `.gitignore` that contains the harness-kit block |
@@ -233,52 +237,65 @@ A spec starts as a draft in `docs/superpowers/plans/<topic>/` and moves to
 generated `AGENTS.md` tells agents the same, overriding skill defaults that
 write specs straight to `docs/superpowers/specs/`.
 
-To untrack files the check reports, run
-`scripts/agent-local-only-check.sh status`, then
-`git rm --cached -- <path>`, and commit the removal before pushing; the files
-stay on disk.
+When local files are tracked, the run offers the `untrack-local-records`
+decision: accept it with the printed `--accept` command and commit the removal
+before pushing; the files stay on disk. By hand, run
+`scripts/agent-local-only-check.sh status`, then `git rm --cached -- <path>`.
 
 ## Safe generation and upgrades
 
-Existing files are preserved by default. Conflicts become visible
-`*.generated.<timestamp>` candidates, and `agent-init --diff` previews them.
-`agent-init --apply-candidates` promotes only reviewed paths from the generated
-allowlist, leaving unrelated generated files alone. Add `--only <path>`
-(repeatable) to promote one reviewed file at a time. Filled project briefs,
-tech-stack evidence, and USER overlay sections survive regeneration.
+Local edits are never overwritten. A local-only baseline
+(`.tools/agent-state/harness-baseline/`) keeps the last kit output of every
+generated file, and each run puts every file in one class:
 
-Upgrades remember the last kit output of every generated file in a local-only
-baseline (`.tools/agent-state/harness-baseline/`):
+| Class | When | Action |
+|---|---|---|
+| create | the file is missing | write it |
+| unchanged | the file equals the new kit output | none |
+| update | you have not edited the file | write the new kit output |
+| kept | the kit did not change the file, you did | keep yours |
+| merge | both changed and the merge is clean | write the merged file |
+| conflict | both changed and the merge fails, or the file is JSON | keep yours; the kit's goes to `<path>.generated.<STAMP>` |
+| unsafe | a link or a path outside the project | skip and report |
+| pinned | pinned with `--keep-local` (or the generator's `--keep`) | leave it alone; a pin edited since is reported as stale |
 
-- a file you have not edited follows the new kit in place;
-- a file you edited gets the kit changes merged in, or a `*.generated.*`
-  candidate when your edits and the kit changes overlap;
-- a file the kit did not change keeps your edits, with no candidate.
+Filled project briefs, tech-stack evidence, `seats.json` and USER overlay
+sections survive every run, including `--reset`. Projects generated before
+2026.10.13.1 have no baseline yet, so their first update reports every changed
+kit file as a conflict; `scripts/harness-kit.sh --take-kit all` takes the kit's
+files and backs yours up.
 
-`agent-init --upgrade-plan --json` lists the action for each file without
-writing anything. Every run prints an upgrade id; `--rollback <id>` restores the
-files that run changed and removes what it created, keeping (and listing, exit
-3) any file edited since. Projects generated before 2026.10.13.1 have no
-baseline yet, so their first upgrade still uses candidates.
+The generator follows the same rules when you call it directly (`agent-init`
+or `bootstrap-multi-agent-project.sh`). `--keep <path>` (repeatable) leaves a
+file untouched: no write and no candidate. `agent-init --diff` previews the
+candidates, and `agent-init --upgrade-plan --json` lists the action for each
+file without writing anything. `agent-init --apply-candidates` promotes
+reviewed candidates from the generated allowlist but keeps files with local
+edits unless they are named with `--only <path>` (repeatable). Every generator
+run prints an upgrade id; `--rollback <id>` restores the files that run changed
+and removes what it created, keeping (and listing, exit 3) any file edited
+since.
 
 `agent-init --status --json` reports bundle version, installed version, drift,
 and pending candidates for tooling or CI.
 
-`--diff`, `--upgrade-plan`, `--status` and `--apply-candidates` replay generation
-on a temporary copy of the project. The copy skips build output, Gradle homes,
-dependency folders and other ignored directories at any depth, so large
-Android checkouts take seconds. It never includes personal or secret files:
-`*.local.*` (such as `.claude/settings.local.json`), signing certificates,
-provisioning profiles, `*.xcconfig`, Firebase config files, `.netrc`, `.npmrc`
-and `.pypirc`.
+`--diff`, `--upgrade-plan` and `--status` generate into a temporary staging
+directory that holds only the kit's outputs, the configuration the kit reads
+back (lock, brief, tech-stack contract, `seats.json`, candidates) and, for the
+upgrade plan, the baseline. Detection reads the project in place, so the
+project is never copied and large checkouts take seconds. Personal and secret
+files never reach the staging directory: `*.local.*` (such as
+`.claude/settings.local.json`), signing certificates, provisioning profiles,
+`*.xcconfig`, Firebase config files, `.netrc`, `.npmrc` and `.pypirc`.
 
 ### Retired harness files
 
 Older releases generated a remote CI workflow, `.github/workflows/agent-guard.yml`,
 and its template mirror. Upgrades never delete them: generation, `--force`,
-`--diff`, `--upgrade-plan`, `--status`, `--apply-candidates`, the updater and the
-one-shot defaults only show a read-only retirement plan. Removal is a separate,
-explicit step:
+`--diff`, `--upgrade-plan`, `--status`, `--apply-candidates`, the updater and a
+plain `scripts/harness-kit.sh` run only show a read-only retirement plan.
+Removal is a separate, explicit step: accept the `retire-files` decision with
+the `--accept` command the run prints, or use the generator:
 
 ```bash
 agent-init --retirement-plan            # read-only; add --json for a typed report
@@ -345,25 +362,49 @@ scripts/agent-guard.sh preflight
 scripts/agent-guard.sh pre-final --run-verify
 ```
 
-`pre-final --run-verify` runs concrete fast verification commands and records
-the real report at `.agents/state/last-verify-report.json`. Placeholder commands
-are warned about rather than reported as successful. Use
+`pre-final --run-verify` takes its commands from `verification[]` in
+`docs/superpowers/specs/project-tech-stack.json` (each entry may set
+`scope: fast|full`); detector commands are used only when that list is empty.
+Commands with placeholders never run, and discovery commands such as
+`--version` or `--help` are not evidence. The report
+(`agent-guard-verification/v2`) goes to `.agents/state/last-verify-report.json`.
+When no command could run, the result is `unverified`, which is never a pass:
+strict mode (the default) exits 4 and fails, advisory mode warns. Use
 `--verify-scope full` only after reviewing heavier build commands.
+
+`scripts/agent-guard.sh baseline` runs the fast contract commands on the
+current commit before the first `@gate` round. The result is cached by commit,
+`verification[]`, toolchain fingerprint (the output of the contract's
+`toolchain[]` commands) and scope, so a repeat run on the same key runs
+nothing. A red baseline is reported to the user before review starts. The
+Claude Code Stop hook verifies only when the session changed files, and the
+Codex `@build` seat runs pre-final once when its session ends. A later `@gate`
+round reads its previous verdict and the specification sections changed since
+then, not a git diff.
 
 Agent Guard protects known files and detects stale context, but it is a thin
 file-edit guardrail, not a security boundary for arbitrary Bash commands. Task
 packets are ignored, ephemeral, and convention-controlled; Git does not protect
 their append-only history.
 
-Generated doctor and verifier commands report two estimated context budgets:
+`scripts/verify-ai-deps.sh` measures two estimated context budgets (the
+`.codex/codex-mode.sh doctor` reports its numbers; `--json` adds
+`context_budget`, and `--context-budget` runs only this check):
 
 - core startup context: gate `4000`, amber above `3800`;
 - full on-demand workflow context: gate `6200`, amber above `5900`.
 
 The core estimate covers `AGENTS.md`, project context, and the project brief. It
-excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`. Amber means
-the target still passes but should be measured again before adding more always-on
-guidance.
+excludes tool-specific wrappers such as `CLAUDE.md` and `GEMINI.md`. The
+on-demand estimate adds what a working seat reads: mode contracts, handoff
+schema, the handoff reference's `State values` section and its largest other
+section, and the Karpathy and council workflows. Each estimate is split into
+the kit's own text and project content (the project brief, the project agent
+context, `<!-- BEGIN USER -->` regions and the
+detector-filled managed blocks). Kit text above a gate fails the verifier; a
+total above a gate only warns and names the largest project files, which are
+the project's to shorten. Amber means the target still passes but
+should be measured again before adding more guidance.
 
 ## Contracts, schemas, and repository layout
 
@@ -407,13 +448,15 @@ release scope is supplied.
 
 These are agent operating rules, not server-side branch protection. They do not
 change the existing optional Git hook. Existing downstream projects receive the
-updated instructions through the normal reviewed upgrade/candidate flow.
+updated instructions through a normal `scripts/harness-kit.sh` update.
 
 Tests run in two tiers. On every edit run the fast tier,
 `bash scripts/test-fast.sh` (about 5 minutes: syntax, release pins and mirrors,
 release script, workspace guard, onboarding, retirement lifecycle, detector
-fixtures, path policy, concurrent guard reads, local-only mode). It runs every check and lists all
-failures at the end; `--only <check>` reruns one.
+fixtures, path policy, concurrent guard reads, local-only mode, verification
+evidence, and the one-shot entry, knowledge, migrations, staging and runs). It
+runs every check and lists all failures at the end; `--only <check>` reruns
+one.
 
 The full tier below runs in CI on Linux and macOS for every pull request,
 push to `main` and release tag. Other branches are tested through their pull
@@ -445,6 +488,29 @@ mirror and runtime snapshots, and verifies the result. It never commits, tags
 or pushes. Before an authorized tag, run
 `bash scripts/release.sh --check-tag v<version>`; CI repeats this check on
 every tag push.
+
+### Adding a migration
+
+A migration changes an existing project once, during an update. Add
+`agent-bootstrap/migrations/next-<slug>.sh`; `scripts/release.sh <version>`
+renames it to `<version>-<slug>.sh` and rewrites its id. The file defines
+`MIGRATION_ID` (its name without `.sh`), `MIGRATION_SINCE=next`,
+`MIGRATION_KIND`, `MIGRATION_SUMMARY` and three functions:
+
+- `migration_needed` checks the project's actual state, not only versions;
+- `migration_describe` prints one line of facts;
+- `migration_apply` is idempotent and backs up each file with
+  `migration_backup PATH` before writing it.
+
+An `auto` migration touches only kit-owned local files and state, and runs on
+its own. A `decision` migration (tracked files, the index, project content or
+deletions) runs only after `--accept <id>`; `--decline <id>` is remembered
+until its facts change. Migrations use only git, POSIX tools and `python3`, and
+never commit, push or switch branches. Name the id under `## Unreleased` in
+`CHANGELOG.md` and add a case to `scripts/test-harness-migrations.sh`: needed,
+apply, not needed, and a second apply that changes nothing.
+`scripts/release.sh --check` checks the ids, versions, functions and changelog
+entries.
 
 ### Workspace–Repository Guard
 

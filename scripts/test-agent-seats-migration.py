@@ -60,7 +60,8 @@ def command(label, argv, cwd=ROOT, expected=0):
     Path(str(log) + ".stdout").write_text(proc.stdout)
     Path(str(log) + ".stderr").write_text(proc.stderr)
     Path(str(log) + ".json").write_text(json.dumps({"command": [str(a) for a in argv], "rc": proc.returncode, "expected": expected}, indent=2) + "\n")
-    assert proc.returncode == expected, (label, proc.returncode, proc.stderr[-3000:])
+    allowed = expected if isinstance(expected, tuple) else (expected,)
+    assert proc.returncode in allowed, (label, proc.returncode, proc.stdout[-1500:], proc.stderr[-1500:])
     return proc
 
 
@@ -246,21 +247,37 @@ def seed_target(source, name):
     return target
 
 
+def latest_conflicts(target):
+    reports = sorted((target / ".tools/agent-state/upgrades").glob("*/report.json"))
+    if not reports:
+        return []
+    return [c["path"] for c in json.loads(reports[-1].read_text())["files"]["conflicts"]]
+
+
 def upgrade(target, label, apply=False, dry=False):
+    """One run of the one-shot entry (old name). A legacy update ends needs
+    review (exit 3) while kit files conflict or decisions are pending; apply
+    takes the kit's version of every open conflict (project-owned templates
+    named one by one, since --take-kit all leaves them)."""
     argv = ["/bin/bash", SOURCE / "agent-bootstrap/harness-kit-one-shot-upgrade.sh",
             "--source-dir", SOURCE, "--ref", "v" + VERSION,
             "--target", target, "--home", WORK / (target.name + "-home"),
             "--allow-dirty", "--no-branch", "--skip-verify"]
     if apply:
-        argv.append("--apply-candidates")
+        argv += ["--take-kit", "all"]
+        for rel in latest_conflicts(target):
+            if rel.startswith(("docs/agent-configs/project-", "docs/superpowers/specs/project-tech-stack")):
+                argv += ["--take-kit", rel]
     if dry:
         argv.append("--dry-run")
-    return command(label, argv)
+    return command(label, argv, expected=(0,) if dry else (0, 3))
 
 
 def tree_hashes(target):
+    """Project files; the kit copy and run state the one-shot keeps are left out."""
     return {str(p.relative_to(target)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in target.rglob("*") if p.is_file() and ".git" not in p.relative_to(target).parts}
+            for p in target.rglob("*") if p.is_file() and ".git" not in p.relative_to(target).parts
+            and p.relative_to(target).parts[0] not in (".harness-kit", ".tools")}
 
 
 def keep_knowledge(target, before_brief, label):
