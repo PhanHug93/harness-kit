@@ -148,7 +148,7 @@ Install, reinstall or update a project with one command. The first time, from
 the project root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.19.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Use `| bash -s -- --to latest` for the newest release. Later runs use the

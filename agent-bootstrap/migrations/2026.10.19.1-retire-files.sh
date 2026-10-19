@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # Migration: remove retired harness-kit files (HK-07 inventory) with the
 # generator's own verified backups.
-MIGRATION_ID=next-retire-files
-MIGRATION_SINCE=next
+MIGRATION_ID=2026.10.19.1-retire-files
+MIGRATION_SINCE=2026.10.19.1
 MIGRATION_KIND=decision
 MIGRATION_SUMMARY="Remove retired harness-kit files (backups are kept)"
 

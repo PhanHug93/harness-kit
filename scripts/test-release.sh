@@ -112,6 +112,11 @@ if ! grep -q '^## Unreleased' "$copy/CHANGELOG.md"; then
   printf '# Changelog\n\n## Unreleased\n\n- Test release note.\n\n%s\n' "$(sed '1d' "$copy/CHANGELOG.md")" >"$copy/CHANGELOG.md"
 fi
 write_migration "$copy/agent-bootstrap/migrations" next-zz-fixture next
+# The inventories name every migration file. A fixture row checks the rename
+# whatever the shipped migrations are called (next-* only before a release).
+printf '| %s | Test fixture. | Test only. |\n' "\`migrations/next-zz-fixture.sh\`" >>"$copy/agent-bootstrap/MANIFEST.md"
+printf '# migrations/next-zz-fixture.sh\n' >>"$copy/agent-bootstrap/install-agent-bootstrap-home.sh"
+printf '# migrations/next-zz-fixture.sh\n' >>"$copy/scripts/test-bootstrap-multi-agent-project.sh"
 notes=""
 for f in "$copy"/agent-bootstrap/migrations/next-*.sh; do notes="$notes- Migration \`$(basename "$f" .sh)\`.\n"; done
 python3 - "$copy/CHANGELOG.md" "$notes" <<'PY'
@@ -131,7 +136,7 @@ need_contains "$(cat "$renamed")" "MIGRATION_SINCE=2099.01.01.1" "bump rewrites 
 need_contains "$(cat "$renamed")" "MIGRATION_ID=2099.01.01.1-zz-fixture" "bump rewrites MIGRATION_ID"
 need_contains "$(cat "$copy/CHANGELOG.md")" "Migration \`2099.01.01.1-zz-fixture\`" "bump rewrites the id in the notes"
 for inventory in agent-bootstrap/MANIFEST.md agent-bootstrap/install-agent-bootstrap-home.sh scripts/test-bootstrap-multi-agent-project.sh; do
-  need_contains "$(cat "$copy/$inventory")" "migrations/2099.01.01.1-retire-files.sh" "bump renames migrations in $inventory"
+  need_contains "$(cat "$copy/$inventory")" "migrations/2099.01.01.1-zz-fixture.sh" "bump renames migrations in $inventory"
   ! grep -q 'migrations/next-' "$copy/$inventory" || fail "bump left a next-* migration name in $inventory"
 done
 bash "$copy/scripts/release.sh" --check-tag v2099.01.01.1 >/dev/null || fail "--check-tag must accept the bumped tree"

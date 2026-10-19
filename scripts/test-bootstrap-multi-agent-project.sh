@@ -1993,9 +1993,9 @@ for canonical_file in \
   lib/retirement.py \
   lib/knowledge.py \
   lib/migrations.sh \
-  migrations/next-ignore-block-to-exclude.sh \
-  migrations/next-retire-files.sh \
-  migrations/next-untrack-local-records.sh; do
+  migrations/2026.10.19.1-ignore-block-to-exclude.sh \
+  migrations/2026.10.19.1-retire-files.sh \
+  migrations/2026.10.19.1-untrack-local-records.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \

@@ -7,8 +7,8 @@
 # so the content, the prefix anchoring below a repository top level and the
 # idempotence rules are the same as on a fresh install. The old text in
 # .gitignore is only removed (its backup is kept in the journal).
-MIGRATION_ID=next-ignore-block-to-exclude
-MIGRATION_SINCE=next
+MIGRATION_ID=2026.10.19.1-ignore-block-to-exclude
+MIGRATION_SINCE=2026.10.19.1
 MIGRATION_KIND=decision
 MIGRATION_SUMMARY="Move the local-only ignore block from .gitignore to .git/info/exclude"
 

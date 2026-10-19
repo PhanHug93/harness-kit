@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.10.13.2`](agent-bootstrap/VERSION)
+Current release: [`2026.10.19.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -35,17 +35,12 @@ Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`. The
 project must be a Git work tree.
 
 One command installs, reinstalls or updates a project. The first time, run the
-entry script from the project root. It installs release `2026.10.13.2`:
+entry script from the project root. It installs release `2026.10.19.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.19.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
-
-The line above needs a release newer than `2026.10.13.2`; releases up to that
-one ship only `harness-kit-one-shot-upgrade.sh` with the earlier flow. Until the
-next tag, run the entry from a checkout of `main` with `--source-dir` (see
-Other options below).
 
 End the line with `| bash -s -- --to latest` to install the newest release
 instead. The install adds `scripts/harness-kit.sh`, so later runs need no curl:

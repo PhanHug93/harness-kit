@@ -368,9 +368,9 @@ main() {
   copy_file "lib/retirement.py" "lib/retirement.py"
   copy_file "lib/knowledge.py" "lib/knowledge.py"
   copy_file "lib/migrations.sh" "lib/migrations.sh"
-  copy_file "migrations/next-ignore-block-to-exclude.sh" "migrations/next-ignore-block-to-exclude.sh"
-  copy_file "migrations/next-retire-files.sh" "migrations/next-retire-files.sh"
-  copy_file "migrations/next-untrack-local-records.sh" "migrations/next-untrack-local-records.sh"
+  copy_file "migrations/2026.10.19.1-ignore-block-to-exclude.sh" "migrations/2026.10.19.1-ignore-block-to-exclude.sh"
+  copy_file "migrations/2026.10.19.1-retire-files.sh" "migrations/2026.10.19.1-retire-files.sh"
+  copy_file "migrations/2026.10.19.1-untrack-local-records.sh" "migrations/2026.10.19.1-untrack-local-records.sh"
   write_source_metadata
   init_history
 

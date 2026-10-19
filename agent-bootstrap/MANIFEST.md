@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.10.13.2`
+Version: `2026.10.19.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -93,9 +93,9 @@ tag or source branch to complete a feature PR.
 | `lib/retirement.py` | HK-07 retired-artifact engine: read-only plan/status sections and the explicit `--apply-retirements` backup/delete path. | Must match canonical home export; never emitted into targets. |
 | `lib/knowledge.py` | Project knowledge engine for `.tools/agent-state/project-knowledge.json` (pins, resolutions, decisions, runs). | Must match canonical home export; never emitted into targets. |
 | `lib/migrations.sh` | Sourced migration runner used by `harness-kit-run.sh`. | Must match canonical home export; never emitted into targets. |
-| `migrations/next-ignore-block-to-exclude.sh` | Migration `next-ignore-block-to-exclude` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
-| `migrations/next-retire-files.sh` | Migration `next-retire-files` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
-| `migrations/next-untrack-local-records.sh` | Migration `next-untrack-local-records` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.19.1-ignore-block-to-exclude.sh` | Migration `next-ignore-block-to-exclude` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.19.1-retire-files.sh` | Migration `next-retire-files` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.19.1-untrack-local-records.sh` | Migration `next-untrack-local-records` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

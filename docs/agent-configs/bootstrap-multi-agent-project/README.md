@@ -203,7 +203,7 @@ Install, reinstall or update with one command. The first time, from the
 project root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.19.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Then `scripts/harness-kit.sh` reinstalls the installed version,

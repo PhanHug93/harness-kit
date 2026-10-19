@@ -3,7 +3,7 @@
 # over to that version's orchestrator. Install, reinstall and update are one command.
 set -euo pipefail
 
-DEFAULT_REF="v2026.10.13.2"
+DEFAULT_REF="v2026.10.19.1"
 REPO_URL="${HARNESS_KIT_REPO_URL:-https://github.com/PhanHug93/harness-kit.git}"
 TO="${DEFAULT_REF#v}"
 SOURCE_DIR=""
@@ -16,7 +16,7 @@ Usage: harness-kit-one-shot.sh [--to VERSION|latest] [--target DIR] [--source-di
 
 Fetches the kit release into <project>/.harness-kit/v<version>/ and runs its
 orchestrator. Other options are passed through unchanged.
-  --to VERSION|latest  Kit version to install or update to. Defaults to v2026.10.13.2.
+  --to VERSION|latest  Kit version to install or update to. Defaults to v2026.10.19.1.
   --target DIR         Project directory (a Git work tree). Defaults to the current directory.
   --source-dir DIR     Local harness-kit checkout (or a dir with agent-bootstrap/); no network.
   --repo URL           Kit Git repo. Defaults to https://github.com/PhanHug93/harness-kit.git.

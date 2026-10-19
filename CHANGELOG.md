@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.10.19.1 — One-shot install and update, real verification evidence, consistent seat rules
 
 - One command installs, reinstalls or updates a project. The first time, run
   `curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v<ver>/agent-bootstrap/harness-kit-one-shot.sh | bash`
@@ -42,10 +42,10 @@
   `next-<slug>.sh`, and `scripts/release.sh <version>` renames them to
   `<version>-<slug>.sh`. An `auto` migration runs by itself; a `decision`
   needs `--accept`, and `--decline` is remembered until the facts change. This
-  release adds three decisions: `next-untrack-local-records` (untrack
+  release adds three decisions: `2026.10.19.1-untrack-local-records` (untrack
   local-only harness files; the files stay on disk),
-  `next-ignore-block-to-exclude` (move the ignore block from `.gitignore` to
-  `.git/info/exclude`) and `next-retire-files` (remove retired harness files,
+  `2026.10.19.1-ignore-block-to-exclude` (move the ignore block from `.gitignore` to
+  `.git/info/exclude`) and `2026.10.19.1-retire-files` (remove retired harness files,
   with backups).
 - Verification evidence: `agent-guard.sh pre-final` takes its commands from
   `verification[]` in the tech-stack contract first, and detector commands
