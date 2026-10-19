@@ -4,7 +4,9 @@
 # clones have a context pack before pre-final freshness checks.
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
+# The project is two levels up from this hook: the Git top level, or the
+# subdirectory the kit is installed in.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 scope="${AGENT_GUARD_PREPUSH_SCOPE:-fast}"
 push_input="$(mktemp)"
 trap 'rm -f "$push_input"' EXIT HUP INT TERM
@@ -17,5 +19,12 @@ fi
 
 bash "$ROOT/scripts/agent-local-only-check.sh" pre-push < "$push_input"
 
+# A push that only deletes branches sends no commit: nothing to verify.
+if [[ -s "$push_input" ]] && ! awk '$2 !~ /^0+$/ { found = 1 } END { exit !found }' "$push_input"; then
+  exit 0
+fi
+
 bash "$ROOT/scripts/agent-guard.sh" preflight >/dev/null
-exec bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope"
+# --committed: the tier check reads the commits of the checked-out branch,
+# not drafts. Tier checks only recommend; verification can still fail.
+exec bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope" --committed

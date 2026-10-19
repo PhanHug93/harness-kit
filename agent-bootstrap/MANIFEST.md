@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.10.13.2`
+Version: `2026.10.20.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -35,6 +35,7 @@ tag or source branch to complete a feature PR.
 | `agent-tech-stack-lib.sh` | Runtime detector library snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-tech-stack-lib.sh`. |
 | `agent-hook.sh` | Runtime hook snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-hook.sh`. |
 | `agent-guard.sh` | Agent Guard Lite runtime snapshot for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
+| `agent-tier.py` | Change-tier program (`suggest`, `set`, `show`, `close`) that `agent-guard.sh tier` runs; it alone writes `.agents/tasks/<id>/tier.json`. | Must match canonical home export and generated target `scripts/agent-tier.py`. |
 | `agent-seats.sh` | Runtime seat assignment, migration, validation, and roster renderer for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-seats.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
 | `agent-local-only-check.sh` | Runtime Git hygiene checker that blocks harness-kit generated files from being pushed. | Must match generated target `scripts/agent-local-only-check.sh` and pre-push hook expectations. |
@@ -61,6 +62,7 @@ tag or source branch to complete a feature PR.
 | `schemas/agent-guard-verification-v2.schema.json` | JSON Schema for the `agent-guard.sh pre-final --run-verify` verification report (`.agents/state/last-verify-report.json`). | Must match canonical home export and generated target schema catalog. |
 | `schemas/harness-project-knowledge-v1.schema.json` | JSON Schema for `.tools/agent-state/project-knowledge.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/harness-kit-run-report-v1.schema.json` | JSON Schema for the one-shot run report `.tools/agent-state/upgrades/<STAMP>/report.json`. | Must match canonical home export and generated target schema catalog. |
+| `schemas/harness-tier-v1.schema.json` | JSON Schema for the per-task change tier record `.agents/tasks/<id>/tier.json`, written only by the tier script. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/tool-contract/shared.md` | Shared managed tool contract rendered into CLAUDE/GEMINI/Windsurf/Cursor entrypoints. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/android_kotlin.md` | Android/Kotlin overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
@@ -93,9 +95,9 @@ tag or source branch to complete a feature PR.
 | `lib/retirement.py` | HK-07 retired-artifact engine: read-only plan/status sections and the explicit `--apply-retirements` backup/delete path. | Must match canonical home export; never emitted into targets. |
 | `lib/knowledge.py` | Project knowledge engine for `.tools/agent-state/project-knowledge.json` (pins, resolutions, decisions, runs). | Must match canonical home export; never emitted into targets. |
 | `lib/migrations.sh` | Sourced migration runner used by `harness-kit-run.sh`. | Must match canonical home export; never emitted into targets. |
-| `migrations/next-ignore-block-to-exclude.sh` | Migration `next-ignore-block-to-exclude` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
-| `migrations/next-retire-files.sh` | Migration `next-retire-files` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
-| `migrations/next-untrack-local-records.sh` | Migration `next-untrack-local-records` (renamed to `<version>-…` by `scripts/release.sh <version>`). | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.20.1-ignore-block-to-exclude.sh` | Migration `2026.10.20.1-ignore-block-to-exclude`. | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.20.1-retire-files.sh` | Migration `2026.10.20.1-retire-files`. | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.10.20.1-untrack-local-records.sh` | Migration `2026.10.20.1-untrack-local-records`. | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

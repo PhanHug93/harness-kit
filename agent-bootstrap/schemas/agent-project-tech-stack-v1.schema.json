@@ -48,6 +48,7 @@
         "additionalProperties": false
       }
     },
+    "risk_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "toolchain": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "conventions": { "type": "array", "items": { "type": "string" } },
     "source_evidence": {

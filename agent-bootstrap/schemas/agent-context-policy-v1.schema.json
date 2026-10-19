@@ -86,6 +86,28 @@
         }
       }
     },
+    "tier_rules": {
+      "type": "object",
+      "required": ["small", "medium"],
+      "additionalProperties": false,
+      "properties": {
+        "small": { "$ref": "#/$defs/tierLimit" },
+        "medium": { "$ref": "#/$defs/tierLimit" }
+      }
+    },
+    "risk_tokens": { "$ref": "#/$defs/stringList" },
+    "risk_paths": { "$ref": "#/$defs/stringList" },
+    "dependency_manifests": { "$ref": "#/$defs/stringList" },
+    "dependency_locks": { "$ref": "#/$defs/stringList" },
+    "test_patterns": {
+      "type": "object",
+      "required": ["dirs", "names"],
+      "additionalProperties": false,
+      "properties": {
+        "dirs": { "$ref": "#/$defs/stringList" },
+        "names": { "$ref": "#/$defs/stringList" }
+      }
+    },
     "agent_instructions": {
       "type": "array",
       "minItems": 1,
@@ -96,6 +118,19 @@
     }
   },
   "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "tierLimit": {
+      "type": "object",
+      "required": ["max_files", "max_lines"],
+      "additionalProperties": false,
+      "properties": {
+        "max_files": { "type": "integer", "minimum": 0 },
+        "max_lines": { "type": "integer", "minimum": 0 }
+      }
+    },
     "relativePath": {
       "type": "string",
       "minLength": 1,

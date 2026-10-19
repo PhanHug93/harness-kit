@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # Migration: stop tracking local-only harness files that are in the Git index.
-MIGRATION_ID=next-untrack-local-records
-MIGRATION_SINCE=next
+MIGRATION_ID=2026.10.20.1-untrack-local-records
+MIGRATION_SINCE=2026.10.20.1
 MIGRATION_KIND=decision
 MIGRATION_SUMMARY="Untrack local-only harness files (index only; the files stay on disk)"
 

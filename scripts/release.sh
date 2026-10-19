@@ -174,6 +174,11 @@ for rel in ("agent-bootstrap/MANIFEST.md", "agent-bootstrap/install-agent-bootst
     text = updated.get(rel, (root / rel).read_text())
     for old_id, new_id in id_map.items():
         text = text.replace(f"migrations/{old_id}.sh", f"migrations/{new_id}.sh")
+        if rel == "agent-bootstrap/MANIFEST.md":
+            # The row's description names the id and, before release, the rename note.
+            note = " (renamed to `<version>-…` by `scripts/release.sh <version>`)"
+            text = text.replace(f"Migration `{old_id}`{note}", f"Migration `{new_id}`")
+            text = text.replace(f"Migration `{old_id}`", f"Migration `{new_id}`")
     updated[rel] = text
 for rel, text in updated.items():
     (root / rel).write_text(text)

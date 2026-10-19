@@ -1879,6 +1879,7 @@ fi
 for root_runtime_snapshot in \
   agent-hook.sh \
   agent-guard.sh \
+  agent-tier.py \
   agent-seats.sh \
   agent-onboarding.sh \
   agent-tech-stack-lib.sh \
@@ -1935,6 +1936,7 @@ for canonical_file in \
   agent-tech-stack-lib.sh \
   agent-hook.sh \
   agent-guard.sh \
+  agent-tier.py \
   agent-seats.sh \
   agent-onboarding.sh \
   agent-local-only-check.sh \
@@ -1961,6 +1963,7 @@ for canonical_file in \
   schemas/agent-guard-verification-v2.schema.json \
   schemas/harness-project-knowledge-v1.schema.json \
   schemas/harness-kit-run-report-v1.schema.json \
+  schemas/harness-tier-v1.schema.json \
   templates/base/README.md \
   templates/tool-contract/shared.md \
   templates/overlays/android_kotlin.md \
@@ -1993,9 +1996,9 @@ for canonical_file in \
   lib/retirement.py \
   lib/knowledge.py \
   lib/migrations.sh \
-  migrations/next-ignore-block-to-exclude.sh \
-  migrations/next-retire-files.sh \
-  migrations/next-untrack-local-records.sh; do
+  migrations/2026.10.20.1-ignore-block-to-exclude.sh \
+  migrations/2026.10.20.1-retire-files.sh \
+  migrations/2026.10.20.1-untrack-local-records.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \
@@ -2038,7 +2041,8 @@ $inv_diff_ic"
 inv_diff_mi="$(diff <(printf '%s\n' "$inv_manifest") <(printf '%s\n' "$inv_expected_manifest") || true)"
 [[ -z "$inv_diff_mi" ]] || fail "bundle inventory drift: MANIFEST Source Roles set (<) != installer copy set + install-agent-bootstrap-home.sh (>):
 $inv_diff_mi"
-inv_actual="$(find "$BOOTSTRAP_BUNDLE" -type f -print \
+# Python bytecode caches are local build output, never bundle files.
+inv_actual="$(find "$BOOTSTRAP_BUNDLE" -name __pycache__ -prune -o -type f -print \
   | sed "s|^$BOOTSTRAP_BUNDLE/||" \
   | sort -u)"
 inv_diff_am="$(diff <(printf '%s\n' "$inv_actual") <(printf '%s\n' "$inv_manifest") || true)"
@@ -2857,7 +2861,7 @@ need_contains "$mode_contracts" '- `technical_review` · `@gate` -> `analysis` |
 need_contains "$mode_contracts" '- `implementation` · `@build` -> `verification` | `resolution`' "implementation transitions"
 need_contains "$mode_contracts" '- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`' "verification transitions"
 need_contains "$mode_contracts" '- `cross_review` · `@audit` -> `implementation` | `resolution`' "cross-review transitions"
-need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` (recorded by the active seat on the user'"'"'s decision) | user-selected prior phase' "resolution transitions"
+need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` | user-selected prior phase' "resolution transitions"
 need_contains "$mode_contracts" "awaiting_user" "mode contracts awaiting-user invariant"
 need_contains "$mode_contracts" 'only with `resolution` · `@owner`' "mode contracts awaiting-user owner restriction"
 need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
@@ -2867,10 +2871,10 @@ need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upg
 need_contains "$mode_contracts" '`revision_rounds` counts returns to `implementation` only' "mode remediation checkpoint"
 need_contains "$mode_contracts" 'asks whether another bounded pass is worth its cost.' "mode remediation bounded cost"
 need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
-need_contains "$mode_contracts" "The user may authorize another pass in the same task" "mode remediation same-task authorization"
-need_contains "$mode_contracts" "Do not create a child task or a new lifecycle state solely because the checkpoint was reached." "mode remediation no forced child or state"
-need_contains "$mode_contracts" "runner, status, reason, and real report" "mode contracts verification evidence"
-need_contains "$mode_contracts" "evidence to check, not to re-run" "mode contracts executing-host pass rule"
+# Another pass stays in the same task (handoff "continue the current task" above).
+need_contains "$handoff_contract" 'An entry allowing another pass records `revision_rounds` reset to 0' "handoff same-task pass resets the count"
+need_contains "$handoff_contract" '"verification": {"runner": "none", "status": "not_run", "reason": null, "report": null}' "handoff verification evidence fields"
+need_contains "$mode_contracts" "Only the executing host may declare a pass for what it ran." "mode contracts executing-host pass rule"
 need_contains "$mode_contracts" "re-runs only a check whose" "mode contracts verify re-runs only on missing or doubtful evidence"
 need_contains "$mode_contracts" "Seats do not spawn reviewers beyond the doubt-driven skill" "mode contracts no helper reviewers"
 need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
@@ -2885,7 +2889,7 @@ need_contains "$mode_contracts" 'Required procedural declarations: `fresh_sessio
 need_contains "$mode_contracts" 'user must open a new session for the `@gate` occupant to code' "mode contracts new-session escalation"
 need_contains "$mode_contracts" "audit-only procedural declaration" "mode contracts Sol-coding audit limitation"
 need_contains "$mode_contracts" "cannot provide file-based authorization" "mode contracts no file authorization"
-need_contains "$mode_contracts" "The user is the final authority" "mode contracts user authority"
+need_contains "$mode_contracts" 'records each user decision, the close included, in `user-decision.md`' "mode contracts record user decisions in user-decision.md"
 need_contains "$mode_contracts" "not an authorization or security boundary" "mode contracts security-boundary limitation"
 need_not_contains "$mode_contracts" "Three rounds:" "ordinary review three-round mandate"
 need_not_contains "$handoff_contract$mode_contracts$(cat "$TMP_DIR/.codex/codex-mode.sh")" "--escalated" "obsolete escalated route"
@@ -4565,5 +4569,8 @@ note "one-shot staging and orchestrator"
 bash "$ROOT_DIR/scripts/test-harness-kit-staging.sh"
 bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh"
 bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh"
+
+note "change tiers"
+bash "$ROOT_DIR/scripts/test-change-tiers.sh"
 
 printf 'bootstrap-test: ok (%s)\n' "$TMP_DIR"

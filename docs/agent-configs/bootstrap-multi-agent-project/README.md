@@ -71,6 +71,7 @@ agent-bootstrap/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
 ├── agent-guard.sh
+├── agent-tier.py
 ├── agent-seats.sh
 ├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
@@ -104,6 +105,7 @@ $HOME/dev/agent-bootstrap/
 ├── agent-tech-stack-lib.sh
 ├── agent-hook.sh
 ├── agent-guard.sh
+├── agent-tier.py
 ├── agent-seats.sh
 ├── agent-onboarding.sh
 ├── detect-agent-tech-stack.sh
@@ -203,7 +205,7 @@ Install, reinstall or update with one command. The first time, from the
 project root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.20.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Then `scripts/harness-kit.sh` reinstalls the installed version,
@@ -293,6 +295,7 @@ With `--workflow full`, it also installs:
 - `docs/agent-configs/agent-handoff-schema.md`.
 - `docs/agent-configs/karpathy-llm-coding-agent-config.md`.
 - `docs/agent-configs/llm-council-agent-workflow.md`.
+- `docs/agent-configs/tier-medium.md`.
 - `.codex/config.toml`, `.codex/codex-mode.sh`, `.codex/README.md`.
 - `.claude/commands/*.md` for planning/coding/reviewing modes, plus
   `/codex:setup`, `/codex:rescue`, and `/codex:status` bridge commands.

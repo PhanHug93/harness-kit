@@ -310,6 +310,7 @@ main() {
   copy_file "agent-tech-stack-lib.sh" "agent-tech-stack-lib.sh"
   copy_file "agent-hook.sh" "agent-hook.sh"
   copy_file "agent-guard.sh" "agent-guard.sh"
+  copy_file "agent-tier.py" "agent-tier.py"
   copy_file "agent-seats.sh" "agent-seats.sh"
   copy_file "agent-onboarding.sh" "agent-onboarding.sh"
   copy_file "agent-local-only-check.sh" "agent-local-only-check.sh"
@@ -336,6 +337,7 @@ main() {
   copy_file "schemas/agent-guard-verification-v2.schema.json" "schemas/agent-guard-verification-v2.schema.json"
   copy_file "schemas/harness-project-knowledge-v1.schema.json" "schemas/harness-project-knowledge-v1.schema.json"
   copy_file "schemas/harness-kit-run-report-v1.schema.json" "schemas/harness-kit-run-report-v1.schema.json"
+  copy_file "schemas/harness-tier-v1.schema.json" "schemas/harness-tier-v1.schema.json"
   copy_file "templates/base/README.md" "templates/base/README.md"
   copy_file "templates/tool-contract/shared.md" "templates/tool-contract/shared.md"
   copy_file "templates/overlays/android_kotlin.md" "templates/overlays/android_kotlin.md"
@@ -368,9 +370,9 @@ main() {
   copy_file "lib/retirement.py" "lib/retirement.py"
   copy_file "lib/knowledge.py" "lib/knowledge.py"
   copy_file "lib/migrations.sh" "lib/migrations.sh"
-  copy_file "migrations/next-ignore-block-to-exclude.sh" "migrations/next-ignore-block-to-exclude.sh"
-  copy_file "migrations/next-retire-files.sh" "migrations/next-retire-files.sh"
-  copy_file "migrations/next-untrack-local-records.sh" "migrations/next-untrack-local-records.sh"
+  copy_file "migrations/2026.10.20.1-ignore-block-to-exclude.sh" "migrations/2026.10.20.1-ignore-block-to-exclude.sh"
+  copy_file "migrations/2026.10.20.1-retire-files.sh" "migrations/2026.10.20.1-retire-files.sh"
+  copy_file "migrations/2026.10.20.1-untrack-local-records.sh" "migrations/2026.10.20.1-untrack-local-records.sh"
   write_source_metadata
   init_history
 

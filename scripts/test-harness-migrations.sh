@@ -45,9 +45,16 @@ state_hash() { { git -C "$TARGET_DIR" ls-files -s; git -C "$TARGET_DIR" status -
 pending_ids() { python3 -I "$KNOW" --target "$TARGET_DIR" decisions --pending | tr '\n' ' '; }
 result_line() { grep -F "$1"$'\t' "$MIGRATIONS_RESULT_FILE" | tail -1; }
 
-UNTRACK=next-untrack-local-records
-TOEXCL=next-ignore-block-to-exclude
-RETIRE=next-retire-files
+# A release renames the shipped migrations from next-<slug> to <version>-<slug>.
+shipped_id() {
+  local file
+  file="$(compgen -G "$KIT/migrations/*-$1.sh" | head -1)"
+  [[ -n "$file" ]] || fail "shipped migration $1 is missing"
+  basename "$file" .sh
+}
+UNTRACK="$(shipped_id untrack-local-records)"
+TOEXCL="$(shipped_id ignore-block-to-exclude)"
+RETIRE="$(shipped_id retire-files)"
 
 # ---------------------------------------------------------------- untrack
 new_target
@@ -62,7 +69,7 @@ git -C "$TARGET_DIR" add -f ".agents/tasks/a b/task.md" docs/superpowers/plans/x
 eq "$(wc -l <"$TMP_ROOT/list.out" | tr -d ' ')" "3" "--list prints one tracked local-only path per line"
 grep -qxF ".agents/tasks/a b/task.md" "$TMP_ROOT/list.out" || fail "--list must print paths with spaces verbatim"
 eq "$(migrations_select 2026.10.13.2 next update)" "$UNTRACK" "untrack is selected"
-eq "$(migrations_select 2026.10.13.2 2026.10.13.3 update)" "" "next migrations are not in a released range"
+eq "$(migrations_select 2026.10.13.2 2026.10.13.3 update)" "" "a migration outside the FROM..TO range is not selected"
 eq "$(migrations_select 2026.10.13.2 next install)" "" "install selects only pending decisions"
 facts="$(migrations_facts "$UNTRACK")"
 has "$facts" "3 tracked local-only files: " "facts count"
@@ -241,7 +248,7 @@ eq "$(migrations_select 2026.10.13.2 next update)" "" "a pending decision that i
 new_target
 make_stub_kit 3
 KIT_DIR="$STUB_KIT"; export KIT_DIR
-cp "$KIT/migrations/next-retire-files.sh" "$STUB_KIT/migrations/" 2>/dev/null || fail "next-retire-files.sh missing"
+cp "$KIT/migrations/$RETIRE.sh" "$STUB_KIT/migrations/" 2>/dev/null || fail "$RETIRE.sh missing"
 cat >"$STUB_KIT/bootstrap-multi-agent-project.sh" <<'STUB'
 #!/usr/bin/env bash
 case " $* " in

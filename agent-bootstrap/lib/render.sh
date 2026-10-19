@@ -290,6 +290,7 @@ scripts/agent-tech-stack-lib.sh
 scripts/detect-agent-tech-stack.sh
 scripts/agent-hook.sh
 scripts/agent-guard.sh
+scripts/agent-tier.py
 scripts/agent-seats.sh
 scripts/agent-onboarding.sh
 scripts/agent-local-only-check.sh
