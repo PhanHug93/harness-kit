@@ -36,6 +36,9 @@ sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parent.parent
 BUNDLE = ROOT / "agent-bootstrap"
+# A release renames the shipped migrations from next-<slug> to <version>-<slug>.
+_RETIRE = sorted((BUNDLE / "migrations").glob("*-retire-files.sh"))
+RETIRE_ID = _RETIRE[0].stem if _RETIRE else "next-retire-files"
 ONE_SHOT = BUNDLE / "harness-kit-one-shot-upgrade.sh"
 WORKFLOW = ".github/workflows/agent-guard.yml"
 TEMPLATE = "docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml"
@@ -1427,7 +1430,7 @@ def one_shot(c, work, label, flags, *, expect, prepare=None, apply_expected=Fals
     c.check(f"R12 one-shot {label}: no home install", not home.exists())
     after = {rel: ident(target / rel) for rel in watched}
     if not apply_expected:
-        c.check(f"R12 one-shot {label}: retirement stays a pending decision", "next-retire-files" in decisions["pending"], decisions)
+        c.check(f"R12 one-shot {label}: retirement stays a pending decision", RETIRE_ID in decisions["pending"], decisions)
         c.check(f"R12 one-shot {label}: never deletes", after == before, [r for r in watched if before[r] != after[r]])
         c.check(f"R12 one-shot {label}: never reaches apply", " apply --target" not in probe)
     else:
@@ -1440,7 +1443,7 @@ def slow_one_shot_default(c, work):
     plan = report and json.loads((target / ".tools/agent-state/upgrades" / report["stamp"] / "plan.json").read_text())
     planned = [item["path"] for item in (plan or {}).get("files", [])]
     c.check("R2 one-shot never generates retired paths", planned and WORKFLOW not in planned and TEMPLATE not in planned)
-    c.check("R12 one-shot console names the retire-files decision", "--accept next-retire-files" in out, out[-1500:])
+    c.check("R12 one-shot console names the retire-files decision", f"--accept {RETIRE_ID}" in out, out[-1500:])
 
 
 def slow_one_shot_flags(c, work):
@@ -1458,7 +1461,7 @@ def slow_one_shot_apply3(c, work):
     fresh = [name for name in backups(target, WORKFLOW) if not name.endswith("20200101T000000Z-0123456789abcdef")]
     c.check("R12 one-shot apply retired the exact local-only workflow", after[WORKFLOW] is None and len(fresh) == 1)
     c.check("R12 one-shot apply preserved the modified template", after[TEMPLATE] == before[TEMPLATE])
-    c.check("R12 one-shot retirement with a preserved file is applied", decisions["applied"] == ["next-retire-files"], decisions)
+    c.check("R12 one-shot retirement with a preserved file is applied", decisions["applied"] == [RETIRE_ID], decisions)
     c.check("R12 one-shot exit 3 comes from the remaining conflicts", report.get("result") == "needs review"
             and report["files"]["conflicts"], report.get("result"))
 
@@ -1479,7 +1482,7 @@ def slow_one_shot_apply1(c, work):
         if "parent" in holder:
             os.chmod(holder["parent"], 0o755)
     c.check("R12 one-shot apply failure keeps the original", after[WORKFLOW] == before[WORKFLOW])
-    c.check("R12 one-shot apply failure is a failed migration", decisions["failed"] == ["next-retire-files"]
+    c.check("R12 one-shot apply failure is a failed migration", decisions["failed"] == [RETIRE_ID]
             and report.get("result") == "failed", decisions)
     c.check("R12 one-shot apply failure stops further actions",
             [p["status"] for p in report.get("phases", []) if p["name"] in ("migrate", "verify")] == ["failed", "skipped"],

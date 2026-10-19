@@ -34,6 +34,8 @@ Inventory and drift rules: see `MANIFEST.md`.
   `detect-agent-tech-stack.sh`, `verify-ai-deps.sh`,
   `install-rtk.sh`, and `rtk` — full-workflow runtime snapshots generated into
   bootstrapped projects.
+- `agent-tier.py` — the change-tier program that `agent-guard.sh tier` runs;
+  generated projects get it as `scripts/agent-tier.py`.
 - `model-profiles/` — retained legacy defaults used to recognize older
   configurations during migration; fresh targets do not receive this file.
 - `policies/` — Agent Guard Lite context policy copied into generated target
@@ -131,6 +133,9 @@ scripts/agent-guard.sh pre-final --run-verify
 tech-stack contract (detector commands only when it is empty) and never runs
 placeholders such as `xcodebuild ... <scheme>`. When no command could run, the
 result is `unverified`, never a pass: strict mode exits 4, advisory mode warns.
+With a declared change tier (`scripts/agent-guard.sh tier`), a change above
+that tier gets a recommendation, never a failure; see the root README, "Pick a
+tier for each change".
 `scripts/agent-guard.sh baseline` checks the current commit and caches the
 result. Review the commands before using `--verify-scope full` to include
 build/full commands. Results are written to
@@ -148,7 +153,7 @@ Install, reinstall or update a project with one command. The first time, from
 the project root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.20.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Use `| bash -s -- --to latest` for the newest release. Later runs use the

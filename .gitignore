@@ -38,3 +38,6 @@ docs/superpowers/plans/**
 !docs/superpowers/plans/*/journal.md
 .agents/tasks/
 /Claude outputs/
+
+# Python bytecode caches
+__pycache__/

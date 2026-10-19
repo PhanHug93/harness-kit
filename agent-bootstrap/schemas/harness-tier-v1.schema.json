@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-bootstrap.local/schemas/harness-tier-v1.schema.json",
+  "title": "Harness Change Tier Record",
+  "description": "Describes .agents/tasks/<id>/tier.json. Only the tier script writes this file.",
+  "type": "object",
+  "required": ["schema", "task_id", "start_commit", "declared", "status", "history"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "harness-tier/v1" },
+    "task_id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "branch": { "type": ["string", "null"] },
+    "base_ref": { "type": ["string", "null"] },
+    "start_commit": { "type": "string" },
+    "declared": { "$ref": "#/$defs/tierOrNull" },
+    "suggested": { "$ref": "#/$defs/tierOrNull" },
+    "suggestion_inputs": { "type": "object" },
+    "reason": { "type": ["string", "null"] },
+    "coding_started_tier": { "$ref": "#/$defs/tierOrNull" },
+    "coding_started_at": { "type": ["string", "null"] },
+    "status": { "enum": ["open", "closed"] },
+    "closed_at": { "type": ["string", "null"] },
+    "closed_by": { "type": ["string", "null"] },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["at", "event", "tier", "printed_by", "recorded_by", "host_session", "answer", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "at": { "type": "string" },
+          "event": { "enum": ["suggest", "set", "checkpoint", "close"] },
+          "tier": { "$ref": "#/$defs/tierOrNull" },
+          "printed_by": { "type": "string" },
+          "recorded_by": { "type": "string" },
+          "host_session": { "type": ["string", "null"] },
+          "answer": { "type": ["string", "null"] },
+          "reason": { "type": ["string", "null"] },
+          "base": { "type": ["string", "null"], "description": "The --base this set gave, when it gave one." },
+          "overrode": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The seats whose negative latest review this lowering went past (with a reason)."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "tierOrNull": { "enum": ["small", "medium", "large", null] }
+  }
+}

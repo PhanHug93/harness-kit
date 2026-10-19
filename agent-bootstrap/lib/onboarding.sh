@@ -64,6 +64,10 @@ Run `scripts/agent-onboarding.sh next` to see the current missing pieces.
    tech-stack overrides: protected paths, generated files, architecture
    boundaries, test strategy, release constraints, and commands that replaced
    detector placeholders.
+   Write the user's answer on protected / sensitive areas as `risk_paths` globs
+   in `project-tech-stack.json` (`app/billing/` becomes
+   `"risk_paths": ["app/billing/**"]`). Changes in these places always count
+   as large.
 6. Fill `docs/superpowers/specs/project-tech-stack.md` and
    `docs/superpowers/specs/project-tech-stack.json` with the verified
    project-specific tech-stack, module map, conventions, source evidence, and

@@ -138,6 +138,17 @@ bash "$BOOTSTRAP" --target "$plain" --workflow full --dry-run >/dev/null 2>&1 ||
 # plain no-stack fixtures: c1 (current kit), c4 and c6 (v2026.09.07.1).
 ENTRY="$ROOT_DIR/agent-bootstrap/harness-kit-one-shot.sh"
 VERSION="$(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION" | tr -d '[:space:]')"
+# A release renames the shipped migrations from next-<slug> to <version>-<slug>.
+shipped_id() {
+  local file
+  file="$(compgen -G "$ROOT_DIR/agent-bootstrap/migrations/*-$1.sh" | head -1)"
+  [[ -n "$file" ]] || { printf 'oneshot-test: FAIL: shipped migration %s is missing\n' "$1" >&2; exit 1; }
+  basename "$file" .sh
+}
+UNTRACK_ID="$(shipped_id untrack-local-records)"
+RETIRE_ID="$(shipped_id retire-files)"
+TOEXCL_ID="$(shipped_id ignore-block-to-exclude)"
+NEWER_VERSION="${VERSION%.*}.$((${VERSION##*.} + 1))"
 MARKER='# >>> multi-agent bootstrap local state >>>'
 OLD_KIT="$TMP_ROOT/old-kit"
 mkdir -p "$OLD_KIT"
@@ -317,8 +328,9 @@ grep -qx 'local patch' "$c1/.claude/commands/coding.md" || fail "case 2: a local
 [[ "$OUT" == *"RESULT: done (verify skipped)"* ]] || fail "case 2: the result line must say verify skipped: $OUT"
 grep -q 'taking over a stale run lock' "$TMP_ROOT/hk.err" || fail "run lock: a dead holder must be taken over with a note"
 [[ ! -e "$lockdir" ]] || fail "run lock: not released"
-kits="$(for dir in "$c1"/.harness-kit/v*; do printf '%s ' "${dir##*/}"; done)"
-[[ "$kits" == "v2026.02.01.1 v2026.10.13.2 v2026.10.13.2-rc1 vjunk " ]] || fail "kit copy pruning: $kits"
+kits="$(for dir in "$c1"/.harness-kit/v*; do printf '%s\n' "${dir##*/}"; done | LC_ALL=C sort | tr '\n' ' ')"
+want="$(printf '%s\n' v2026.02.01.1 "v$VERSION" v2026.10.13.2-rc1 vjunk | LC_ALL=C sort | tr '\n' ' ')"
+[[ "$kits" == "$want" ]] || fail "kit copy pruning: $kits (want $want)"
 knowledge_out="$(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --knowledge 2>&1)" || fail "case 2: --knowledge failed: $knowledge_out"
 [[ "$(wc -l <<<"$knowledge_out")" -le 15 && "$knowledge_out" == *"patch: .claude/commands/coding.md"* &&
   "$knowledge_out" == *"pin: .claude/commands/planning.md"* ]] ||
@@ -463,9 +475,9 @@ schema_check "$c1/$(printf '%s\n' "$OUT" | sed -n 's/^report: //p' | tail -n 1)"
 [[ ! -e "$lockdir" ]] || fail "an interrupted run must release the run lock"
 for args in "--bogus" "--branch main" "--workflow nope" "--take-kit ../x" "--take-kit /etc/hosts" \
   "--accept no-such-id" "--reason why" "--take-kit .tools/x" "--resolved AGENTS.md.generated.20260101-000000" \
-  "--plan --accept next-untrack-local-records" "--plan --take-kit AGENTS.md" "--rollback 20260101-000000 --reset" \
+  "--plan --accept $UNTRACK_ID" "--plan --take-kit AGENTS.md" "--rollback 20260101-000000 --reset" \
   "--knowledge --plan" "--take-kit AGENTS.md --resolved AGENTS.md" "--keep-local AGENTS.md --resolved AGENTS.md" \
-  "--accept next-retire-files --decline next-retire-files" "--skip-verify --project-verify" "--json --knowledge"; do
+  "--accept $RETIRE_ID --decline $RETIRE_ID" "--skip-verify --project-verify" "--json --knowledge"; do
   RC=0
   # shellcheck disable=SC2086 # split on purpose
   (cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" $args) >/dev/null 2>&1 || RC=$?
@@ -535,7 +547,7 @@ printf 'one\n' >"$TMP_ROOT/mig-target/facts.txt"
   mkdir -p "$broken_kit"
   printf '#!/usr/bin/env bash\nexit 5\n' >"$broken_kit/agent-local-only-check.sh"
   printf '#!/usr/bin/env bash\nexit 5\n' >"$broken_kit/bootstrap-multi-agent-project.sh"
-  for shipped in next-untrack-local-records next-retire-files; do
+  for shipped in "$UNTRACK_ID" "$RETIRE_ID"; do
     cp "$ROOT_DIR/agent-bootstrap/migrations/$shipped.sh" "$stubs/"
     KIT_DIR="$broken_kit" migrations_select "" next update >/dev/null 2>&1 && fail "$shipped: a failing check must fail selection"
     [[ "$(migrations_report)" == *"$shipped	failed"*"exit 2"* ]] || fail "$shipped: a failing check: $(migrations_report)"
@@ -545,8 +557,8 @@ printf 'one\n' >"$TMP_ROOT/mig-target/facts.txt"
 
 # A failed migration is retried: the next run (now a reinstall, since apply
 # moved the lock) selects it again and applies it once the cause is gone.
-printf '%s\n' 2026.10.13.3 >"$kit2/agent-bootstrap/VERSION"
-sed -i.orig 's/^AGENT_BOOTSTRAP_VERSION="[^"]*"/AGENT_BOOTSTRAP_VERSION="2026.10.13.3"/' "$kit2/agent-bootstrap/bootstrap-multi-agent-project.sh"
+printf '%s\n' "$NEWER_VERSION" >"$kit2/agent-bootstrap/VERSION"
+sed -i.orig "s/^AGENT_BOOTSTRAP_VERSION=\"[^\"]*\"/AGENT_BOOTSTRAP_VERSION=\"$NEWER_VERSION\"/" "$kit2/agent-bootstrap/bootstrap-multi-agent-project.sh"
 cat >"$kit2/agent-bootstrap/migrations/next-zz-flaky.sh" <<'EOF'
 MIGRATION_ID=next-zz-flaky
 MIGRATION_SINCE=next
@@ -572,7 +584,7 @@ RC=0
 OUT="$(bash "$kit2/agent-bootstrap/harness-kit-run.sh" --target "$c1" --skip-verify 2>"$TMP_ROOT/hk.err")" || RC=$?
 REPORT="$c1/$(printf '%s\n' "$OUT" | sed -n 's/^report: //p' | tail -n 1)"
 expect 0 "the retried migration"
-[[ "$(sed -n '1p' <<<"$OUT")" == "mode: reinstall 2026.10.13.3" && -f "$c1/flaky.done" ]] ||
+[[ "$(sed -n '1p' <<<"$OUT")" == "mode: reinstall $NEWER_VERSION" && -f "$c1/flaky.done" ]] ||
   fail "a failed migration must be retried by the next run: $OUT"
 [[ "$(jget "$REPORT" '[m["id"] for m in d["migrations"]["applied"]]')" == "['next-zz-flaky']" ]] ||
   fail "the retried migration must be applied: $(jget "$REPORT" 'd["migrations"]')"
@@ -596,9 +608,9 @@ if [[ ! -f "$c4/$cand" ]] || grep -q 'legacy patch' "$c4/$cand"; then
   fail "case 4: no kit candidate for the conflict: $cand"
 fi
 [[ "$OUT" == *"--take-kit all"* ]] || fail "many conflicts must suggest --take-kit all: $OUT"
-[[ "$(jget "$REPORT" '[p["id"] for p in d["migrations"]["pending"]]')" == *next-ignore-block-to-exclude* ]] ||
+[[ "$(jget "$REPORT" '[p["id"] for p in d["migrations"]["pending"]]')" == *"$TOEXCL_ID"* ]] ||
   fail "case 7: ignore-block-to-exclude must be pending: $(jget "$REPORT" 'd["migrations"]')"
-[[ "$OUT" == *"--accept next-ignore-block-to-exclude"* ]] || fail "case 7: the console must give the accept command: $OUT"
+[[ "$OUT" == *"--accept $TOEXCL_ID"* ]] || fail "case 7: the console must give the accept command: $OUT"
 grep -Fq "$MARKER" "$c4/.gitignore" || fail "case 7: a decision ran without --accept"
 user_conflicts=()
 while IFS= read -r rel; do
@@ -607,7 +619,7 @@ done < <(jget "$REPORT" '"\n".join(c["path"] for c in d["files"]["conflicts"] if
 # A stale candidate from an older kit must never be promoted.
 printf 'stale kit output\n' >"$c4/.claude/README.md.generated.29991231-235959"
 hk "$c4" --skip-verify --resolved .claude/commands/coding.md --reason "local wording" \
-  --accept next-ignore-block-to-exclude --apply-retirements --take-kit all ${user_conflicts[@]+"${user_conflicts[@]}"}
+  --accept "$TOEXCL_ID" --apply-retirements --take-kit all ${user_conflicts[@]+"${user_conflicts[@]}"}
 expect 0 "case 4 --resolved and --take-kit all"
 grep -qx 'legacy patch' "$c4/.claude/commands/coding.md" || fail "case 4: --resolved must keep the local file"
 grep -q 'legacy patch' "$c4/.tools/agent-state/harness-baseline/files/.claude/commands/coding.md" &&
@@ -622,7 +634,7 @@ leftover_candidates="$(find "$c4" \( -path "$c4/.git" -o -path "$c4/.tools" -o -
 if ! git -C "$c4" diff --quiet -- .gitignore || ! grep -Fq "$MARKER" "$(exclude_of "$c4")"; then
   fail "case 7: --accept must move the block to the exclude file and leave the committed .gitignore"
 fi
-grep -q -- '--apply-retirements means --accept next-retire-files' "$TMP_ROOT/hk.err" ||
+grep -q -- "--apply-retirements means --accept $RETIRE_ID" "$TMP_ROOT/hk.err" ||
   fail "old flag --apply-retirements must print its note: $(cat "$TMP_ROOT/hk.err")"
 hk "$c4" --skip-verify
 expect 0 "case 4 next run"
@@ -661,23 +673,23 @@ refused "take-kit on a remote's default branch" "trunk is protected"
 git -C "$c6" checkout -q main
 git -C "$c6" branch -q -D trunk
 [[ "$(git -C "$c6" branch --list feature/take)" == "" ]] || fail "a refused run must not create its branch"
-hk "$c6" --skip-verify --accept next-untrack-local-records
+hk "$c6" --skip-verify --accept "$UNTRACK_ID"
 refused "case 6 --accept on main" "--branch"
 git -C "$c6" diff --cached --quiet || fail "case 6: a refused run changed the index"
-hk "$c6" --skip-verify --decline next-untrack-local-records
+hk "$c6" --skip-verify --decline "$UNTRACK_ID"
 expect 3 "case 6 --decline"
 [[ "$(jget "$REPORT" '([m["id"] for m in d["migrations"]["declined"]], [m["id"] for m in d["migrations"]["pending"]])')" == \
-  "(['next-untrack-local-records'], ['next-ignore-block-to-exclude'])" ]] ||
+  "(['$UNTRACK_ID'], ['$TOEXCL_ID'])" ]] ||
   fail "case 6: decline: $(jget "$REPORT" 'd["migrations"]')"
 git -C "$c6" add -f GEMINI.md
 git_c "$c6" commit -qm "legacy: one more tracked harness file"
 head="$(git -C "$c6" rev-parse HEAD)"
 hk "$c6" --skip-verify
 expect 3 "case 6 pending after new facts"
-[[ "$(jget "$REPORT" '[p["accept"] for p in d["migrations"]["pending"] if p["id"] == "next-untrack-local-records"]')" == *"--branch feature/"* ]] ||
+[[ "$(jget "$REPORT" '[p["accept"] for p in d["migrations"]["pending"] if p["id"] == "'"$UNTRACK_ID"'"]')" == *"--branch feature/"* ]] ||
   fail "case 6: untrack must be pending again, with a branch in its accept command: $(jget "$REPORT" 'd["migrations"]')"
 git -C "$c6" diff --cached --quiet || fail "case 6: a decision ran without --accept"
-hk "$c6" --skip-verify --branch feature/untrack --accept next-untrack-local-records
+hk "$c6" --skip-verify --branch feature/untrack --accept "$UNTRACK_ID"
 expect 3 "case 6 --accept on a feature branch"
 [[ "$(git -C "$c6" symbolic-ref --short HEAD)" == feature/untrack && "$(git -C "$c6" rev-parse HEAD)" == "$head" ]] ||
   fail "case 6: --branch must switch without committing"
@@ -688,7 +700,7 @@ for rel in AGENTS.md CLAUDE.md GEMINI.md; do
   grep -qx "D$(printf '\t')$rel" <<<"$staged" || fail "case 6: $rel was not untracked: $staged"
   [[ -f "$c6/$rel" ]] || fail "case 6: untrack removed $rel from disk"
 done
-[[ "$(jget "$REPORT" '[m["id"] for m in d["migrations"]["applied"]]')" == "['next-untrack-local-records']" ]] ||
+[[ "$(jget "$REPORT" '[m["id"] for m in d["migrations"]["applied"]]')" == "['$UNTRACK_ID']" ]] ||
   fail "case 6: untrack must be applied: $(jget "$REPORT" 'd["migrations"]')"
 
 # 11 a worktree uses the common exclude file. Run directories beyond the

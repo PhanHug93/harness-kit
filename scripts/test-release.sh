@@ -112,6 +112,12 @@ if ! grep -q '^## Unreleased' "$copy/CHANGELOG.md"; then
   printf '# Changelog\n\n## Unreleased\n\n- Test release note.\n\n%s\n' "$(sed '1d' "$copy/CHANGELOG.md")" >"$copy/CHANGELOG.md"
 fi
 write_migration "$copy/agent-bootstrap/migrations" next-zz-fixture next
+# The inventories name every migration file. A fixture row checks the rename
+# whatever the shipped migrations are called (next-* only before a release).
+printf '| %s | Migration %s (renamed to %s by %s). | Test only. |\n' "\`migrations/next-zz-fixture.sh\`" \
+  "\`next-zz-fixture\`" "\`<version>-…\`" "\`scripts/release.sh <version>\`" >>"$copy/agent-bootstrap/MANIFEST.md"
+printf '# migrations/next-zz-fixture.sh\n' >>"$copy/agent-bootstrap/install-agent-bootstrap-home.sh"
+printf '# migrations/next-zz-fixture.sh\n' >>"$copy/scripts/test-bootstrap-multi-agent-project.sh"
 notes=""
 for f in "$copy"/agent-bootstrap/migrations/next-*.sh; do notes="$notes- Migration \`$(basename "$f" .sh)\`.\n"; done
 python3 - "$copy/CHANGELOG.md" "$notes" <<'PY'
@@ -131,9 +137,12 @@ need_contains "$(cat "$renamed")" "MIGRATION_SINCE=2099.01.01.1" "bump rewrites 
 need_contains "$(cat "$renamed")" "MIGRATION_ID=2099.01.01.1-zz-fixture" "bump rewrites MIGRATION_ID"
 need_contains "$(cat "$copy/CHANGELOG.md")" "Migration \`2099.01.01.1-zz-fixture\`" "bump rewrites the id in the notes"
 for inventory in agent-bootstrap/MANIFEST.md agent-bootstrap/install-agent-bootstrap-home.sh scripts/test-bootstrap-multi-agent-project.sh; do
-  need_contains "$(cat "$copy/$inventory")" "migrations/2099.01.01.1-retire-files.sh" "bump renames migrations in $inventory"
+  need_contains "$(cat "$copy/$inventory")" "migrations/2099.01.01.1-zz-fixture.sh" "bump renames migrations in $inventory"
   ! grep -q 'migrations/next-' "$copy/$inventory" || fail "bump left a next-* migration name in $inventory"
 done
+# The MANIFEST description of a released migration names its new id, without the "renamed to" note.
+need_contains "$(cat "$copy/agent-bootstrap/MANIFEST.md")" "Migration \`2099.01.01.1-zz-fixture\`." "bump rewrites the MANIFEST description"
+! grep -qF "Migration \`next-zz-fixture\`" "$copy/agent-bootstrap/MANIFEST.md" || fail "bump left a next-* description in MANIFEST.md"
 bash "$copy/scripts/release.sh" --check-tag v2099.01.01.1 >/dev/null || fail "--check-tag must accept the bumped tree"
 [[ "$(sed -n '1p' "$copy/agent-bootstrap/VERSION")" == "2099.01.01.1" ]] || fail "VERSION not bumped"
 need_contains "$(bash "$copy/agent-bootstrap/bootstrap-multi-agent-project.sh" --version)" "2099.01.01.1" "entrypoint version"

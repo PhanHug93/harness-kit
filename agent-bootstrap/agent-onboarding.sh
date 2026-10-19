@@ -393,9 +393,10 @@ PY
 }
 
 print_next_actions() {
-  STATUS_JSON_DATA="$STATUS_JSON" python3 - <<'PY'
+  STATUS_JSON_DATA="$STATUS_JSON" python3 - "$ROOT_DIR" <<'PY'
 import json
 import os
+import pathlib
 import sys
 
 doc = json.loads(os.environ["STATUS_JSON_DATA"])
@@ -403,6 +404,14 @@ print(f"Onboarding status: {doc.get('status')}")
 print("Next actions:")
 for index, action in enumerate(doc.get("next_actions") or [], start=1):
     print(f"  {index}. {action}")
+# Advice only: never changes the status or an exit code.
+tech = pathlib.Path(sys.argv[1]) / "docs/superpowers/specs/project-tech-stack.json"
+try:
+    contract = json.loads(tech.read_text(encoding="utf-8")) if tech.is_file() and not tech.is_symlink() else None
+except Exception:
+    contract = None
+if isinstance(contract, dict) and "risk_paths" not in contract:
+    print("hint: add your risky folders as risk_paths in docs/superpowers/specs/project-tech-stack.json (see project-onboarding.md)")
 PY
 }
 

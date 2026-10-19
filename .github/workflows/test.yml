@@ -105,6 +105,7 @@ jobs:
               scripts/test-harness-migrations.sh \
               scripts/test-harness-kit-staging.sh \
               scripts/test-harness-kit-oneshot.sh \
+              scripts/test-change-tiers.sh \
               agent-bootstrap/agent-bootstrap-update.sh \
               agent-bootstrap/install-agent-bootstrap-home.sh \
               agent-bootstrap/install-rtk.sh \

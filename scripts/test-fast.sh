@@ -8,7 +8,7 @@ set -uo pipefail
 # reproduce a CI failure or when CI cannot run.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race local-only
-  verification-evidence entry knowledge migrations staging oneshot matrix)
+  verification-evidence entry knowledge migrations staging oneshot tiers matrix)
 
 usage() {
   printf '%s\n' \
@@ -42,6 +42,7 @@ run_check() {
     migrations) bash "$ROOT_DIR/scripts/test-harness-migrations.sh" ;;
     staging) bash "$ROOT_DIR/scripts/test-harness-kit-staging.sh" ;;
     oneshot) bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh" ;;
+    tiers) bash "$ROOT_DIR/scripts/test-change-tiers.sh" ;;
     matrix) bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh" ;;
   esac
 }

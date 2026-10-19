@@ -1,7 +1,83 @@
 # Changelog
 
-## Unreleased
+## 2026.10.20.1 — Change tiers, one-shot install and update, real verification evidence
 
+- Change tiers: every task gets a tier.
+  - small: one agent, pre-final, PR review;
+  - medium: one agent writes `task.md` and codes, then a fresh `@verify` or the human PR review;
+  - large: the full seat cycle.
+
+  How to use it:
+  1. `scripts/agent-guard.sh tier suggest --task <id> --paths <files> [--data] [--access] [--dependency] [--unclear]` prints the tier and the reasons. Called with no facts, it keeps the ones on record.
+  2. `tier set <tier> --task <id>` records it after the user says yes. A tier lower than the suggestion needs `--reason`.
+  3. `tier show --pr-line` prints one line for the PR body.
+  4. `tier close` ends the task.
+
+  The rules and lists live in `context-policy.json`. Projects add their own
+  risky folders as `risk_paths` in `project-tech-stack.json`, and onboarding
+  asks for them. As in `.gitignore`, a `risk_paths` or `generated_files`
+  pattern that names a folder (`app/ledger`) covers the files inside it. The
+  thresholds are a first guess.
+- `pre-final` measures the real change against the declared tier:
+  - committed, staged and unstaged work, renames, binaries and submodules;
+  - on a feature branch, from the merge-base with the default branch;
+  - on the default branch, from `tier set`, minus the commits pulled from its
+    remote branch and the commits already pushed there.
+
+  The pre-push hook counts only committed work (`pre-final --committed`), not
+  draft files. A plain `mv` or a staged `git mv` counts the file once but
+  keeps every path it had for the risk check. A task started on the default
+  branch moves to a new branch made from its work when `tier set` runs there;
+  until then pre-final calls it stale and says so (also after
+  `git branch -m`). A stacked branch counts only its own work once the parent
+  is merged. `--base` can be given on any later `tier set`, recorded in the
+  history; it warns while a review is negative. With no known default
+  branch the measure is partial and says how to set it.
+- `scripts/install-git-hooks.sh` and the pre-push hook work for a kit in a
+  subdirectory. When git cannot tell the task's work apart (a rebase or
+  reset of the start commit, a merge pull on top of older local commits, or a
+  `--base` ref that is gone), the measure is partial: pre-final warns with the
+  cause and does not fail.
+
+  Tests, lock files and generated files are not counted.
+
+  Tier checks recommend, never block: a change above the tier warns with the
+  reasons and the next step in pre-final, the Stop hook and the pre-push hook
+  (`pre-final --committed`, on the commits of the checked-out branch; a push
+  that only deletes branches is skipped). The exit code stays the
+  verification's. The report and the `pre_final` event carry a `tier` block,
+  and `tier show --pr-line` adds "measured medium, above the tier" or
+  "@verify review still needed" for the PR reviewer. A partial measure still
+  recommends, with its cause next to each step. With no tier declared,
+  pre-final only warns.
+- The Claude Code Stop hook warns on a change above its tier (with the
+  reasons), and when a tier was raised after coding ("@verify should review
+  it") until the reviews the new tier needs pass. Its warnings, and the unverified
+  one, now reach the user as `systemMessage`; before, a hook that exits 0 had
+  its stderr shown nowhere. Pre-final and pre-push keep that recommendation until
+  those reviews pass.
+- Lowering a tier while the latest `@gate`, `@verify` or `@audit` review is
+  negative needs `--reason`; it then warns, and the PR line says "lowered
+  despite a negative @gate review". Lowering means below the higher of the
+  declared tier and the current suggestion, so a first set or a checkpoint
+  "keep" counts too.
+  Older packets' `codex-review.md` and `claude-review.md` count while the
+  seat's own file has no attempt; a pending own review never borrows their
+  pass. A `--reason` covers only the suggestion it was given against; a later,
+  higher suggestion needs the user's confirmation again. At push, a human
+  `@verify` with `pr: pending` counts, because the PR needs the push. `audit-review.md`
+  gains `verdict: pass | changes_required`. A human `@verify` needs a `pr:` link
+  or number.
+- A confirmed small or medium tier is the user's decision for the active seat
+  to implement; the `@gate` rules apply to large only.
+- `@spec`, `@gate` and the medium coding seat end with a one-key tier
+  checkpoint that passes the files it knows.
+- New `docs/agent-configs/tier-medium.md`, and context budgets reported per
+  tier (`context_budget.tiers`).
+- Generated `AGENTS.md` asks every seat for short output in plain words, with
+  an example instead of jargon.
+- New bundle file `agent-tier.py`, installed as `scripts/agent-tier.py`
+  (local-only, protected), and schema `harness-tier-v1`.
 - One command installs, reinstalls or updates a project. The first time, run
   `curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v<ver>/agent-bootstrap/harness-kit-one-shot.sh | bash`
   (`| bash -s -- --to latest` for the newest release); after that,
@@ -42,10 +118,10 @@
   `next-<slug>.sh`, and `scripts/release.sh <version>` renames them to
   `<version>-<slug>.sh`. An `auto` migration runs by itself; a `decision`
   needs `--accept`, and `--decline` is remembered until the facts change. This
-  release adds three decisions: `next-untrack-local-records` (untrack
+  release adds three decisions: `2026.10.20.1-untrack-local-records` (untrack
   local-only harness files; the files stay on disk),
-  `next-ignore-block-to-exclude` (move the ignore block from `.gitignore` to
-  `.git/info/exclude`) and `next-retire-files` (remove retired harness files,
+  `2026.10.20.1-ignore-block-to-exclude` (move the ignore block from `.gitignore` to
+  `.git/info/exclude`) and `2026.10.20.1-retire-files` (remove retired harness files,
   with backups).
 - Verification evidence: `agent-guard.sh pre-final` takes its commands from
   `verification[]` in the tech-stack contract first, and detector commands

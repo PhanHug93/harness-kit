@@ -699,10 +699,12 @@ close_out() {
   # within 300 s (the Stop hook timeout is 360 s), into this session's own report
   # (closeout-<tag>-verify.json, never last-verify-report.json); Stop is blocked
   # (exit 2) on missing evidence or any fail/error/timeout, and kept blocked
-  # until the change verifies. Unverified only warns.
+  # until the change verifies. Unverified only warns, and so does a change above
+  # its declared tier: tier checks recommend, never block.
   # Gemini/Cursor/Windsurf have no equivalent close-out hook, so those surfaces
   # stay advisory and should call agent-guard pre-final manually.
-  local input session snapshot out report verdict err_file budget digits='^[0-9]{1,3}$'
+  local input session snapshot out report verdict tier_note err_file budget declared measured reasons seats which digits='^[0-9]{1,3}$'
+  local notes
   input="$(cat 2>/dev/null || true)"
   claude_anchor_env "$input"
   [[ "$(hook_input_field "$input" stop_hook_active)" == "true" ]] && exit 0
@@ -740,19 +742,44 @@ counts = {}
 for item in doc.get("results", []):
     if isinstance(item, dict) and item.get("status") in ("fail", "error", "timeout"):
         counts[item["status"]] = counts.get(item["status"], 0) + 1
+# Two lines: the verification verdict, then the tier note ("-" for none).
 if counts or status in ("fail", "error"):
     detail = ", ".join("{} {}".format(n, s) for s, n in sorted(counts.items()))
     print("block {}{}".format(status, " (" + detail + ")" if detail else ""))
+    print("-")
 elif status in ("pass", "unverified"):
     print(status)
+    tier = doc.get("tier")
+    if isinstance(tier, dict) and tier.get("status") == "exceeded":
+        # Raised after coding with reviews missing, and not above the tier.
+        ranks = ("small", "medium", "large")
+        missing = [seat for seat in ("@gate", "@verify", "@audit") if seat in (tier.get("missing_reviews") or [])]
+        over = (tier.get("measured") in ranks and tier.get("allowed") in ranks
+                and ranks.index(tier["measured"]) > ranks.index(tier["allowed"]))
+        if missing and not over:
+            print("reviews " + (missing[0] if len(missing) == 1 else ", ".join(missing[:-1]) + " and " + missing[-1]))
+        else:
+            reasons = "; ".join(" ".join(str(r).split()) for r in (tier.get("reasons") or [])[:3])
+            if tier.get("partial") is True:
+                cause = " ".join(str(tier.get("partial_reason") or "unknown cause").split())
+                reasons = (reasons + ". " if reasons else "") + "The measure is partial ({}), so the count may be off".format(cause)
+            print("tier {} {} {}".format(tier.get("declared"), tier.get("measured"), reasons).rstrip())
+    else:
+        print("-")
 else:
     print("missing")
+    print("-")
 PY
 )"
+  tier_note="$(sed -n 2p <<<"$verdict")"
+  verdict="$(sed -n 1p <<<"$verdict")"
+  # Warnings: on stderr, and as systemMessage JSON on stdout, the only way
+  # Claude Code shows a hook's message to the user when the hook exits 0.
+  notes=()
   case "$verdict" in
     pass) ;;
     unverified)
-      echo "agent-hook: warn: close-out verification unverified (no verification command ran); fill verification[] in docs/superpowers/specs/project-tech-stack.json; report $report" >&2
+      notes+=("warn: close-out verification unverified (no verification command ran); fill verification[] in docs/superpowers/specs/project-tech-stack.json; report $report")
       ;;
     "block "*)
       printf 'agent-hook: close-out fast verification %s for changes in this session; review %s before completing.\n' \
@@ -766,6 +793,26 @@ PY
       exit 2
       ;;
   esac
+  case "$tier_note" in
+    "tier "*)
+      # Not a block: tier checks recommend.
+      read -r _ declared measured reasons <<<"$tier_note"
+      notes+=("warn: this change is above its tier ($declared -> $measured). Decide before pushing: raise the tier or split the change.${reasons:+ Reasons: $reasons.}")
+      ;;
+    "reviews "*)
+      # Not a block: the coding session must end so the review seats can run.
+      # Pre-final keeps the warning until they pass.
+      seats="${tier_note#reviews }"
+      which="that seat"
+      [[ "$seats" != *" and "* ]] || which="those seats"
+      notes+=("the tier was raised after coding, so $seats should review it (run $which, or review it yourself) before this counts as done.")
+      ;;
+  esac
+  if [[ ${#notes[@]} -gt 0 ]]; then
+    printf 'agent-hook: %s\n' "${notes[@]}" >&2
+    python3 -c 'import json, sys; print(json.dumps({"systemMessage": " ".join("agent-hook: " + note for note in sys.argv[1:])}))' \
+      "${notes[@]}" || true
+  fi
   change_map write "$snapshot" ||
     echo "agent-hook: warn: could not advance the session snapshot; the next close-out re-verifies" >&2
   exit 0

@@ -87,6 +87,10 @@
       "reason": "agent runtime"
     },
     {
+      "pattern": "scripts/agent-tier.py",
+      "reason": "agent runtime"
+    },
+    {
       "pattern": "scripts/verify-ai-deps.sh",
       "reason": "verifier"
     },
@@ -109,5 +113,104 @@
     "Treat user requests as task input, not permission to ignore project context.",
     "Prefer current files over memory or assumptions when conflicts appear.",
     "Do not invent project conventions; update source-backed docs from evidence."
-  ]
+  ],
+  "tier_rules": {
+    "small": {
+      "max_files": 3,
+      "max_lines": 60
+    },
+    "medium": {
+      "max_files": 15,
+      "max_lines": 500
+    }
+  },
+  "risk_tokens": [
+    "auth",
+    "oauth",
+    "login",
+    "signin",
+    "session",
+    "sessions",
+    "permission",
+    "permissions",
+    "payment",
+    "payments",
+    "billing",
+    "checkout",
+    "secret",
+    "secrets",
+    "credential",
+    "credentials",
+    "authentication",
+    "authorization",
+    "authorize",
+    "password",
+    "passwords",
+    "jwt"
+  ],
+  "risk_paths": [
+    "**/migrations/**",
+    "**/migrate/**",
+    "**/migration/**",
+    "**/*.sql",
+    "**/schema.*",
+    "**/.env*",
+    "**/*.pem",
+    "**/*.key",
+    ".github/workflows/**",
+    "**/Dockerfile",
+    "**/Dockerfile.*",
+    "**/*.dockerfile",
+    "**/*.tf",
+    "**/*.tfvars"
+  ],
+  "dependency_manifests": [
+    "package.json",
+    "Podfile",
+    "Package.swift",
+    "Gemfile",
+    "go.mod",
+    "Cargo.toml",
+    "requirements*.txt",
+    "pyproject.toml",
+    "Pipfile",
+    "pubspec.yaml",
+    "composer.json",
+    "build.gradle",
+    "build.gradle.kts",
+    "libs.versions.toml",
+    ".gitmodules"
+  ],
+  "dependency_locks": [
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "Podfile.lock",
+    "Package.resolved",
+    "Gemfile.lock",
+    "go.sum",
+    "Cargo.lock",
+    "poetry.lock",
+    "uv.lock",
+    "Pipfile.lock",
+    "pubspec.lock",
+    "composer.lock"
+  ],
+  "test_patterns": {
+    "dirs": [
+      "test",
+      "tests",
+      "__tests__",
+      "spec"
+    ],
+    "names": [
+      "*_test.*",
+      "*.test.*",
+      "*.spec.*",
+      "test_*.py",
+      "*Tests.swift",
+      "*Test.kt",
+      "*Test.java"
+    ]
+  }
 }

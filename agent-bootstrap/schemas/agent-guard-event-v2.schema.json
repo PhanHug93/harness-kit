@@ -25,6 +25,53 @@
           }
         },
         "gate_status": { "enum": ["pass", "warn", "fail"] },
+        "tier": {
+          "type": "object",
+          "required": ["task", "declared", "suggested", "allowed", "measured", "reasons", "counted_files", "counted_lines", "excluded", "base", "status", "partial", "reason", "stale_reason", "coding_started_tier", "raised_after_coding", "missing_reviews"],
+          "description": "pre-final's change-tier check; status none when no tier is declared. Absent when the check was skipped or pre-final stopped before it.",
+          "additionalProperties": false,
+          "properties": {
+            "task": { "type": ["string", "null"], "description": "Task id of the tier record; null when there is none." },
+            "declared": { "enum": ["small", "medium", "large", null] },
+            "suggested": { "enum": ["small", "medium", "large", null] },
+            "allowed": { "enum": ["small", "medium", "large", null], "description": "The declared tier, or the suggested one when the user lowered it with a reason; null with no tier." },
+            "measured": { "enum": ["small", "medium", "large"], "description": "Tier of the change since the task's base, by the same rules as tier suggest." },
+            "reasons": { "type": "array", "items": { "type": "string" } },
+            "counted_files": { "type": "integer", "minimum": 0 },
+            "counted_lines": { "type": ["integer", "null"], "minimum": 0 },
+            "excluded": {
+              "type": "object",
+              "required": ["tests", "locks", "generated", "lines"],
+              "additionalProperties": false,
+              "properties": {
+                "tests": { "type": "integer", "minimum": 0 },
+                "locks": { "type": "integer", "minimum": 0 },
+                "generated": { "type": "integer", "minimum": 0 },
+                "lines": { "type": "integer", "minimum": 0 }
+              }
+            },
+            "base": {
+              "type": "object",
+              "required": ["sha", "subject", "commits_since", "kind", "ref"],
+              "additionalProperties": false,
+              "properties": {
+                "sha": { "type": "string" },
+                "subject": { "type": ["string", "null"] },
+                "commits_since": { "type": "integer", "minimum": 0 },
+                "kind": { "enum": ["merge-base", "start", "head", "empty"] },
+                "ref": { "type": ["string", "null"] }
+              }
+            },
+            "status": { "enum": ["ok", "below_suggested", "exceeded", "stale", "none"], "description": "exceeded: on a result that is not stale, measured above allowed or missing_reviews not empty; a recommendation that never changes the exit code. A partial result says so (partial, and pre-final names the cause)." },
+            "partial": { "type": "boolean", "description": "The full change could not be measured (pre-final warns with the cause), or no tier is declared." },
+            "reason": { "type": ["string", "null"], "description": "The reason recorded with tier set --reason." },
+            "stale_reason": { "type": ["string", "null"] },
+            "partial_reason": { "type": ["string", "null"], "description": "Why the measure is partial (null when it is not)." },
+            "coding_started_tier": { "enum": ["small", "medium", "large", null] },
+            "raised_after_coding": { "type": "boolean", "description": "The declared tier is above coding_started_tier (the tier when a change other than *.md or *.mdx was first seen)." },
+            "missing_reviews": { "type": "array", "items": { "enum": ["@gate", "@verify", "@audit"] }, "description": "After a raise: the reviews the new tier needs whose latest attempt does not pass. Also listed on a stale result; it makes the status exceeded only when the result is not stale." }
+          }
+        },
         "verification": {
           "type": "object",
           "required": ["ran", "available", "status"],

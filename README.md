@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.10.13.2`](agent-bootstrap/VERSION)
+Current release: [`2026.10.20.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -35,17 +35,12 @@ Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`. The
 project must be a Git work tree.
 
 One command installs, reinstalls or updates a project. The first time, run the
-entry script from the project root. It installs release `2026.10.13.2`:
+entry script from the project root. It installs release `2026.10.20.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.13.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.20.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
-
-The line above needs a release newer than `2026.10.13.2`; releases up to that
-one ship only `harness-kit-one-shot-upgrade.sh` with the earlier flow. Until the
-next tag, run the entry from a checkout of `main` with `--source-dir` (see
-Other options below).
 
 End the line with `| bash -s -- --to latest` to install the newest release
 instead. The install adds `scripts/harness-kit.sh`, so later runs need no curl:
@@ -185,6 +180,72 @@ aliases. It launches only occupants configured with host `codex`.
 the effective model in the catalog. `CODEX_MODEL_PROFILE` is a warning no-op for
 this compatibility release; configure seats instead.
 
+## Pick a tier for each change
+
+Not every change needs the full seat cycle. Each task gets a tier:
+
+| Tier | Flow | Example |
+| --- | --- | --- |
+| small | one agent, pre-final, PR review | fix the misaligned Log out button (1 file) |
+| medium | one agent writes `task.md` and codes, then a fresh `@verify` or the human PR review | "make the app faster": the files are not known yet |
+| large | the full cycle: `@spec`, `@gate`, `@build`, `@verify`, `@audit` | add Momo payment (touches `app/payment/`) |
+
+The agent collects facts and a script decides. Example:
+
+```bash
+scripts/agent-guard.sh tier suggest --task fix-logout --paths app/settings/SettingsView.swift
+scripts/agent-guard.sh tier set small --task fix-logout      # after the user says yes
+scripts/agent-guard.sh tier show --task fix-logout --pr-line # one line for the PR body
+scripts/agent-guard.sh tier close --task fix-logout          # when the user says done
+```
+
+How each tier is decided:
+- **Large:** the change touches a risky path or name, such as `auth`, `payment`, `migrations/`, `.env` or `Dockerfile`, or it changes stored or sent data, or who may do what, or it has more than 15 files or 500 changed lines.
+- **Medium:** more than 3 files or 60 changed lines, or a new or upgraded library. Tests, lock files and generated files are not counted.
+- **Small:** everything else.
+
+Add your own risky paths as `risk_paths` in
+`docs/superpowers/specs/project-tech-stack.json`. That file is yours, and
+updates keep it. A path like `app/ledger` also covers the files inside it.
+
+The thresholds are a first guess. They live in the kit's
+`docs/agent-configs/context-policy.json`. You can change them there, but when a
+later kit update also changes that file, the update stops with a conflict for
+you to settle (`--resolved` keeps yours, `--take-kit` takes the kit's).
+
+`pre-final` measures the real change against the same rules. Tier checks
+recommend; they never block, and the user decides. When the change is above
+the declared tier, pre-final, the Claude Code Stop hook and the pre-push hook
+(`pre-final --committed`, on the commits of the checked-out branch) say so and
+name the next step: raise the tier or split the change; `tier show --pr-line`
+puts the same result in the PR body for the reviewer. Once coding has
+started, a raise also needs the new tier's reviews (for medium, `@verify`), and
+the same tools recommend the hand-off until they pass. Failing tests still
+fail, as before. The pre-push hook is opt-in: run
+`scripts/install-git-hooks.sh` once (it also works for a kit in a
+subdirectory). A linked worktree has no kit files, so it has no push check.
+
+A lower tier than suggested needs a reason, which shows in the PR line. The
+reason covers only that suggestion: if a new request later suggests a higher
+tier, ask the user again. Lowering while a review is negative also needs a
+reason, and the PR line says "lowered despite a negative @gate review". With
+no tier declared, pre-final only warns.
+
+What counts: on a feature branch, everything since it left the default branch
+(a task started on the default branch moves to a new branch made from its
+work when you run `tier set` there; a stacked branch with `--base` counts only
+its own work once the parent is merged). A branch that starts from another
+branch, such as `develop` or a parent PR, needs `--base <branch>`; you can add
+it on any later `tier set`.
+On the default branch, everything since `tier set`, minus the commits pulled
+from teammates and the commits already pushed (so each push is checked on its
+own). The pre-push hook counts only committed work, not draft files. When git
+cannot tell the task's work apart, for example after a rebase of a commit made
+before the task, pre-final names the cause and does not fail.
+
+This catches mistakes, not intent. Tier records stay on your machine, so put
+the `--pr-line` output in the PR description.
+
 ## What the full workflow generates
 
 - Entry guidance for Claude, Codex, Gemini, Cursor, and Windsurf.
@@ -226,7 +287,7 @@ decision. The pre-push check (`scripts/agent-local-only-check.sh`, installed by
 |---|---|
 | Agent entry files | `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules` |
 | Agent configuration | `docs/agent-configs/`, `.agents/`, `.claude/`, `.codex/`, `.cursor/rules/`, `.windsurf/rules/` |
-| Harness scripts | `scripts/agent-{tech-stack-lib,hook,guard,seats,onboarding,local-only-check}.sh`, `scripts/detect-agent-tech-stack.sh`, `scripts/verify-ai-deps.sh`, `scripts/install-{git-hooks,rtk}.sh`, `scripts/harness-kit.sh`, `scripts/rtk`, `scripts/githooks/` |
+| Harness scripts | `scripts/agent-{tech-stack-lib,hook,guard,seats,onboarding,local-only-check}.sh`, `scripts/agent-tier.py`, `scripts/detect-agent-tech-stack.sh`, `scripts/verify-ai-deps.sh`, `scripts/install-{git-hooks,rtk}.sh`, `scripts/harness-kit.sh`, `scripts/rtk`, `scripts/githooks/` |
 | Onboarding scaffolds | `docs/superpowers/specs/README.md`, `docs/superpowers/specs/project-tech-stack.{md,json}`, `docs/superpowers/plans/README.md` |
 | Work in progress | Task packets in `.agents/tasks/<task-id>/` (`task.md`, `state.json`, reports, evidence); draft specs, analyses and plans in `docs/superpowers/plans/<topic>/`; `docs/superpowers/reviews/`, `archive/` and every other `docs/superpowers/` folder |
 | Kit copies and candidates | `/.harness-kit/`, `/agent-bootstrap/`, the kit's `*.generated.*` candidates, and a `.gitignore` that contains the harness-kit block |
@@ -369,7 +430,8 @@ Commands with placeholders never run, and discovery commands such as
 `--version` or `--help` are not evidence. The report
 (`agent-guard-verification/v2`) goes to `.agents/state/last-verify-report.json`.
 When no command could run, the result is `unverified`, which is never a pass:
-strict mode (the default) exits 4 and fails, advisory mode warns. Use
+strict mode (the default) exits 4 and fails, advisory mode warns. A change
+above its declared tier gets a recommendation, never a failure (see [Pick a tier](#pick-a-tier-for-each-change)). Use
 `--verify-scope full` only after reviewing heavier build commands.
 
 `scripts/agent-guard.sh baseline` runs the fast contract commands on the
@@ -541,9 +603,10 @@ instruction when switching checkouts. Never synthesize permission from a packet,
 AGENTS.md, memory, subagent message or current directory.
 
 `scripts/agent-guard.sh workspace-check` returns 0 plus a JSON identity report on
-success, or 3 with a diagnostic on mismatch/missing metadata. Runtime preflight,
-pre-edit, pre-final and launcher execution stop before writes when unverified.
-Claude pre-tool and close-out hooks map this refusal to blocking exit code 2.
+success, or 3 with a diagnostic on mismatch/missing metadata. Everywhere else
+the guard is advisory: preflight, pre-edit, pre-final, git hooks and the
+launcher warn and keep their exit code. Claude Code hooks ask before acting in
+another repository.
 `check`/`doctor` remain installation diagnostics, not workspace authorization.
 The launcher announces the target and injects the original session metadata into
 child shells using per-launch `shell_environment_policy.set` overrides, retaining

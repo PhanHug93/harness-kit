@@ -38,17 +38,18 @@ doc_lacks() {  # <generated file> <phrase>...
 journal_rule='with each commit that changes tracked files'
 severity_rule='Severity names its trigger condition and frequency, or is marked as an estimate.'
 modes=docs/agent-configs/agent-mode-contracts.md
-doc_has "$modes" "$severity_rule" 'recorded by the active seat' 'the seat the user is talking to' \
+doc_has "$modes" "$severity_rule" 'the close included' 'the seat the user is talking to' \
   'the only writes a non-owner seat' 'counts returns to' 'beyond the doubt-driven skill' \
-  '`@gate` runs `scripts/agent-guard.sh baseline` before its first round' 'lists the sections it changed' \
-  'not a git diff' 'The builder check:' 'is its hand-off check'
+  '`@gate` runs `scripts/agent-guard.sh baseline` before its first round' \
+  'not a git diff' 'The builder check:'
 doc_lacks "$modes" 'defined by the reviewing launcher' 'Seats do not spawn extra reviewer helpers' \
   'names the condition that triggers it' 'diff since that revision'
 doc_has docs/agent-configs/agent-handoff-schema.md 'is not `closed`' 'gate-review.md' 'verify-review.md' 'audit-review.md' \
   'An older `codex-review.md` keeps its two sections' \
   'listing the sections it changed'
 doc_has docs/agent-configs/agent-handoff-reference.md 'owner: user' '### `gate-review.md`' '### `verify-review.md`' \
-  '### `audit-review.md`' 'fail, error → fail; unverified → not_run' "the user's words"
+  '### `audit-review.md`' 'fail, error → fail; unverified → not_run' "the user's words" \
+  'Then ask the user to decide: close, another bounded pass, or a prior phase.'
 doc_lacks docs/agent-configs/agent-handoff-reference.md 'Mirroring is optional' 'budget → fail'
 doc_has AGENTS.md 'The seat that changed code' 'short, plain words, and an example instead of jargon' 'plans never leave' "$journal_rule" \
   'USER and detected blocks) only warns' 'entries follow `docs/agent-configs/task-journal.md`' \
@@ -57,6 +58,18 @@ for readme in README.md docs/agent-configs/bootstrap-multi-agent-project/README.
   grep -q 'detector-filled managed blocks' "$ROOT_DIR/$readme" || fail "$readme must list detector-filled managed blocks as project content"
 done
 doc_lacks AGENTS.md 'Before completion, run' 'do not commit them until' 'not a closure gate'
+# Change tiers: AGENTS.md says how to pick one; the contracts give each tier's
+# phases and the coding rule; the schema says who writes tier.json.
+doc_has AGENTS.md '## Pick a tier' 'scripts/agent-guard.sh tier suggest' 'a new request mid-task means' \
+  'tier suggest --task' 'When the user says done: `tier close --task <id>`'
+doc_has "$modes" 'A small or medium tier the user confirmed' \
+  'small: `analysis` -> `implementation` -> `resolution`' \
+  'medium: `analysis` -> `implementation` -> `verification` -> `resolution`' \
+  'Skipped or unavailable checks never pass.' 'missing or inconsistent verdict blocks coding'
+doc_has CLAUDE.md 'small or medium tier'
+doc_has docs/agent-configs/agent-handoff-schema.md 'tier.json' 'written only by `scripts/agent-guard.sh`' \
+  '`tier set` fills a null one with'
+doc_has .claude/commands/coding.md 'a confirmed small or medium tier'
 # The journal rule lives in AGENTS.md (read at startup), the journal guide and the plans README.
 for journal_doc in AGENTS.md docs/agent-configs/task-journal.md docs/superpowers/plans/README.md; do
   doc_has "$journal_doc" "$journal_rule"
@@ -80,6 +93,18 @@ doc_has .codex/codex-mode.sh 'gate-review.md' 'scripts/agent-guard.sh baseline' 
 doc_lacks .codex/codex-mode.sh 'codex-review.md' 'verify-review.md' 'Judge the spec and plan' 'diff since' \
   'Severity must name' 'mark the severity as an estimate' "$severity_rule"
 doc_has .codex/README.md "@build's hand-off check"
+doc_has .claude/commands/planning.md 'Enter = keep' '--answer' 'tier suggest'
+doc_has .claude/commands/coding.md 'after task.md' 'Enter = keep' '--answer'
+doc_has .codex/codex-mode.sh 'End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @spec' \
+  'tier suggest --task <id> --by @gate' 'Add scope goes back to @spec' 'say '"'"'not recorded'"'"' if read-only'
+# Every tier checkpoint passes the facts it knows: a suggest with no --paths
+# would judge "files unknown".
+doc_has .codex/codex-mode.sh '--by @spec --paths <files>' '--by @gate --paths <files>' '--by @build --paths <files>' \
+  'l = large · m = medium · s = small'
+doc_lacks .codex/codex-mode.sh 'Enter = keep · m · s'
+doc_has docs/agent-configs/tier-medium.md '--by @build --paths <files>' '`--unclear`'
+doc_has .claude/commands/planning.md '--by @spec --paths <files>'
+doc_has .claude/commands/coding.md '--paths <files>` (and the AGENTS.md flags when true)'
 doc_has docs/agent-configs/RECOVERY.md 'scripts/harness-kit.sh --take-kit' 'agent-init --apply-candidates --only' \
   'bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --apply-candidates --only'
 doc_lacks docs/agent-configs/RECOVERY.md 'scripts/bootstrap-multi-agent-project.sh'
@@ -709,7 +734,9 @@ grep -q 'FAIL.*roster' "$TMP_ROOT/launch.out" && fail "roster drift must be a wa
 budget="$TMP_ROOT/budget"
 mkdir -p "$budget"
 git -C "$budget" init -q
-bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$budget" --workflow full >/dev/null 2>&1
+# A fixed name: the project name is counted text, so the kit numbers stay stable.
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$budget" --workflow full \
+  --project-name budget-fixture >/dev/null 2>&1
 budget_run() {  # <out file> <verifier args...>; sets rc
   local out="$1"; shift
   rc=0
@@ -750,6 +777,31 @@ base_core_kit="$(budget_field "$base_json" core kit)"
 base_core_project="$(budget_field "$base_json" core project)"
 base_on_demand="$(budget_field "$base_json" on_demand estimate)"
 base_on_demand_kit="$(budget_field "$base_json" on_demand kit)"
+# Change tiers: the tier text is paid for by trimming duplicates; the kit text
+# must not grow past the 5203-token baseline it had before tiers.
+[[ "$base_on_demand_kit" -le 5203 ]] || fail "on-demand kit text must be at most 5203 tokens, got $base_on_demand_kit"
+# Budget by tier: small is core, large is on-demand, medium adds tier-medium.md
+# (reported only; large sessions never read it).
+python3 -B - "$base_json" "$budget/docs/agent-configs/tier-medium.md" <<'PY' || fail "tier budgets: $(cat "$base_json")"
+import json, sys
+budget = json.load(open(sys.argv[1]))["context_budget"]
+raw = open(sys.argv[2], "rb").read()
+words = len(raw.decode("utf-8").split())
+medium_doc = int(max(len(raw) / 4, words * 1.3))
+tiers = budget["tiers"]
+assert tiers["small"]["estimate"] == budget["core"]["estimate"], tiers
+assert tiers["large"]["estimate"] == budget["on_demand"]["estimate"], tiers
+assert tiers["medium"]["estimate"] == tiers["small"]["estimate"] + medium_doc, (tiers, medium_doc)
+assert (tiers["small"]["amber"], tiers["small"]["gate"]) == (3800, 4000), tiers
+assert (tiers["large"]["amber"], tiers["large"]["gate"]) == (5900, 6200), tiers
+assert "gate" not in tiers["medium"] and "amber" not in tiers["medium"], tiers
+assert tiers["large"]["kit"] <= 5203, tiers
+PY
+saved_target="$target"; target="$budget"
+doc_has docs/agent-configs/tier-medium.md '## Planned files' 'same_vendor' 'reviewer_model: human' \
+  'CODEX_REASONING_EFFORT=high' 'tier close'
+doc_has AGENTS.md 'tier-medium.md'
+target="$saved_target"
 budget_run "$TMP_ROOT/budget-only.json" --json --context-budget
 python3 -B -c 'import json,sys; a, b = (json.load(open(p))["context_budget"] for p in sys.argv[1:]); assert a == b, (a, b)' \
   "$base_json" "$TMP_ROOT/budget-only.json" || fail "--context-budget must report the full run's numbers"
@@ -815,7 +867,9 @@ modbig="$TMP_ROOT/modbig"
 mkdir -p "$modbig"
 git -C "$modbig" init -q
 for i in $(seq -w 1 40); do printf 'include(":feature-%s")\n' "$i"; done > "$modbig/settings.gradle.kts"
-bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$modbig" --workflow full >/dev/null 2>&1
+# The same name as the budget target, so only the modules differ.
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$modbig" --workflow full \
+  --project-name budget-fixture >/dev/null 2>&1
 grep -Fq -- '- `:feature-40`' "$modbig/AGENTS.md" || fail "the detector must list the 40 modules in AGENTS.md"
 (cd "$modbig" && scripts/verify-ai-deps.sh --json --context-budget </dev/null >"$TMP_ROOT/budget-modules.json" 2>&1) ||
   fail "detected modules must never fail the verifier: $(cat "$TMP_ROOT/budget-modules.json")"

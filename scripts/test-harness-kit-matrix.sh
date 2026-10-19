@@ -22,6 +22,9 @@ fail() {
 
 ENTRY="$ROOT_DIR/agent-bootstrap/harness-kit-one-shot.sh"
 VERSION="$(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION" | tr -d '[:space:]')"
+# A release renames the shipped migrations from next-<slug> to <version>-<slug>.
+TOEXCL_ID="$(basename "$(compgen -G "$ROOT_DIR/agent-bootstrap/migrations/*-ignore-block-to-exclude.sh" | head -1)" .sh)"
+[[ "$TOEXCL_ID" == *-ignore-block-to-exclude ]] || fail "shipped migration ignore-block-to-exclude is missing"
 MARKER='# >>> multi-agent bootstrap local state >>>'
 OLD_KIT="$TMP_ROOT/old-kit"
 mkdir -p "$OLD_KIT"
@@ -183,7 +186,7 @@ for kind in none web mobile; do
   while IFS= read -r rel; do
     [[ -n "$rel" ]] && takes+=(--take-kit "$rel")
   done < <(jget "$REPORT" '"\n".join(c["path"] for c in d["files"]["conflicts"] if c["path"].startswith(("docs/agent-configs/project-", "docs/superpowers/specs/project-tech-stack")))')
-  hk "$dir" --skip-verify --resolved .claude/commands/coding.md --accept next-ignore-block-to-exclude \
+  hk "$dir" --skip-verify --resolved .claude/commands/coding.md --accept "$TOEXCL_ID" \
     --take-kit all ${takes[@]+"${takes[@]}"}
   expect 0 "$kind: --resolved"
   grep -qx 'legacy patch' "$dir/.claude/commands/coding.md" || fail "$kind: --resolved must keep the local file"

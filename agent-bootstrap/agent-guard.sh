@@ -157,11 +157,12 @@ PY
 case "${1:-}" in
   workspace-check) workspace_check; exit $? ;;
   preflight) workspace_check entry >/dev/null || true ;;
-  pre-edit|pre-final|baseline|skill-note) workspace_check quiet >/dev/null || true ;;
+  pre-edit|pre-final|baseline|skill-note|tier) workspace_check quiet >/dev/null || true ;;
 esac
 
 POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
 PROJECT_TECH_STACK_FILE="$PROJECT_ROOT/docs/superpowers/specs/project-tech-stack.json"
+TIER_PROGRAM="$SCRIPT_DIR/agent-tier.py"
 # Resolve a usable state directory so the guard still works when .agents is
 # read-only (e.g. sandboxed runs). Order: $AGENT_STATE_DIR, .agents/state, then
 # a per-project dir under TMPDIR. Falls back to advisory-only if none is usable.
@@ -227,6 +228,20 @@ SESSION_EVENTS="$STATE_DIR/session-events.jsonl"
 EMIT_CLOSEOUT=false
 GATE_STATUS=fail
 RUN_VERIFY_FLAG=false
+# Set by pre-final's tier check (tier_measure): ok|below_suggested|exceeded|
+# stale|none, the tier block (one JSON line) for the report and the pre_final
+# event (empty when the check was skipped), the closing lines, and why it is
+# exceeded (size: above the tier; reviews <seats>: raised after coding, and
+# the reviews of those seats have not passed).
+TIER_STATUS=none
+TIER_BLOCK=""
+TIER_SUMMARY=""
+TIER_KIND=""
+TIER_DETAILS=""
+# Set by run_detected_verification, which always returns 0 so that set -e
+# still stops on an error inside it: 0 pass (or advisory), 1 fail, 2 error,
+# 3 budget exhausted, 4 unverified.
+VERIFY_CODE=0
 # Set only by `baseline` (never inherited from the environment).
 BASELINE_KEY=""
 BASELINE_TOOLCHAIN=""
@@ -243,9 +258,9 @@ AGENT_INSTRUCTIONS=()
 
 usage() {
   printf '%s\n' \
-    "Usage: scripts/agent-guard.sh workspace-check|preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full]|baseline [--refresh] [--advisory] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor" \
-    "" \
-    "Lite context guard for generated multi-agent harness projects."
+    "Usage: scripts/agent-guard.sh workspace-check|preflight|check|pre-edit [--advisory|--strict] [--ack TEXT] <path>|pre-final [--advisory|--strict] [--run-verify] [--verify-scope fast|full] [--task <id>] [--committed]|baseline [--refresh] [--advisory] [--verify-scope fast|full]|skill-note NAME|status|stats [--json]|doctor"
+  tier_synopsis "       "
+  printf '%s\n' "" "Lite context guard for generated multi-agent harness projects."
 }
 
 fail() {
@@ -482,6 +497,7 @@ default_protected_paths() {
     "docs/agent-configs/**" "agent context" \
     "docs/superpowers/specs/**" "durable specs" \
     "scripts/agent-*.sh" "agent runtime" \
+    "scripts/agent-tier.py" "agent runtime" \
     "scripts/verify-ai-deps.sh" "verifier" \
     "scripts/install-rtk.sh" "tool install" \
     "scripts/rtk" "git wrapper"
@@ -710,7 +726,7 @@ is_bootstrap_generated_base() {
     docs/superpowers/specs/*|docs/superpowers/plans/*)
       return 0
       ;;
-    scripts/agent-*.sh|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
       return 0
       ;;
     *)
@@ -1184,7 +1200,7 @@ append_pre_final_event() {
   local verification_ran="${2:-false}"
   [[ "$STATE_WRITABLE" == "true" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
+  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" PROJECT_ROOT="$PROJECT_ROOT" TIER_BLOCK="$TIER_BLOCK" python3 - <<'PY'
 import json
 import os
 import pathlib
@@ -1297,6 +1313,11 @@ event = {
     "gate_status": gate,
     "verification": verification,
 }
+if os.environ.get("TIER_BLOCK"):
+    try:
+        event["tier"] = json.loads(os.environ["TIER_BLOCK"])
+    except ValueError:
+        pass
 events_path.parent.mkdir(parents=True, exist_ok=True)
 with events_path.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(event, separators=(",", ":")) + "\n")
@@ -1465,14 +1486,17 @@ PY
 run_detected_verification() {
   local strict="$1"
   local verify_scope="$2"
+  VERIFY_CODE=0
   reset_verify_report
   if [[ "$STATE_WRITABLE" != "true" ]]; then
     no_verification_ran "$strict" "state dir not writable" \
-      "set AGENT_STATE_DIR to a writable directory" || return $?
+      "set AGENT_STATE_DIR to a writable directory" || VERIFY_CODE=$?
     return 0
   fi
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to run detected verification"
-  local detector_json="" code=0 total contract_state runner_mode=run
+  local detector_json="" code=0 total contract_state runner_mode=run report_tier=""
+  # pre-final's tier check, known before the run, is written with the report.
+  [[ "$TIER_STATUS" == "none" ]] || report_tier="$TIER_BLOCK"
   contract_state="$(contract_verification_state)"
   if [[ "$contract_state" == "no" ]]; then
     if [[ -x "$DETECTOR" ]]; then
@@ -1506,8 +1530,10 @@ run_detected_verification() {
   VERIFY_TIMEOUT_SECONDS="$VERIFY_TIMEOUT_SECONDS" \
   VERIFY_TOTAL_TIMEOUT_SECONDS="$total" \
   VERIFY_SCOPE="$verify_scope" \
+  REPORT_TIER="$report_tier" \
   PROJECT_ROOT="$PROJECT_ROOT" \
   python3 - <<'PY' || code=$?
+import contextlib
 import json
 import math
 import os
@@ -1517,6 +1543,7 @@ import signal
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 root = pathlib.Path(os.environ["PROJECT_ROOT"])
@@ -1581,9 +1608,28 @@ def write_report(status, extra=None):
         report["toolchain"] = json.loads(os.environ.get("BASELINE_TOOLCHAIN") or '"undeclared"')
     if extra:
         report.update(extra)
-    partial = report_path.with_name(report_path.name + ".tmp")
-    partial.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    os.replace(partial, report_path)
+    if os.environ.get("REPORT_TIER"):
+        try:
+            report["tier"] = json.loads(os.environ["REPORT_TIER"])
+        except ValueError as exc:
+            print(f"agent-guard: warn: the tier check is not in the report: {exc}", file=sys.stderr)
+    # Written once: a temp file of its own in the same directory, then rename,
+    # so parallel runs never share a temp file or leave a partial report.
+    try:
+        mask = os.umask(0)
+        os.umask(mask)
+        fd, partial = tempfile.mkstemp(dir=str(report_path.parent), prefix="." + report_path.name + ".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(report, indent=2) + "\n")
+            os.chmod(partial, 0o666 & ~mask)
+            os.replace(partial, report_path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(partial)
+            raise
+    except Exception as exc:
+        print(f"agent-guard: warn: could not write {report_path}: {exc}", file=sys.stderr)
 
 
 def write_error_report(message):
@@ -1795,7 +1841,7 @@ PY
       printf 'agent-guard: verify_report=%s\n' "$VERIFY_REPORT"
     fi
     no_verification_ran "$strict" "missing detector" \
-      "fill verification[] in docs/superpowers/specs/project-tech-stack.json" || return $?
+      "fill verification[] in docs/superpowers/specs/project-tech-stack.json" || VERIFY_CODE=$?
     return 0
   fi
   # The runner has returned: only now is the verification recorded as run.
@@ -1813,7 +1859,8 @@ PY
   fi
   if [[ "$strict" == "true" ]]; then
     GATE_STATUS=fail
-    return "$code"
+    VERIFY_CODE="$code"
+    return 0
   fi
   GATE_STATUS=warn
   case "$code" in
@@ -1824,10 +1871,256 @@ PY
   return 0
 }
 
+# Pre-final's change-tier check. tier_evaluate runs `scripts/agent-tier.py
+# measure` for the task (default: the one in .agents/tasks/ACTIVE) and prints
+# the status, the tier block (one JSON line), the summary line, the kind
+# ("size", "reviews <seats>" or empty) and, when exceeded, the reason and
+# next-step lines.
+# Allowed is the declared tier, or the suggestion a stored reason covers.
+# exceeded, on a result that is not stale (a partial one says so): measured
+# above allowed (size), or the tier was raised after coding and a review it
+# needs has no passing latest attempt (reviews). It warns for none, stale and
+# below_suggested. A measure that cannot run (or takes over 30 s) warns once
+# ("tier check skipped") and prints status none only.
+tier_evaluate() {
+  TIER_PROGRAM="$TIER_PROGRAM" TIER_TASK="$1" TIER_COMMITTED="${2:-false}" PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+TIERS = ("small", "medium", "large")
+REVIEW_FILES = {"@gate": "gate-review.md", "@verify": "verify-review.md", "@audit": "audit-review.md"}
+# The reviews a raise after coding needs (as in scripts/agent-tier.py).
+RAISE_NEEDS = {"small": (), "medium": ("@verify",), "large": ("@gate", "@verify", "@audit")}
+TIMEOUT = 30
+for stream in (sys.stdout, sys.stderr):
+    stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
+def warn(text):
+    print(f"agent-guard: warn: {text}", file=sys.stderr, flush=True)
+
+
+def plural(count, word):
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def one_line(text):
+    return " ".join(str(text).split())
+
+
+def joined(items):
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def skip(why):
+    warn(f"tier check skipped: {why}")
+    print("none")
+    sys.exit(0)
+
+
+def valid(m):
+    return (isinstance(m, dict) and m.get("tier") in TIERS and m.get("status") in ("open", "stale", "none")
+            and isinstance(m.get("counted_files"), int) and isinstance(m.get("partial"), bool)
+            and isinstance(m.get("base"), dict) and isinstance(m.get("reasons"), list))
+
+
+argv = [sys.executable or "python3", "-I", os.environ["TIER_PROGRAM"], "measure"]
+if os.environ.get("TIER_TASK"):
+    argv += ["--task", os.environ["TIER_TASK"]]
+if os.environ.get("TIER_COMMITTED") == "true":
+    argv.append("--committed")
+try:
+    run = subprocess.run(argv, cwd=os.environ["PROJECT_ROOT"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT)
+except subprocess.TimeoutExpired:
+    skip(f"the measure took over {TIMEOUT} s")
+except OSError as exc:
+    skip(f"cannot run scripts/agent-tier.py ({exc.strerror or exc})")
+err = run.stderr.decode("utf-8", "replace")
+if run.returncode != 0:
+    lines = [line for line in err.splitlines() if line.strip()]
+    why = lines[-1] if lines else "no message"
+    for prefix in ("agent-guard: ERROR: ", "agent-guard: warn: "):
+        if why.startswith(prefix):
+            why = why[len(prefix):]
+    skip(f"{one_line(why)} (exit {run.returncode})")
+# Its own warnings (a bad pattern, no file locks) stay visible.
+sys.stderr.write(err)
+sys.stderr.flush()
+try:
+    m = json.loads(run.stdout.decode("utf-8", "surrogateescape"))
+except ValueError:
+    m = None
+if not valid(m):
+    skip("the measure printed no valid result")
+
+measured, partial, rank = m["tier"], m["partial"], TIERS.index
+declared = m.get("declared") if m.get("declared") in TIERS else None
+suggested = m.get("suggested") if m.get("suggested") in TIERS else None
+reason = m.get("reason") if isinstance(m.get("reason"), str) else None
+covers = m.get("reason_covers") if m.get("reason_covers") in TIERS else None
+allowed, lowered = declared, False
+if declared and covers and rank(declared) < rank(covers) and reason:
+    # A lowering the user chose on purpose: it covers the suggestion it was
+    # given against, never a later one (spec rule 1).
+    allowed, lowered = covers, True
+started = m.get("coding_started_tier") if m.get("coding_started_tier") in TIERS else None
+raised = m.get("raised_after_coding") is True and started is not None
+missing = [seat for seat in REVIEW_FILES if raised and seat in (m.get("missing_reviews") or [])]
+over = declared is not None and rank(measured) > rank(allowed)
+size = plural(m["counted_files"], "file") + (", partial" if partial else "")
+details, kind = [], ""
+if m["status"] == "none" or declared is None:
+    status, summary = "none", ""
+    warn(f"no tier declared; measured: {measured} ({size}); run scripts/agent-guard.sh tier suggest")
+elif m["status"] == "stale":
+    why = one_line(m.get("stale_reason") or "unknown")
+    status, summary = "stale", f"TIER: stale ({why}; measured {measured})"
+    warn(f"tier is stale ({why}); measured: {measured} ({size}); the tier is not checked")
+elif over or missing:
+    # Tier checks recommend, never block (spec, pre-final): the reasons and
+    # the next steps are a warning.
+    status = "exceeded"
+    kind = "reviews " + joined(missing) if missing else "size"
+    summary = (f"TIER: declared {declared}" + (f" (allowed {allowed})" if lowered else "") + f", measured {measured}"
+               + (", partial" if partial else ""))
+    if over:
+        details = [f"- {one_line(item)}" for item in m["reasons"]]
+        # A raise above the tier coding started at needs that tier's reviews.
+        seats = list(RAISE_NEEDS[measured]) if started and rank(measured) > rank(started) else []
+        needs = f"; the raise then needs {joined(seats)} to pass" if seats else ""
+        details.append(f"Next: ask the user to raise the tier (scripts/agent-guard.sh tier set {measured} "
+                       f"--task {m.get('task')}{needs}) or split the change.")
+        if not m.get("base_ref") and m.get("branch") and m.get("branch") != m.get("default_name"):
+            details.append(f"Next: if this branch starts from another branch, give its base: scripts/agent-guard.sh "
+                           f"tier set {declared} --task {m.get('task')} --base <branch>.")
+        if m.get("move_hint") is True:
+            details.append("Next: if you moved files, git add them, so each move counts once.")
+        if partial:
+            # The count may be off: say why next to the recommendation.
+            cause = one_line(m.get("partial_reason") or "unknown")
+            details = [f"{line} (partial: {cause})" if line.startswith("Next:") else line for line in details]
+    if missing:
+        summary += f"; raised after coding: {joined(missing)} review{'s' if len(missing) > 1 else ''} still needed"
+        files = joined([REVIEW_FILES[seat] for seat in missing])
+        details.append(f"Next: the tier was raised after coding started ({started} -> {declared}); the latest "
+                       f"attempt{'s' if len(missing) > 1 else ''} in {files} must pass, then run pre-final again.")
+elif lowered:
+    status = "below_suggested"
+    summary = f"TIER: {declared} below suggested {covers} (reason: {one_line(reason)})"
+    warn(f"tier {declared} is below the suggested {covers} (reason: {one_line(reason)})")
+else:
+    status, summary = "ok", f"TIER: {declared} ok (measured {measured}, {size})"
+block = {
+    "task": m.get("task"),
+    "declared": declared,
+    "suggested": suggested,
+    "allowed": allowed,
+    "measured": measured,
+    "reasons": [str(item) for item in m["reasons"]],
+    "counted_files": m["counted_files"],
+    "counted_lines": m.get("counted_lines"),
+    "excluded": m.get("excluded"),
+    "base": m["base"],
+    "status": status,
+    "partial": partial,
+    "reason": reason,
+    "stale_reason": m.get("stale_reason"),
+    "partial_reason": m.get("partial_reason") if partial else None,
+    "coding_started_tier": started,
+    "raised_after_coding": raised,
+    "missing_reviews": missing,
+}
+if status not in ("none", "stale") and partial:
+    # Spec rule 4: a partial measure names its cause.
+    warn(f"the tier measure is partial ({one_line(m.get('partial_reason') or 'unknown')}); "
+         f"measured: {measured} ({size}); the count may be off")
+if (status != "none" and status != "stale" and m.get("suggested_after_set") is True and suggested
+        and rank(suggested) > rank(declared)):
+    warn(f"a newer suggestion ({suggested}) came after the user chose {declared}; ask the user to confirm the tier again")
+print(status)
+print(json.dumps(block, separators=(",", ":")))
+print(summary)
+print(kind)
+for line in details:
+    print(line)
+PY
+}
+
+# Sets TIER_STATUS, TIER_BLOCK, TIER_SUMMARY, TIER_KIND and TIER_DETAILS for pre-final
+# (see tier_evaluate); $2 true counts the commits alone. Never fails: a check
+# that cannot run counts as none.
+tier_measure() {
+  local out=""
+  TIER_STATUS=none TIER_BLOCK="" TIER_SUMMARY="" TIER_KIND="" TIER_DETAILS=""
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "tier check skipped: python3 is missing"
+    return 0
+  fi
+  if [[ ! -f "$TIER_PROGRAM" ]]; then
+    warn "tier check skipped: scripts/agent-tier.py is missing"
+    return 0
+  fi
+  out="$(tier_evaluate "$1" "${2:-false}")" || out=""
+  {
+    IFS= read -r TIER_STATUS || true
+    IFS= read -r TIER_BLOCK || true
+    IFS= read -r TIER_SUMMARY || true
+    IFS= read -r TIER_KIND || true
+    TIER_DETAILS="$(cat)"
+  } <<<"$out"
+  case "$TIER_STATUS" in
+    ok|below_suggested|exceeded|stale|none) ;;
+    *)
+      warn "tier check skipped: the tier check failed"
+      TIER_STATUS=none TIER_BLOCK="" TIER_SUMMARY="" TIER_KIND="" TIER_DETAILS=""
+      ;;
+  esac
+}
+
+# The tier lines that end pre-final; the summary is the last line, so a
+# caller that shows only the last line (the Codex close-out) sees the tier
+# and any verification failure. Exceeded: the reason and next-step lines,
+# then the summary, on stderr. Otherwise the summary alone, on stdout when
+# the exit code is 0. Nothing when no tier is declared.
+tier_close_out() {
+  local code="$1" summary="$TIER_SUMMARY" verification="" next
+  [[ -n "$summary" ]] || return 0
+  case "$code" in
+    0) ;;
+    1) verification="; verification fail (exit 1)" ;;
+    3) verification="; verification budget (exit 3)" ;;
+    4) verification="; verification unverified (exit 4)" ;;
+    *) verification="; verification error (exit $code)" ;;
+  esac
+  if [[ "$TIER_STATUS" != "exceeded" ]]; then
+    if [[ "$code" -eq 0 ]]; then
+      printf '%s\n' "$summary"
+    else
+      printf '%s%s\n' "$summary" "$verification" >&2
+    fi
+    return 0
+  fi
+  # A recommendation, never a failure: the next step the user decides on.
+  next="raise the tier or split the change"
+  if [[ "$TIER_KIND" == "reviews "* ]]; then
+    next="hand off to ${TIER_KIND#reviews } (or ask the user); do not write review files yourself"
+  fi
+  summary="$summary (recommended: $next)$verification"
+  printf '%s\n' "$TIER_DETAILS" "$summary" >&2
+}
+
 pre_final() {
   local strict=true
   local run_verify=false
   local verify_scope=""
+  local task=""
+  local committed=false
+  # The letters are spelled out: a range like a-z can follow the locale.
+  local task_char='[abcdefghijklmnopqrstuvwxyz0123456789]'
+  local task_pattern="^${task_char}+(-${task_char}+)*\$"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --strict)
@@ -1849,6 +2142,18 @@ pre_final() {
           *) fail "--verify-scope must be fast or full" ;;
         esac
         shift 2
+        ;;
+      --task)
+        task="${2:-}"
+        [[ "$task" =~ $task_pattern ]] ||
+          fail "pre-final --task needs a task id: lowercase letters, digits and dashes (like fix-login)"
+        shift 2
+        ;;
+      --committed)
+        # The pre-push hook: the tier counts what the push sends, not
+        # uncommitted files.
+        committed=true
+        shift
         ;;
       -*)
         fail "unknown pre-final option: $1"
@@ -1883,10 +2188,24 @@ pre_final() {
   if [[ -n "$protected_changes" ]]; then
     warn "protected-path changes detected; confirm they were intended before claiming completion"
   fi
+  # Measured before any verification command runs: commands can create files.
+  tier_measure "$task" "$committed"
+  local vcode=0 code
   if [[ "$run_verify" == "true" ]]; then
     run_detected_verification "$strict" "$verify_scope"
+    vcode="$VERIFY_CODE"
   fi
-  printf 'agent-guard: pre-final ok (context_pack=%s)\n' "$(context_pack_display)"
+  # The exit code is the verification's. Tier checks recommend, never block
+  # (spec, pre-final): an exceeded tier only warns.
+  code="$vcode"
+  if [[ "$TIER_STATUS" == "exceeded" && "$GATE_STATUS" == "pass" ]]; then
+    GATE_STATUS=warn
+  fi
+  if [[ "$code" -eq 0 ]]; then
+    printf 'agent-guard: pre-final ok (context_pack=%s)\n' "$(context_pack_display)"
+  fi
+  tier_close_out "$code"
+  [[ "$code" -eq 0 ]] || exit "$code"
 }
 
 # Prints three lines: the baseline key, the cached "<status> <commit>" (or
@@ -2071,7 +2390,10 @@ baseline() {
   BASELINE_KEY="$key"
   BASELINE_TOOLCHAIN="$toolchain"
   # Strict here so a red result keeps its exit code; advisory applies below.
-  run_detected_verification true "$verify_scope" || code=$?
+  # "|| true" keeps the old baseline contract: a setup failure inside the
+  # runner is reported as a baseline error, not an abort.
+  run_detected_verification true "$verify_scope" || true
+  code="$VERIFY_CODE"
   # A report already recorded as dirty is never reused; a clean one must
   # still describe the tree after the run.
   commit="$TREE_COMMIT" dirty="$TREE_DIRTY"
@@ -2213,6 +2535,32 @@ else:
 PY
 }
 
+# Change tiers live in scripts/agent-tier.py (rules, records and options);
+# this guard only passes the project paths. tier_synopsis prints the same
+# lines as `tier --help`, for the main usage.
+tier_synopsis() {
+  local line
+  for line in \
+    "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear]" \
+    "tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]" \
+    "tier show [--task <id>] [--pr-line]" \
+    "tier close --task <id>"; do
+    printf '%sscripts/agent-guard.sh %s\n' "$1" "$line"
+  done
+}
+
+tier() {
+  command -v python3 >/dev/null 2>&1 || fail "python3 is required for tier"
+  [[ -f "$TIER_PROGRAM" ]] || fail "missing scripts/agent-tier.py; run the harness-kit update"
+  case "${1:-}" in
+    --root|--root=*|--policy|--policy=*|--tech-stack|--tech-stack=*)
+      fail "tier: $1 is not an option here; the project paths are fixed"
+      ;;
+  esac
+  # -I: never import modules from the project's scripts/ folder.
+  python3 -I "$TIER_PROGRAM" "$@"
+}
+
 case "${1:-}" in
   preflight)
     shift || true
@@ -2249,6 +2597,10 @@ case "${1:-}" in
   doctor)
     shift || true
     check_guard "$@"
+    ;;
+  tier)
+    shift || true
+    tier "$@"
     ;;
   -h|--help|help|"")
     usage

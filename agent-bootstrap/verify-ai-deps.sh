@@ -147,7 +147,7 @@ is_bootstrap_generated_base() {
     docs/superpowers/specs/*|docs/superpowers/plans/*)
       return 0
       ;;
-    scripts/agent-*.sh|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
       return 0
       ;;
     *)
@@ -408,7 +408,15 @@ check_context_budget() {
   if [[ -n "$largest_name" ]]; then
     sections_json="${sections_json:+$sections_json,}\"$(json_escape "$largest_name")\""
   fi
-  CONTEXT_BUDGET_JSON="{\"core\":{$(budget_json "$core_total" "$core_kit" "$core_project" 3800 4000 "$core_status" "$core_kit_status")},\"on_demand\":{$(budget_json "$od_total" "$od_kit" "$od_project" 5900 6200 "$od_status" "$od_kit_status"),\"reference_sections\":[$sections_json]}}"
+  # Tiers: small reads the core files, medium adds tier-medium.md (reported
+  # only, no gate), large reads what on-demand counts (never tier-medium.md).
+  local med_kit med_project med_total
+  read -r med_kit med_project < <(split_file_estimate docs/agent-configs/tier-medium.md)
+  med_kit=$((core_kit + med_kit))
+  med_project=$((core_project + med_project))
+  med_total=$((med_kit + med_project))
+  ok "context tiers: small $core_total, medium $med_total (reported only), large $od_total tokens"
+  CONTEXT_BUDGET_JSON="{\"core\":{$(budget_json "$core_total" "$core_kit" "$core_project" 3800 4000 "$core_status" "$core_kit_status")},\"on_demand\":{$(budget_json "$od_total" "$od_kit" "$od_project" 5900 6200 "$od_status" "$od_kit_status"),\"reference_sections\":[$sections_json]},\"tiers\":{\"small\":{$(budget_json "$core_total" "$core_kit" "$core_project" 3800 4000 "$core_status" "$core_kit_status")},\"medium\":{\"estimate\":$med_total,\"kit\":$med_kit,\"project\":$med_project},\"large\":{$(budget_json "$od_total" "$od_kit" "$od_project" 5900 6200 "$od_status" "$od_kit_status")}}}"
 }
 
 finish_report() {
@@ -517,9 +525,36 @@ if isinstance(context_policy, dict):
             "protected_paths",
             "change_protocol",
             "agent_instructions",
+        ) + tuple(
+            key
+            for key in ("tier_rules", "risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "test_patterns")
+            if key in context_policy
         ),
         "context policy",
     )
+    def string_list(value):
+        return isinstance(value, list) and all(non_empty_string(entry) for entry in value)
+    if "tier_rules" in context_policy:
+        tier_rules = context_policy.get("tier_rules")
+        require(isinstance(tier_rules, dict) and set(tier_rules) == {"small", "medium"}, "context policy tier_rules must be an object with small and medium")
+        if isinstance(tier_rules, dict):
+            for tier_name in ("small", "medium"):
+                limits = tier_rules.get(tier_name)
+                require(
+                    isinstance(limits, dict)
+                    and set(limits) == {"max_files", "max_lines"}
+                    and all(isinstance(limits[key], int) and not isinstance(limits[key], bool) and limits[key] >= 0 for key in limits),
+                    f"context policy tier_rules.{tier_name} must have integer max_files and max_lines",
+                )
+    for list_key in ("risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks"):
+        if list_key in context_policy:
+            require(string_list(context_policy.get(list_key)), f"context policy {list_key} must be an array of non-empty strings")
+    if "test_patterns" in context_policy:
+        test_patterns = context_policy.get("test_patterns")
+        require(
+            isinstance(test_patterns, dict) and set(test_patterns) == {"dirs", "names"} and all(string_list(value) for value in test_patterns.values()),
+            "context policy test_patterns must have dirs and names arrays of non-empty strings",
+        )
     require(context_policy.get("schema") == "agent-context-policy/v1", "context policy schema must be agent-context-policy/v1")
     require(non_empty_string(context_policy.get("version")), "context policy version must be a non-empty string")
     require(context_policy.get("mode") == "lite", "context policy mode must be lite")
@@ -567,6 +602,7 @@ expected_schema_ids = {
     "agent-guard-verification-v2.schema.json": "https://agent-bootstrap.local/schemas/agent-guard-verification-v2.schema.json",
     "harness-project-knowledge-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-project-knowledge-v1.schema.json",
     "harness-kit-run-report-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-kit-run-report-v1.schema.json",
+    "harness-tier-v1.schema.json": "https://agent-bootstrap.local/schemas/harness-tier-v1.schema.json",
 }
 for filename, schema_id in expected_schema_ids.items():
     schema = load_json(f"{schema_dir}/{filename}") or {}
@@ -679,7 +715,7 @@ if isinstance(doc, dict):
             "conventions",
             "source_evidence",
             "open_questions",
-        ) + (("toolchain",) if "toolchain" in doc else ()),
+        ) + tuple(key for key in ("toolchain", "risk_paths") if key in doc),
         "project tech-stack contract",
     )
     require(doc.get("schema") == "agent-project-tech-stack/v1", "project tech-stack schema must be agent-project-tech-stack/v1")
@@ -719,6 +755,9 @@ if isinstance(doc, dict):
     if "toolchain" in doc:
         toolchain = doc.get("toolchain")
         require(isinstance(toolchain, list) and all(non_empty_string(entry) for entry in toolchain), "project tech-stack toolchain must be an array of non-empty strings")
+    if "risk_paths" in doc:
+        risk_paths = doc.get("risk_paths")
+        require(isinstance(risk_paths, list) and all(non_empty_string(entry) for entry in risk_paths), "project tech-stack risk_paths must be an array of non-empty strings")
     evidence = doc.get("source_evidence")
     require(isinstance(evidence, list), "project tech-stack source_evidence must be an array")
     if isinstance(evidence, list):
@@ -844,7 +883,8 @@ if command -v python3 >/dev/null 2>&1; then
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-event-v2.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-guard-verification-v2.schema.json" >/dev/null 2>&1 &&
     python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-project-knowledge-v1.schema.json" >/dev/null 2>&1 &&
-    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-kit-run-report-v1.schema.json" >/dev/null 2>&1; then
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-kit-run-report-v1.schema.json" >/dev/null 2>&1 &&
+    python3 -m json.tool "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-tier-v1.schema.json" >/dev/null 2>&1; then
     ok "schema JSON parses"
   else
     bad "schema JSON is invalid"
@@ -863,6 +903,7 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   for path in \
   docs/agent-configs/agent-mode-contracts.md \
   docs/agent-configs/agent-handoff-schema.md \
+  docs/agent-configs/tier-medium.md \
   docs/agent-configs/karpathy-llm-coding-agent-config.md \
   docs/agent-configs/llm-council-agent-workflow.md \
   docs/agent-configs/task-journal.md \
@@ -939,6 +980,7 @@ need_file scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
 need_executable scripts/agent-guard.sh
+need_executable scripts/agent-tier.py
 need_executable scripts/agent-local-only-check.sh
 need_executable scripts/harness-kit.sh
 need_executable scripts/detect-agent-tech-stack.sh
