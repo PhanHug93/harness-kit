@@ -69,7 +69,8 @@
             "partial_reason": { "type": ["string", "null"], "description": "Why the measure is partial (null when it is not)." },
             "coding_started_tier": { "enum": ["small", "medium", "large", null] },
             "raised_after_coding": { "type": "boolean", "description": "The declared tier is above coding_started_tier (the tier when a change other than *.md or *.mdx was first seen)." },
-            "missing_reviews": { "type": "array", "items": { "enum": ["@gate", "@verify", "@audit"] }, "description": "After a raise: the reviews the new tier needs whose latest attempt does not pass. Also listed on a stale result; it makes the status exceeded only when the result is not stale." }
+            "missing_reviews": { "type": "array", "items": { "enum": ["@gate", "@verify", "@audit"] }, "description": "After a raise: the reviews the new tier needs whose latest attempt does not pass. Also listed on a stale result; it makes the status exceeded only when the result is not stale." },
+            "committed": { "type": "boolean", "description": "True when pre-final ran with --committed (the pre-push hook): the commits alone were measured. Absent in older records." }
           }
         },
         "verification": {

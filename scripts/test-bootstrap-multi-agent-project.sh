@@ -3222,6 +3222,32 @@ fi
 cp "$TMP_DIR/.agents/state/context-pack.json" "$TMP_DIR/out/doctor-context-pack-before.json"
 (cd "$TMP_DIR" && .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-codex-doctor.out)
 cmp -s "$TMP_DIR/.agents/state/context-pack.json" "$TMP_DIR/out/doctor-context-pack-before.json" || fail "Codex doctor rewrote the real guard context pack"
+# The verifier and the Codex doctor (each with its own copy of the hook check)
+# accept a hook path from "$CLAUDE_PROJECT_DIR", the verifier names the
+# doctor's first failure, and a project without the smoke test gets no smoke
+# line.
+# hook_form <pass|fail> <label> <sed expression for .claude/settings.json>
+hook_form() {
+  local out="$TMP_DIR/out/bootstrap-verify-hook.out" rc=0
+  sed "$3" "$TMP_DIR/out/claude-settings.json" >"$TMP_DIR/.claude/settings.json"
+  (cd "$TMP_DIR" && scripts/verify-ai-deps.sh </dev/null >"$out") || rc=$?
+  if [[ "$1" == pass ]]; then
+    [[ "$rc" -eq 0 ]] || fail "verifier failed with the $2 hook: $(cat "$out")"
+    need_contains "$(cat "$out")" "ok Claude PreToolUse uses shared agent hook" "verifier accepts the $2 hook"
+    need_contains "$(cat "$out")" "Codex helper doctor passes" "Codex doctor accepts the $2 hook"
+    need_not_contains "$(cat "$out")" "smoke test" "verifier in a project without the smoke test"
+  else
+    [[ "$rc" -ne 0 ]] || fail "verifier passed with the $2 hook"
+    need_contains "$(cat "$out")" "Codex helper doctor failed: Claude PreToolUse does not use shared agent hook" "verifier names the doctor's first failure ($2)"
+  fi
+}
+cp "$TMP_DIR/.claude/settings.json" "$TMP_DIR/out/claude-settings.json"
+hook_form pass 'quoted $CLAUDE_PROJECT_DIR' 's#"\./scripts/agent-hook\.sh#"\\"$CLAUDE_PROJECT_DIR\\"/scripts/agent-hook.sh#'
+hook_form pass 'bare ${CLAUDE_PROJECT_DIR}' 's#"\./scripts/agent-hook\.sh#"${CLAUDE_PROJECT_DIR}/scripts/agent-hook.sh#'
+hook_form pass 'quoted whole path' 's#"\./scripts/agent-hook\.sh claude-pretool#"\\"$CLAUDE_PROJECT_DIR/scripts/agent-hook.sh\\" claude-pretool#'
+hook_form fail 'missing pretool' 's#agent-hook\.sh claude-pretool#agent-hook.sh claude-session-start#'
+hook_form fail '$HOME-based' 's#"\./scripts/agent-hook\.sh#"\\"$HOME/x\\"/scripts/agent-hook.sh#'
+cp "$TMP_DIR/out/claude-settings.json" "$TMP_DIR/.claude/settings.json"
 cat > "$TMP_DIR/scripts/test-bootstrap-multi-agent-project.sh" <<'EOF_GENERATED_SMOKE_PROBE'
 #!/usr/bin/env bash
 printf '%s\n' "smoke probe should not run without an interactive tty" >&2

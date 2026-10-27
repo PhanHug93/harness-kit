@@ -1876,7 +1876,8 @@ if isinstance(context_policy, dict):
             "agent_instructions",
         ) + tuple(
             key
-            for key in ("tier_rules", "risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "test_patterns")
+            for key in ("tier_rules", "risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "test_patterns",
+                        "binary_asset_extensions")
             if key in context_policy
         ),
         "context policy",
@@ -1895,9 +1896,12 @@ if isinstance(context_policy, dict):
                     and all(isinstance(limits[key], int) and not isinstance(limits[key], bool) and limits[key] >= 0 for key in limits),
                     f"context policy tier_rules.{tier_name} must have integer max_files and max_lines",
                 )
-    for list_key in ("risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks"):
+    for list_key in ("risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "binary_asset_extensions"):
         if list_key in context_policy:
             require(string_list(context_policy.get(list_key)), f"context policy {list_key} must be an array of non-empty strings")
+    if string_list(context_policy.get("binary_asset_extensions")):
+        require(all(re.fullmatch(r"\.?[A-Za-z0-9][A-Za-z0-9_+-]*", entry) for entry in context_policy["binary_asset_extensions"]),
+                "context policy binary_asset_extensions must hold extensions like png")
     if "test_patterns" in context_policy:
         test_patterns = context_policy.get("test_patterns")
         require(
@@ -1996,6 +2000,7 @@ validate_project_tech_stack_contract() {
   python3 - "$ROOT_DIR" <<'PY'
 import json
 import pathlib
+import re
 import sys
 
 root = pathlib.Path(sys.argv[1])
@@ -2064,7 +2069,7 @@ if isinstance(doc, dict):
             "conventions",
             "source_evidence",
             "open_questions",
-        ) + tuple(key for key in ("toolchain", "risk_paths") if key in doc),
+        ) + tuple(key for key in ("toolchain", "risk_paths", "binary_asset_extensions") if key in doc),
         "project tech-stack contract",
     )
     require(doc.get("schema") == "agent-project-tech-stack/v1", "project tech-stack schema must be agent-project-tech-stack/v1")
@@ -2107,6 +2112,12 @@ if isinstance(doc, dict):
     if "risk_paths" in doc:
         risk_paths = doc.get("risk_paths")
         require(isinstance(risk_paths, list) and all(non_empty_string(entry) for entry in risk_paths), "project tech-stack risk_paths must be an array of non-empty strings")
+    if "binary_asset_extensions" in doc:
+        assets = doc.get("binary_asset_extensions")
+        require(isinstance(assets, list) and all(non_empty_string(entry) for entry in assets), "project tech-stack binary_asset_extensions must be an array of non-empty strings")
+        if isinstance(assets, list) and all(non_empty_string(entry) for entry in assets):
+            require(all(re.fullmatch(r"\.?[A-Za-z0-9][A-Za-z0-9_+-]*", entry) for entry in assets),
+                    "project tech-stack binary_asset_extensions must hold extensions like png")
     evidence = doc.get("source_evidence")
     require(isinstance(evidence, list), "project tech-stack source_evidence must be an array")
     if isinstance(evidence, list):
@@ -2368,7 +2379,9 @@ else
   warn "python3 not found; skipped Claude settings JSON validation"
 fi
 
-if grep -Fq './scripts/agent-hook.sh claude-pretool' "$ROOT_DIR/.claude/settings.json"; then
+# The hook path may also start at "$CLAUDE_PROJECT_DIR", which keeps it working
+# after the agent changes directory.
+if grep -Eq '(\./|[$][{]?CLAUDE_PROJECT_DIR[}]?(\\")?/)scripts/agent-hook\.sh(\\")? claude-pretool' "$ROOT_DIR/.claude/settings.json"; then
   ok "Claude PreToolUse uses shared agent hook"
 else
   bad "Claude PreToolUse does not use shared agent hook"
@@ -2468,14 +2481,22 @@ if [[ -n "$lock_version" ]]; then
 fi
 
 if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
-  if "$ROOT_DIR/.codex/codex-mode.sh" doctor >/dev/null 2>&1; then
+  if codex_doctor_out="$("$ROOT_DIR/.codex/codex-mode.sh" doctor 2>&1)"; then
     ok "Codex helper doctor passes"
   else
     codex_candidate="$(find "$ROOT_DIR/.codex" -name '*.generated.*' -print 2>/dev/null | head -1)"
     if [[ -n "$codex_candidate" && ! -w "$ROOT_DIR/.codex" ]]; then
       warn "Codex helper doctor skipped: read-only .codex candidate unapplied (${codex_candidate#"$ROOT_DIR"/}); promote with write access"
     else
-      bad "Codex helper doctor failed"
+      # Name the doctor's first failure so the reader need not rerun it.
+      codex_doctor_reason=""
+      while IFS= read -r codex_doctor_line; do
+        if [[ "$codex_doctor_line" == "  FAIL  "* ]]; then
+          codex_doctor_reason="${codex_doctor_line#"  FAIL  "}"
+          break
+        fi
+      done <<<"$codex_doctor_out"
+      bad "Codex helper doctor failed${codex_doctor_reason:+: $codex_doctor_reason}"
     fi
   fi
 else
@@ -2494,8 +2515,6 @@ if [[ -x "$ROOT_DIR/scripts/test-bootstrap-multi-agent-project.sh" ]]; then
   else
     bad "portable bootstrap integration smoke test failed"
   fi
-else
-  warn "portable bootstrap integration smoke test missing"
 fi
 
 finish_report

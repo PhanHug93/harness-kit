@@ -49,6 +49,7 @@ assert d["dependency_manifests"] == ["package.json","Podfile","Package.swift","G
 assert d["dependency_locks"] == ["package-lock.json","yarn.lock","pnpm-lock.yaml","Podfile.lock","Package.resolved","Gemfile.lock","go.sum","Cargo.lock","poetry.lock","uv.lock","Pipfile.lock","pubspec.lock","composer.lock"], d["dependency_locks"]
 assert d["test_patterns"]["dirs"] == ["test","tests","__tests__","spec"], d["test_patterns"]
 assert d["test_patterns"]["names"] == ["*_test.*","*.test.*","*.spec.*","test_*.py","*Tests.swift","*Test.kt","*Test.java"], d["test_patterns"]
+assert d["binary_asset_extensions"] == ["png","jpg","jpeg","gif","webp","avif","heic","bmp","tif","tiff","ico","icns","ttf","otf","woff","woff2","eot","mp3","wav","ogg","m4a","aac","flac","mp4","mov","webm","m4v","pdf"], d["binary_asset_extensions"]
 PY
 
 [[ -f "$target/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-tier-v1.schema.json" ]] \
@@ -88,7 +89,8 @@ python3 - "$policy" <<'PY'
 import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
-for k in ("tier_rules", "risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "test_patterns"):
+for k in ("tier_rules", "risk_tokens", "risk_paths", "dependency_manifests", "dependency_locks", "test_patterns",
+          "binary_asset_extensions"):
     d.pop(k, None)
 json.dump(d, open(p, "w"), indent=2)
 PY
@@ -117,6 +119,37 @@ grep -q 'project tech-stack contract failed validation' <<<"$fails" || fail "bad
 python3 - "$contract" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1])); d["risk_paths"] = ["app/billing/**"]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+
+# Tech-stack contract accepts optional binary_asset_extensions; a bad value fails.
+python3 - "$contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = ["psd"]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+fails="$(failing_checks "$target")"
+[[ -z "$fails" ]] || fail "binary_asset_extensions in tech-stack failed: $fails"
+python3 - "$contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = [1]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+fails="$(failing_checks "$target" "$TMP_ROOT/verify.err")"
+grep -q 'project tech-stack contract failed validation' <<<"$fails" || fail "bad binary_asset_extensions not rejected: $fails"
+grep -q 'binary_asset_extensions must be an array of non-empty strings' "$TMP_ROOT/verify.err" \
+  || fail "stderr does not name binary_asset_extensions: $(cat "$TMP_ROOT/verify.err")"
+python3 - "$contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = ["."]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+fails="$(failing_checks "$target" "$TMP_ROOT/verify.err")"
+grep -q 'binary_asset_extensions must hold extensions like png' "$TMP_ROOT/verify.err" \
+  || fail "a '.' asset extension is not rejected: $fails $(cat "$TMP_ROOT/verify.err")"
+python3 - "$contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d.pop("binary_asset_extensions")
 json.dump(d, open(sys.argv[1], "w"), indent=2)
 PY
 
@@ -218,6 +251,7 @@ expect_tier large "--data" -- --paths a.ts --data
 expect_tier large "--access" -- --paths a.ts --access
 expect_tier medium "--dependency" -- --paths a.ts --dependency
 expect_tier medium "--unclear" -- --paths a.ts --unclear
+expect_tier large "--handoff: the work passes between agents (one plans, another codes)" -- --paths a.ts --handoff
 # --paths stops at the next option; --by is accepted. Without --task nothing
 # is recorded (checked below); with --task, see "tier set, show and close".
 expect_tier large "--data" -- --by @build --paths a.ts b.ts --lines 2 --data
@@ -279,7 +313,8 @@ main_synopsis="$(cd "$tier_target" && scripts/agent-guard.sh --help | grep -o 's
 tier_synopsis="$(cd "$tier_target" && scripts/agent-guard.sh tier --help | grep -o 'scripts/agent-guard.sh tier .*')" || true
 [[ -n "$tier_synopsis" && "$main_synopsis" == "$tier_synopsis" ]] \
   || fail "main usage tier synopsis differs: [$main_synopsis] vs [$tier_synopsis]"
-for want in 'tier suggest [--task <id>] [--by @seat] [--paths <file>...]' \
+for want in 'tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]' \
+  'tier stats [--since YYYY-MM-DD] [--json]' \
   'tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]' \
   'tier show [--task <id>] [--pr-line]' 'tier close --task <id>'; do
   grep -qF -- "$want" <<<"$tier_synopsis" || fail "tier synopsis lacks '$want': $tier_synopsis"
@@ -330,18 +365,110 @@ classify_json() {
   (cd "$tier_target" && python3 scripts/agent-tier.py classify --request "$1" 2>"$TMP_ROOT/classify.err") \
     || fail "classify failed: $(cat "$TMP_ROOT/classify.err")"
 }
-result="$(classify_json '{"files":[{"path":"src/new.ts","old_path":"auth/old.ts","lines":10},{"path":"src/a.test.ts","lines":30},{"path":"yarn.lock","lines":900},{"path":"assets/logo.png","binary":true},{"path":"vendor/lib","submodule":true}]}')"
+result="$(classify_json '{"files":[{"path":"src/new.ts","old_path":"auth/old.ts","lines":10},{"path":"src/a.test.ts","lines":30},{"path":"yarn.lock","lines":900},{"path":"assets/logo.png","binary":true},{"path":"libs/sdk.jar","binary":true},{"path":"vendor/lib","submodule":true}]}')"
 python3 - "$result" <<'PY' || fail "classify result is wrong: $result"
 import json, sys
 r = json.loads(sys.argv[1])
 assert r["tier"] == "large", r
-assert r["counted_files"] == 3, r
+assert r["counted_files"] == 4, r
 assert r["counted_lines"] == 10, r
 assert r["excluded"] == {"tests": 1, "locks": 1, "generated": 0, "lines": 930}, r
 assert r["risky"] == [{"path": "auth/old.ts", "kind": "token", "match": "auth"}], r
-for reason in ("binary file changed: assets/logo.png", "submodule changed: vendor/lib", "dependency lock changed: yarn.lock"):
+for reason in ("binary file changed: libs/sdk.jar", "submodule changed: vendor/lib", "dependency lock changed: yarn.lock"):
     assert reason in r["reasons"], (reason, r)
+# Tidy-up rule 2: an image is an asset, so it adds no binary reason.
+assert not any("assets/logo.png" in reason for reason in r["reasons"]), r
 PY
+
+# classify_tier <want> <request JSON> [<reason text>...]: the tier and, for
+# each text, a reason that contains it.
+classify_tier() {
+  local want="$1" request="$2" got
+  shift 2
+  got="$(classify_json "$request")"
+  python3 - "$got" "$want" "$@" <<'PY' || fail "classify $request: want $want with the reasons ${*:-none}: $got"
+import json, sys
+r, want, texts = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3:]
+assert r["tier"] == want, r
+for text in texts:
+    assert any(text in reason for reason in r["reasons"]), (text, r)
+PY
+}
+# Tidy-up rule 2: images, fonts, media and PDF count like any file (any
+# case); other binaries stay medium.
+classify_tier small '{"files":[{"path":"img/Hero.PNG","binary":true}]}'
+classify_tier small '{"files":[{"path":"fonts/a.woff2","binary":true},{"path":"docs/guide.pdf","binary":true}]}'
+classify_tier medium '{"files":[{"path":"a/b.weird","binary":true}]}' "binary file changed: a/b.weird"
+classify_tier medium '{"files":[{"path":"bin/tool","binary":true}]}' "binary file changed: bin/tool"
+# A prebuilt library renamed to an image name is still a binary change.
+classify_tier medium '{"files":[{"path":"a/x.png","old_path":"a/x.jar","binary":true}]}' "binary file changed: a/x.png"
+# A project adds its own asset extensions (any case, with or without the
+# dot); a bad value warns and is ignored.
+asset_contract="$tier_target/docs/superpowers/specs/project-tech-stack.json"
+cp "$asset_contract" "$TMP_ROOT/asset-contract.json"
+python3 - "$asset_contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = [".Weird"]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+classify_tier small '{"files":[{"path":"a/b.weird","binary":true}]}'
+python3 - "$asset_contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = "weird"
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+classify_tier medium '{"files":[{"path":"a/b.weird","binary":true}]}' "binary file changed: a/b.weird"
+grep -qF 'project-tech-stack.json binary_asset_extensions is not a list' "$TMP_ROOT/classify.err" \
+  || fail "a bad asset list does not warn: $(cat "$TMP_ROOT/classify.err")"
+# "." would make every binary with no extension an asset: warned, left out.
+python3 - "$asset_contract" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["binary_asset_extensions"] = [".", "psd"]
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+classify_tier medium '{"files":[{"path":"bin/tool","binary":true}]}' "binary file changed: bin/tool"
+classify_tier small '{"files":[{"path":"art/cover.psd","binary":true}]}'
+grep -qF "project-tech-stack.json binary_asset_extensions: . is not an extension like png; it is ignored" "$TMP_ROOT/classify.err" \
+  || fail "a '.' asset entry does not warn: $(cat "$TMP_ROOT/classify.err")"
+cp "$TMP_ROOT/asset-contract.json" "$asset_contract"
+
+# Tidy-up rule 3: a pure move (an old path, 0 lines, not binary) counts for
+# medium but never makes a change large.
+moves_json() {
+  python3 - "$@" <<'PY'
+import json, sys
+moves, edits, binary = (int(arg) for arg in sys.argv[1:4])
+files = [{"path": f"app/cards/C{n}.tsx", "old_path": f"app/C{n}.tsx", "lines": 0} for n in range(moves)]
+files += [{"path": f"src/e{n}.ts", "lines": 1} for n in range(edits)]
+files += [{"path": f"img/i{n}.bin", "old_path": f"old/i{n}.bin", "lines": 0, "binary": True} for n in range(binary)]
+renamed = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+files += [{"path": f"lib/R{n}.ts", "old_path": f"old/R{n}.ts", "lines": 2} for n in range(renamed)]
+tests = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+files += [{"path": f"tests/t{n}.ts", "old_path": f"spec/t{n}.ts", "lines": 0} for n in range(tests)]
+print(json.dumps({"files": files}))
+PY
+}
+# no_move_reason <request JSON>: no reason says "only moved".
+no_move_reason() {
+  python3 - "$(classify_json "$1")" <<'PY' || fail "classify $1: a file with lines counted as only moved"
+import json, sys
+r = json.loads(sys.argv[1])
+assert not any("only moved" in reason for reason in r["reasons"]), r
+PY
+}
+classify_tier small "$(moves_json 3 0 0)"
+classify_tier medium "$(moves_json 20 0 0)" "20 counted files, 20 only moved (small allows 3)"
+classify_tier medium "$(moves_json 20 15 0)" "35 counted files, 20 only moved (small allows 3)"
+classify_tier large "$(moves_json 20 16 0)" "16 changed files, plus 20 only moved (medium allows 15)"
+classify_tier large "$(moves_json 0 16 0)" "16 counted files (medium allows 15)"
+classify_tier large '{"files":[{"path":"app/payment/x.ts","old_path":"app/x.ts","lines":0}]}' "risky path: app/payment/x.ts"
+classify_tier large "$(moves_json 0 0 16)" "16 counted files (medium allows 15)"
+# A rename with edited lines is not a pure move.
+classify_tier large "$(moves_json 0 0 0 16)" "16 counted files (medium allows 15)"
+classify_tier medium "$(moves_json 0 0 0 4)" "4 counted files (small allows 3)"
+no_move_reason "$(moves_json 0 0 0 4)"
+# Moved tests are not counted at all, so they are not moves either.
+classify_tier large "$(moves_json 0 16 0 0 5)" "16 counted files (medium allows 15)" "5 test files not counted"
 result="$(classify_json '{"files":[{"path":"a.ts","lines":5}],"lines":70}')"
 python3 - "$result" <<'PY' || fail "top-level lines did not win: $result"
 import json, sys
@@ -804,6 +931,11 @@ tier_assert keep-facts "d['suggested'] == 'large'" \
 expect_tier small -- --task keep-facts --paths README.txt --lines 1
 tier_assert keep-facts "d['suggested'] == 'small' and d['suggestion_inputs']['paths'] == ['README.txt']"
 expect_tier medium "files unknown" -- --task no-facts-yet
+# --handoff is a fact like the others: recorded, and kept by a suggest with
+# no facts.
+expect_tier large "--handoff" -- --task handoff-facts --paths src/a.ts --handoff
+tier_assert handoff-facts "d['suggestion_inputs']['flags'] == ['handoff']"
+expect_tier large "facts from the last suggestion (none were given)" "--handoff" -- --task handoff-facts --by @spec
 # tier set fills a null base_commit in an existing state.json.
 mkdir -p "$packets/fill-base"
 printf '{"task_id": "fill-base", "phase": "analysis", "status": "open", "base_commit": null}\n' \
@@ -914,6 +1046,8 @@ grep -qxF 'status: open' <<<"$TIER_OUT" || fail "status line: $TIER_OUT"
 expect_rc 0 show --task feat --pr-line
 [[ "$TIER_OUT" == "Tier: small · 8 files, 13 lines · measured medium, above the tier" ]] \
   || fail "pr-line with the measure: $TIER_OUT"
+# Tidy-up rule 1: the task started with a commit main does not hold.
+measure_assert feat "m['base_hint'] is True"
 
 # 2. A merge of a main commit that touches 5 other files: still 8.
 tg checkout -q main
@@ -1429,6 +1563,48 @@ grep -qxF 'The task moved to branch feature/new-name (it was started on feature/
 expect_measured renamed small 1 1
 grep -qxF 'status: open' <<<"$TIER_OUT" || fail "a moved task is stale: $TIER_OUT"
 
+# Tidy-up rule 1: the --base hint needs evidence. A branch fresh from main
+# (also its first-set note), main itself and a branch with --base: no hint.
+# A branch whose task started on a commit main does not hold: the hint.
+start_case feature/hint-new
+lines_file src/hn.ts 1
+expect_rc 0 set small --task hint-new
+grep -qF '1 file is already changed' <<<"$TIER_OUT" || fail "hint-new set note: $TIER_OUT"
+if grep -qF -- '--base' <<<"$TIER_OUT"; then fail "a branch fresh from main names --base: $TIER_OUT"; fi
+measure_assert hint-new "m['base_hint'] is False"
+start_case main
+expect_rc 0 set small --task hint-main
+measure_assert hint-main "m['base_hint'] is False"
+start_case feature/hint-own
+lines_file src/ho.ts 1
+commit_paths own src/ho.ts
+expect_rc 0 set small --task hint-own
+grep -qF 'If this branch starts from another branch, run tier set again with --base <that branch>.' <<<"$TIER_OUT" \
+  || fail "a branch with its own commit lacks the first-set hint: $TIER_OUT"
+measure_assert hint-own "m['base_hint'] is True"
+expect_rc 0 set small --task hint-own --base main
+measure_assert hint-own "m['base_hint'] is False"
+
+# A detached HEAD gives no hint (as before).
+start_case feature/hint-det
+lines_file src/hd.ts 1
+commit_paths det src/hd.ts
+expect_rc 0 set small --task hint-det
+measure_assert hint-det "m['base_hint'] is True"
+tg checkout -q --detach
+measure_assert hint-det "m['base_hint'] is False"
+tg checkout -q feature/hint-det
+
+# Tidy-up rule 3 on a real move: 20 files moved without edits are medium.
+start_case main
+for n in $(seq 1 20); do lines_file "cards/c$n.ts" 1; done
+commit_paths cards cards
+tg checkout -q -b feature/move-only
+tg mv cards app-cards
+tg commit -q -m "move the cards"
+expect_rc 0 set medium --task move-only
+expect_measured move-only medium 20 0 "20 counted files, 20 only moved (small allows 3)"
+
 # Rule 4: the default branch is unknown (a dev default, no origin/HEAD):
 # partial with that cause, so pulled commits never make the push exit 5.
 # With origin/HEAD set, the measure is full again.
@@ -1457,17 +1633,19 @@ dg add src/own.ts
 dg commit -q -m own
 dg rebase -q refs/remotes/origin/dev
 out="$(cd "$dev_target" && scripts/agent-guard.sh tier measure --task devt --committed 2>&1)" || fail "dev measure: $out"
-python3 "$measure_check" "m['partial'] is True" "m['partial_reason'].startswith('the default branch is unknown')" <<<"$out" \
-  || fail "an unknown default branch is not partial: $out"
+python3 "$measure_check" "m['partial'] is True" "m['partial_reason'].startswith('the default branch is unknown')" \
+  "m['base_hint'] is True" <<<"$out" || fail "an unknown default branch is not partial: $out"
 # Partial still recommends, with its cause next to each step.
 (cd "$dev_target" && scripts/agent-guard.sh preflight >/dev/null 2>&1) || fail "preflight in the dev target"
 out="$(cd "$dev_target" && scripts/agent-guard.sh pre-final --task devt --committed 2>&1)" || fail "dev pre-final: $out"
 grep -qF '(partial: the default branch is unknown' <<<"$out" || fail "a partial exceeded lacks its cause: $out"
+grep -qF 'Next: if this branch starts from another branch, give its base: scripts/agent-guard.sh tier set small --task devt --base <branch>. (partial: the default branch is unknown' \
+  <<<"$out" || fail "an unknown default lacks the --base hint: $out"
 grep -qF 'TIER: declared small, measured medium, partial (recommended: raise the tier or split the change)' <<<"$out" \
   || fail "a partial exceeded is not recommended: $out"
 dg symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/dev
 out="$(cd "$dev_target" && scripts/agent-guard.sh tier measure --task devt --committed 2>&1)" || fail "dev measure: $out"
-python3 "$measure_check" "m['partial'] is False" "[f['path'] for f in m['files']] == ['src/own.ts']" <<<"$out" \
+python3 "$measure_check" "m['partial'] is False" "[f['path'] for f in m['files']] == ['src/own.ts']" "m['base_hint'] is False" <<<"$out" \
   || fail "a dev default with origin/HEAD: $out"
 
 # 17. No tier (a packet with state.json only): the no-tier base rule, partial.
@@ -1817,23 +1995,24 @@ pf_tier set small --task pf-big
 for n in 1 2 3 4 5 6; do printf 'export const f%s = 1;\n' "$n" >"$pf/src/f$n.ts"; done
 pf_expect 0 --run-verify
 grep -q '^agent-guard: pre-final ok' <<<"$PF_OUT" || fail "a size excess must not fail: $PF_OUT"
+# A branch fresh from main: no --base line (tidy-up rule 1).
 pf_big_tail="- 6 counted files (small allows 3)
 Next: ask the user to raise the tier (scripts/agent-guard.sh tier set medium --task pf-big; the raise then needs @verify to pass) or split the change.
-Next: if this branch starts from another branch, give its base: scripts/agent-guard.sh tier set small --task pf-big --base <branch>.
 TIER: declared small, measured medium (recommended: raise the tier or split the change)"
-[[ "$(tail -n 4 <<<"$PF_OUT")" == "$pf_big_tail" ]] || fail "exceeded output: $PF_OUT"
+[[ "$(tail -n 3 <<<"$PF_OUT")" == "$pf_big_tail" ]] || fail "exceeded output: $PF_OUT"
 report_assert "d['status'] == 'pass' and d['tier']['status'] == 'exceeded'"
-event_assert "d['gate_status'] == 'warn' and d['tier']['status'] == 'exceeded'"
+event_assert "d['gate_status'] == 'warn' and d['tier']['status'] == 'exceeded' and d['tier']['committed'] is False"
 # The same files committed: --committed (the pre-push hook) gives the same
 # recommendation.
 pg add src/f1.ts src/f2.ts src/f3.ts src/f4.ts src/f5.ts src/f6.ts
 pg commit -q -m six
 pf_expect 0 --committed --run-verify
 grep -q '^agent-guard: pre-final ok' <<<"$PF_OUT" || fail "a committed size excess must not fail: $PF_OUT"
-[[ "$(tail -n 4 <<<"$PF_OUT")" == "$pf_big_tail" ]] || fail "committed exceeded output: $PF_OUT"
+[[ "$(tail -n 3 <<<"$PF_OUT")" == "$pf_big_tail" ]] || fail "committed exceeded output: $PF_OUT"
 report_assert "d['status'] == 'pass'" "d['tier']['status'] == 'exceeded'" \
-  "d['tier']['declared'] == 'small' and d['tier']['measured'] == 'medium' and d['tier']['counted_files'] == 6"
-event_assert "d['gate_status'] == 'warn' and d['tier']['status'] == 'exceeded'"
+  "d['tier']['declared'] == 'small' and d['tier']['measured'] == 'medium' and d['tier']['counted_files'] == 6" \
+  "d['tier']['committed'] is True"
+event_assert "d['gate_status'] == 'warn' and d['tier']['status'] == 'exceeded' and d['tier']['committed'] is True"
 # 2. A failing command wins over the tier: exit 1; the report has the tier.
 pf_verify false
 pf_expect 1 --committed --run-verify
@@ -1929,6 +2108,23 @@ pf_expect 1 --advisory --run-verify
 if grep -q 'pre-final ok' <<<"$PF_OUT"; then fail "pre-final ok after a broken verification: $PF_OUT"; fi
 rm "$logs"
 mv "$TMP_ROOT/verify-logs.saved" "$logs"
+
+# Tidy-up rule 1: a branch cut from another branch that holds a commit of
+# its own, with no --base: the warning names --base.
+pf_prev="$(pg rev-parse --abbrev-ref HEAD)"
+pg checkout -q -b feature/pf-parent main
+printf 'export const parent = 1;\n' >"$pf/src/parent.ts"
+pg add src/parent.ts
+pg commit -q -m parent
+pg checkout -q -b feature/pf-stack
+pf_tier set small --task pf-stack
+for n in 1 2 3 4 5 6; do printf 'export const s%s = 1;\n' "$n" >"$pf/src/s$n.ts"; done
+pg add src/s1.ts src/s2.ts src/s3.ts src/s4.ts src/s5.ts src/s6.ts
+pg commit -q -m stack
+pf_expect 0 --committed --task pf-stack
+grep -qxF 'Next: if this branch starts from another branch, give its base: scripts/agent-guard.sh tier set small --task pf-stack --base <branch>.' \
+  <<<"$PF_OUT" || fail "a stacked branch lacks the --base hint: $PF_OUT"
+pg checkout -q "$pf_prev"
 
 # Parallel runs on one target: each writes its report once, with its own
 # tier. The command logs its loop, so a report's results name the run whose
@@ -2491,6 +2687,114 @@ section_of() { awk -v head="$1" '$0 == head { on = 1; next } /^```/ { fence = !f
     fail "the verify-review.md format lacks the human review: $verify_format"
   fi
 }
+
+# ---- tier stats ---------------------------------------------------------------
+# Numbers from the records already kept: tasks per tier, suggestions kept,
+# lowered or raised, warnings at pre-final and at push, and time to close.
+st="$(fresh_target)"
+st_run() {
+  ST_RC=0
+  ST_OUT="$(cd "$st" && scripts/agent-guard.sh tier stats "$@" 2>"$TMP_ROOT/st.err")" || ST_RC=$?
+}
+st_run
+[[ "$ST_RC" -eq 0 && "$ST_OUT" == "No tier records yet." ]] || fail "stats with no records: $ST_RC $ST_OUT"
+python3 - "$st" <<'PY' || fail "cannot write the stats fixture"
+import json, os, sys
+root = sys.argv[1]
+
+def record(task, declared, suggested, status, times, flags=(), reason=None, started=None):
+    history = [{"at": times[0], "event": "suggest", "tier": suggested}, {"at": times[0], "event": "set", "tier": declared}]
+    if status == "closed":
+        history.append({"at": times[1], "event": "close", "tier": declared})
+    doc = {"schema": "harness-tier/v1", "task_id": task, "branch": "main", "base_ref": None,
+           "start_commit": "0" * 40, "declared": declared, "suggested": suggested,
+           "suggestion_inputs": {"paths": [], "lines": None, "flags": list(flags)}, "reason": reason,
+           "coding_started_tier": started, "coding_started_at": None, "status": status,
+           "closed_at": times[1] if status == "closed" else None, "closed_by": None, "history": history}
+    os.makedirs(os.path.join(root, ".agents/tasks", task), exist_ok=True)
+    with open(os.path.join(root, ".agents/tasks", task, "tier.json"), "w") as handle:
+        json.dump(doc, handle)
+
+record("s1", "small", "small", "closed", ["2026-10-20T08:00:00Z", "2026-10-20T08:30:00Z"])
+record("s2", "small", "medium", "closed", ["2026-10-21T09:00:00Z", "2026-10-21T10:00:00Z"], reason="one line")
+record("m1", "medium", "small", "open", ["2026-10-22T10:00:00Z"], started="small")
+record("l1", "large", "large", "closed", ["2026-10-22T08:00:00Z", "2026-10-24T08:00:00Z"], flags=["handoff"])
+record("old", "small", "small", "open", ["2026-09-01T08:00:00Z"])
+os.makedirs(os.path.join(root, ".agents/tasks/bad"), exist_ok=True)
+with open(os.path.join(root, ".agents/tasks/bad/tier.json"), "w") as handle:
+    handle.write("{}\n")
+os.makedirs(os.path.join(root, ".agents/state"), exist_ok=True)
+events = [
+    {"schema": "agent-guard-event/v2", "event": "pre_final", "tier": {"task": "m1", "status": "exceeded"}},
+    {"schema": "agent-guard-event/v2", "event": "pre_final", "tier": {"task": "m1", "status": "exceeded", "committed": True}},
+    {"schema": "agent-guard-event/v2", "event": "pre_final", "tier": {"task": "s1", "status": "ok", "committed": False}},
+    {"schema": "agent-guard-event/v2", "event": "pre_final", "tier": {"task": "old", "status": "exceeded", "committed": False}},
+    {"schema": "agent-guard-event/v2", "event": "skill_note", "skill": "x"},
+]
+with open(os.path.join(root, ".agents/state/session-events.jsonl"), "w") as handle:
+    handle.write("\n".join(json.dumps(event) for event in events[:2]) + "\nnot json\n"
+                 + "\n".join(json.dumps(event) for event in events[2:]) + "\n")
+PY
+st_run --since 2026-10-01
+st_want="Tasks: 4 (3 closed, 1 open) since 2026-10-01
+Tier: small 2 · medium 1 · large 1 · handoff 1 · raised after coding 1
+Suggestion: kept 2 · lowered with a reason 1 · raised 1
+Warnings: pre-final 1 on 1 task · push 1 on 1 task
+Time to close (median): small 45 min · large 2.0 d"
+[[ "$ST_RC" -eq 0 && "$ST_OUT" == "$st_want" ]] || fail "stats --since: $ST_RC
+$ST_OUT"
+grep -qxF 'agent-guard: warn: tier stats: 1 record skipped (not readable)' "$TMP_ROOT/st.err" \
+  || fail "stats skipped record: $(cat "$TMP_ROOT/st.err")"
+st_run
+[[ "$(head -n 2 <<<"$ST_OUT")" == "Tasks: 5 (3 closed, 2 open)
+Tier: small 3 · medium 1 · large 1 · handoff 1 · raised after coding 1" ]] || fail "stats without --since: $ST_OUT"
+grep -qxF 'Warnings: pre-final 2 on 2 tasks · push 1 on 1 task' <<<"$ST_OUT" || fail "stats warnings: $ST_OUT"
+st_run --json --since 2026-10-01
+python3 - "$ST_OUT" <<'PY' || fail "stats --json: $ST_OUT"
+import json, sys
+d = json.loads(sys.argv[1])
+assert d["schema"] == "harness-tier-stats/v1", d
+assert d["since"] == "2026-10-01" and d["tasks"] == {"total": 4, "closed": 3, "open": 1}, d
+assert d["tiers"] == {"small": 2, "medium": 1, "large": 1, "none": 0} and d["handoff"] == 1, d
+assert d["raised_after_coding"] == 1, d
+assert d["suggestion"] == {"kept": 2, "lowered": 1, "raised": 1, "not_compared": 0}, d
+assert d["warnings"] == {"pre_final": {"events": 1, "tasks": 1}, "push": {"events": 1, "tasks": 1}}, d
+assert d["close_minutes_median"] == {"small": 45.0, "large": 2880.0}, d
+assert d["skipped"] == 1, d
+PY
+st_run --since 2026-13-01
+[[ "$ST_RC" -eq 1 ]] || fail "a bad --since: want exit 1, got $ST_RC"
+grep -qF -- '--since must be a date like 2026-10-23' "$TMP_ROOT/st.err" \
+  || fail "a bad --since: $(cat "$TMP_ROOT/st.err")"
+st_run --since 2027-01-01
+[[ "$ST_RC" -eq 0 && "$ST_OUT" == "No tier records since 2027-01-01." ]] || fail "stats after the last task: $ST_OUT"
+# Odd data never fails stats: a record with no declared or suggested key,
+# flags that are not a list, a history time that is not one (left out with
+# --since), an event naming a list as its task, and a very deep event line.
+python3 - "$st" <<'PY' || fail "cannot write the odd stats fixture"
+import json, os, sys
+root = sys.argv[1]
+def write(task, doc):
+    os.makedirs(os.path.join(root, ".agents/tasks", task), exist_ok=True)
+    with open(os.path.join(root, ".agents/tasks", task, "tier.json"), "w") as handle:
+        json.dump(dict({"schema": "harness-tier/v1", "task_id": task, "status": "open", "start_commit": "0" * 40}, **doc), handle)
+write("nod", {"history": [{"at": "2026-10-22T00:00:00Z"}]})
+write("flg", {"declared": "small", "suggested": "small", "suggestion_inputs": {"flags": 5},
+              "history": [{"at": "2026-10-22T00:00:00Z"}]})
+write("zzz", {"declared": "small", "suggested": "small", "history": [{"at": "zzz"}]})
+with open(os.path.join(root, ".agents/state/session-events.jsonl"), "a") as handle:
+    handle.write(json.dumps({"event": "pre_final", "tier": {"task": ["m1"], "status": "exceeded"}}) + "\n")
+    handle.write("[" * 100000 + "]" * 100000 + "\n")
+PY
+st_run --since 2026-10-01
+st_want="Tasks: 6 (3 closed, 3 open) since 2026-10-01
+Tier: small 3 · medium 1 · large 1 · no tier 1 · handoff 1 · raised after coding 1
+Suggestion: kept 3 · lowered with a reason 1 · raised 1 · not compared 1
+Warnings: pre-final 1 on 1 task · push 1 on 1 task
+Time to close (median): small 45 min · large 2.0 d"
+[[ "$ST_RC" -eq 0 && "$ST_OUT" == "$st_want" ]] || fail "stats on odd data: $ST_RC
+$ST_OUT
+$(cat "$TMP_ROOT/st.err")"
 
 # ---- the Stop hook: verification blocks, the tier warns -----------------------
 # close-out: a verification problem blocks (exit 2, no snapshot advance); an

@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.10.20.1`
+Version: `2026.10.24.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -35,7 +35,7 @@ tag or source branch to complete a feature PR.
 | `agent-tech-stack-lib.sh` | Runtime detector library snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-tech-stack-lib.sh`. |
 | `agent-hook.sh` | Runtime hook snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-hook.sh`. |
 | `agent-guard.sh` | Agent Guard Lite runtime snapshot for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
-| `agent-tier.py` | Change-tier program (`suggest`, `set`, `show`, `close`) that `agent-guard.sh tier` runs; it alone writes `.agents/tasks/<id>/tier.json`. | Must match canonical home export and generated target `scripts/agent-tier.py`. |
+| `agent-tier.py` | Change-tier program (`suggest`, `set`, `show`, `close`, `stats`) that `agent-guard.sh tier` runs; it alone writes `.agents/tasks/<id>/tier.json`. | Must match canonical home export and generated target `scripts/agent-tier.py`. |
 | `agent-seats.sh` | Runtime seat assignment, migration, validation, and roster renderer for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-seats.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
 | `agent-local-only-check.sh` | Runtime Git hygiene checker that blocks harness-kit generated files from being pushed. | Must match generated target `scripts/agent-local-only-check.sh` and pre-push hook expectations. |

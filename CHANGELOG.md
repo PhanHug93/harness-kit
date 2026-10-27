@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026.10.24.1 — Quieter tier warnings and tier stats
+
+- Quieter tier warnings. A 20-task trial of 2026.10.20.1 found three kinds of
+  warning that were noise:
+  - the `--base` reminder now appears only when the task started on commits
+    the default branch does not have (a branch cut from another branch, or
+    work committed before `tier set`);
+  - images, fonts, audio, video and PDF count like any other file, so
+    replacing a logo stays small; other binaries (`.jar`, `.so`, an unknown
+    type) are still at least medium. Projects add their own types as
+    `binary_asset_extensions` in `project-tech-stack.json`;
+  - files that were only moved count toward medium but never make a change
+    large: moving 20 files without edits is medium, not large.
+- `tier suggest --handoff`: two or more agents share the task (for example
+  Claude writes the spec and Codex codes), so the suggestion is large, the
+  full seat cycle.
+- `tier stats [--since YYYY-MM-DD] [--json]`: tasks per tier, how often the
+  suggestion was kept, lowered or raised, how often a tier went up after
+  coding started, the warnings at pre-final and at push, and the median time
+  to close, from this machine's records. The
+  `pre_final` event's tier block records `committed`, so push warnings can be
+  told apart.
+- Fewer false verifier failures, found on a real iOS project:
+  - `scripts/verify-ai-deps.sh` and `.codex/codex-mode.sh doctor` accept a
+    Claude hook path that starts at `"$CLAUDE_PROJECT_DIR"` (for example
+    `"$CLAUDE_PROJECT_DIR"/scripts/agent-hook.sh claude-pretool`), not only
+    `./scripts/...`. Before, this working hook failed both checks;
+  - when the Codex doctor fails, the verifier names its first failure;
+  - projects no longer get the "smoke test missing" warning: that test lives
+    only in the kit repository.
+
 ## 2026.10.20.1 — Change tiers, one-shot install and update, real verification evidence
 
 - Change tiers: every task gets a tier.
