@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It generates local
 instructions, configurable agent seats, onboarding helpers, runtime checks, and
 handoff guidance without replacing the project's application code.
 
-Current release: [`2026.10.20.1`](agent-bootstrap/VERSION)
+Current release: [`2026.10.24.1`](agent-bootstrap/VERSION)
 
 ## What changes for the user
 
@@ -35,11 +35,11 @@ Requirements: Bash, `python3`, Git, and either `sha256sum` or `shasum`. The
 project must be a Git work tree.
 
 One command installs, reinstalls or updates a project. The first time, run the
-entry script from the project root. It installs release `2026.10.20.1`:
+entry script from the project root. It installs release `2026.10.24.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.20.1/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.24.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 End the line with `| bash -s -- --to latest` to install the newest release
@@ -197,16 +197,19 @@ scripts/agent-guard.sh tier suggest --task fix-logout --paths app/settings/Setti
 scripts/agent-guard.sh tier set small --task fix-logout      # after the user says yes
 scripts/agent-guard.sh tier show --task fix-logout --pr-line # one line for the PR body
 scripts/agent-guard.sh tier close --task fix-logout          # when the user says done
+scripts/agent-guard.sh tier stats --since 2026-10-23         # how tiers worked out so far
 ```
 
 How each tier is decided:
-- **Large:** the change touches a risky path or name, such as `auth`, `payment`, `migrations/`, `.env` or `Dockerfile`, or it changes stored or sent data, or who may do what, or it has more than 15 files or 500 changed lines.
-- **Medium:** more than 3 files or 60 changed lines, or a new or upgraded library. Tests, lock files and generated files are not counted.
+- **Large:** the change touches a risky path or name, such as `auth`, `payment`, `migrations/`, `.env` or `Dockerfile`, or it changes stored or sent data, or who may do what, or two or more agents share the task (`--handoff`, for example Claude writes the spec and Codex codes), or it has more than 15 files or 500 changed lines.
+- **Medium:** more than 3 files or 60 changed lines, a new or upgraded library, or a binary file that is not an image, font, audio, video or PDF (such as a `.jar`). Tests, lock files and generated files are not counted. Files that were only moved count here but never make a change large: moving 20 files without edits is medium.
 - **Small:** everything else.
 
 Add your own risky paths as `risk_paths` in
 `docs/superpowers/specs/project-tech-stack.json`. That file is yours, and
 updates keep it. A path like `app/ledger` also covers the files inside it.
+Binary types that should count like images go in the same file as
+`binary_asset_extensions`, for example `["psd", "sketch"]`.
 
 The thresholds are a first guess. They live in the kit's
 `docs/agent-configs/context-policy.json`. You can change them there, but when a
@@ -236,7 +239,8 @@ What counts: on a feature branch, everything since it left the default branch
 work when you run `tier set` there; a stacked branch with `--base` counts only
 its own work once the parent is merged). A branch that starts from another
 branch, such as `develop` or a parent PR, needs `--base <branch>`; you can add
-it on any later `tier set`.
+it on any later `tier set`. Pre-final reminds you only when the task started on
+commits the default branch does not have.
 On the default branch, everything since `tier set`, minus the commits pulled
 from teammates and the commits already pushed (so each push is checked on its
 own). The pre-push hook counts only committed work, not draft files. When git
@@ -245,6 +249,18 @@ before the task, pre-final names the cause and does not fail.
 
 This catches mistakes, not intent. Tier records stay on your machine, so put
 the `--pr-line` output in the PR description.
+
+`tier stats` shows how the tiers worked out on this machine, so the thresholds
+can be tuned from real numbers (`--since YYYY-MM-DD` keeps the newer tasks,
+`--json` prints the same counts as JSON):
+
+```text
+Tasks: 18 (15 closed, 3 open) since 2026-10-23
+Tier: small 9 · medium 6 · large 3 · handoff 4 · raised after coding 1
+Suggestion: kept 14 · lowered with a reason 2 · raised 2
+Warnings: pre-final 5 on 4 tasks · push 3 on 3 tasks
+Time to close (median): small 36 min · medium 3.1 h · large 1.8 d
+```
 
 ## What the full workflow generates
 

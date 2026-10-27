@@ -1993,7 +1993,9 @@ elif over or missing:
         needs = f"; the raise then needs {joined(seats)} to pass" if seats else ""
         details.append(f"Next: ask the user to raise the tier (scripts/agent-guard.sh tier set {measured} "
                        f"--task {m.get('task')}{needs}) or split the change.")
-        if not m.get("base_ref") and m.get("branch") and m.get("branch") != m.get("default_name"):
+        # Only with evidence that the task did not start from the default
+        # branch (tier tidy-up rule 1).
+        if m.get("base_hint") is True:
             details.append(f"Next: if this branch starts from another branch, give its base: scripts/agent-guard.sh "
                            f"tier set {declared} --task {m.get('task')} --base <branch>.")
         if m.get("move_hint") is True:
@@ -2032,6 +2034,7 @@ block = {
     "coding_started_tier": started,
     "raised_after_coding": raised,
     "missing_reviews": missing,
+    "committed": os.environ.get("TIER_COMMITTED") == "true",
 }
 if status not in ("none", "stale") and partial:
     # Spec rule 4: a partial measure names its cause.
@@ -2541,10 +2544,11 @@ PY
 tier_synopsis() {
   local line
   for line in \
-    "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear]" \
+    "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]" \
     "tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]" \
     "tier show [--task <id>] [--pr-line]" \
-    "tier close --task <id>"; do
+    "tier close --task <id>" \
+    "tier stats [--since YYYY-MM-DD] [--json]"; do
     printf '%sscripts/agent-guard.sh %s\n' "$1" "$line"
   done
 }
@@ -2558,7 +2562,9 @@ tier() {
       ;;
   esac
   # -I: never import modules from the project's scripts/ folder.
-  python3 -I "$TIER_PROGRAM" "$@"
+  # TIER_EVENTS: the session event log `tier stats` reads (it may live
+  # outside the project).
+  TIER_EVENTS="$SESSION_EVENTS" python3 -I "$TIER_PROGRAM" "$@"
 }
 
 case "${1:-}" in

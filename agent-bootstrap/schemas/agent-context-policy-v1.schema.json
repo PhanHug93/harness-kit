@@ -99,6 +99,7 @@
     "risk_paths": { "$ref": "#/$defs/stringList" },
     "dependency_manifests": { "$ref": "#/$defs/stringList" },
     "dependency_locks": { "$ref": "#/$defs/stringList" },
+    "binary_asset_extensions": { "type": "array", "items": { "type": "string", "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]*$" }, "description": "Extensions (no dot, any case) of binary files that count like any other file in a tier measure: images, fonts, audio, video, PDF. Other binaries are at least medium." },
     "test_patterns": {
       "type": "object",
       "required": ["dirs", "names"],

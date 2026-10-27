@@ -60,7 +60,7 @@ done
 doc_lacks AGENTS.md 'Before completion, run' 'do not commit them until' 'not a closure gate'
 # Change tiers: AGENTS.md says how to pick one; the contracts give each tier's
 # phases and the coding rule; the schema says who writes tier.json.
-doc_has AGENTS.md '## Pick a tier' 'scripts/agent-guard.sh tier suggest' 'a new request mid-task means' \
+doc_has AGENTS.md '## Pick a tier' 'scripts/agent-guard.sh tier suggest' 'new scope mid-task: suggest again' \
   'tier suggest --task' 'When the user says done: `tier close --task <id>`'
 doc_has "$modes" 'A small or medium tier the user confirmed' \
   'small: `analysis` -> `implementation` -> `resolution`' \
@@ -102,7 +102,9 @@ doc_has .codex/codex-mode.sh 'End with the tier checkpoint: run scripts/agent-gu
 doc_has .codex/codex-mode.sh '--by @spec --paths <files>' '--by @gate --paths <files>' '--by @build --paths <files>' \
   'l = large · m = medium · s = small'
 doc_lacks .codex/codex-mode.sh 'Enter = keep · m · s'
-doc_has docs/agent-configs/tier-medium.md '--by @build --paths <files>' '`--unclear`'
+doc_has docs/agent-configs/tier-medium.md '--by @build --paths <files>' '`--unclear`' '`--handoff`'
+doc_has AGENTS.md '`--handoff`'
+doc_has .codex/codex-mode.sh '--unclear or --handoff when true'
 doc_has .claude/commands/planning.md '--by @spec --paths <files>'
 doc_has .claude/commands/coding.md '--paths <files>` (and the AGENTS.md flags when true)'
 doc_has docs/agent-configs/RECOVERY.md 'scripts/harness-kit.sh --take-kit' 'agent-init --apply-candidates --only' \

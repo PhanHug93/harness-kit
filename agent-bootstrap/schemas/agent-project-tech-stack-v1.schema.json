@@ -49,6 +49,7 @@
       }
     },
     "risk_paths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "binary_asset_extensions": { "type": "array", "items": { "type": "string", "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_+-]*$" }, "description": "Extra binary asset extensions for the tier measure, added to the kit list in the context policy." },
     "toolchain": { "type": "array", "items": { "type": "string", "minLength": 1 } },
     "conventions": { "type": "array", "items": { "type": "string" } },
     "source_evidence": {

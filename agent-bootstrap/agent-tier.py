@@ -18,6 +18,7 @@ import os
 import posixpath
 import re
 import stat
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -115,19 +116,24 @@ def load_rules(policy_path, contract_path):
         if not string_list(policy.get(key)):
             raise bad(key)
         lists[key] = list(policy[key])
+    # Optional: an older policy without it keeps every binary at medium.
+    assets = policy.get("binary_asset_extensions", [])
+    if not (string_list(assets) and all(ASSET_EXTENSION.fullmatch(name) for name in assets)):
+        raise bad("binary_asset_extensions")
     test_patterns = policy.get("test_patterns")
     if not (isinstance(test_patterns, dict) and string_list(test_patterns.get("dirs"))
             and string_list(test_patterns.get("names"))):
         raise bad("test_patterns")
 
-    project = {"risk_paths": [], "generated_files": []}
+    project = {"risk_paths": [], "generated_files": [], "binary_asset_extensions": []}
     if os.path.isfile(contract_path):
         try:
             contract = read_json(contract_path)
         except TierError:
             # Unreadable, not JSON or nested too deep: bad user JSON, ignored.
             contract = None
-            warn("project-tech-stack.json is not valid JSON; its risk_paths and generated_files are ignored")
+            warn("project-tech-stack.json is not valid JSON; its risk_paths, generated_files and "
+                 "binary_asset_extensions are ignored")
         if isinstance(contract, dict):
             for key in project:
                 if key not in contract:
@@ -135,8 +141,15 @@ def load_rules(policy_path, contract_path):
                 if string_list(contract[key]):
                     project[key] = list(contract[key])
                 else:
-                    warn(f"project-tech-stack.json {key} is not a list of paths; it is ignored")
+                    what = "extensions" if key == "binary_asset_extensions" else "paths"
+                    warn(f"project-tech-stack.json {key} is not a list of {what}; it is ignored")
 
+    # An entry like "." or "*.psd" would match nothing or every file with no
+    # extension: warned about and left out.
+    project_assets = [name for name in project["binary_asset_extensions"] if ASSET_EXTENSION.fullmatch(name)]
+    for name in project["binary_asset_extensions"]:
+        if not ASSET_EXTENSION.fullmatch(name):
+            warn(f"project-tech-stack.json binary_asset_extensions: {shown(name)} is not an extension like png; it is ignored")
     return {
         "limits": limits,
         "risk_tokens": {token.lower() for token in lists["risk_tokens"]},
@@ -148,6 +161,7 @@ def load_rules(policy_path, contract_path):
         # so "Latest.kt" is not a test; the others ignore case.
         "test_names": [(name, name != name.lower()) for name in test_patterns["names"]],
         "generated": project["generated_files"],
+        "assets": {name.lower().lstrip(".") for name in assets + project_assets},
     }
 
 
@@ -325,8 +339,9 @@ FLAG_REASONS = {
     "access": "--access: changes who may do what",
     "dependency": "--dependency: adds or upgrades a library",
     "unclear": "--unclear: the request is not clear yet",
+    "handoff": "--handoff: the work passes between agents (one plans, another codes)",
 }
-REQUEST_KEYS = {"files", "lines", "data", "access", "dependency", "unclear"}
+REQUEST_KEYS = {"files", "lines"} | set(FLAG_REASONS)
 FILE_KEYS = {"path", "old_path", "lines", "binary", "submodule", "moved_from"}
 MAX_RISKY_LINES = 5
 
@@ -369,6 +384,22 @@ def read_files(raw_files):
     return files
 
 
+ASSET_EXTENSION = re.compile(r"\.?[A-Za-z0-9][A-Za-z0-9_+-]*")
+
+
+def is_asset(path, rules):
+    """A binary that counts like any other file: an image, font, audio,
+    video or PDF by its last extension (tier tidy-up rule 2)."""
+    return posixpath.splitext(path)[1][1:].lower() in rules["assets"]
+
+
+def is_pure_move(item):
+    """A file only moved: an old path, 0 counted lines, not binary (tier
+    tidy-up rule 3). A suggest path has no lines, so it is never one."""
+    return (bool(item.get("old_path") or item.get("moved_from")) and "lines" in item and item["lines"] == 0
+            and not item["binary"] and not item["submodule"])
+
+
 def classify(request, rules):
     if not isinstance(request, dict):
         raise TierError("tier request must be a JSON object")
@@ -386,7 +417,7 @@ def classify(request, rules):
         flags[key] = request.get(key, False)
 
     excluded = {"tests": 0, "locks": 0, "generated": 0, "lines": 0}
-    counted, counted_sum = 0, 0
+    counted, counted_sum, moves = 0, 0, 0
     risky, manifests, locks, binaries, submodules = [], [], [], [], []
     for item in files:
         names = item_paths(item)
@@ -399,7 +430,7 @@ def classify(request, rules):
         lock = next((name for name in names if is_lock(name, rules)), None)
         if lock:
             locks.append(lock)
-        if item["binary"]:
+        if item["binary"] and not all(is_asset(name, rules) for name in names):
             binaries.append(item["path"])
         if item["submodule"]:
             submodules.append(item["path"])
@@ -414,6 +445,7 @@ def classify(request, rules):
         else:
             counted += 1
             counted_sum += lines
+            moves += is_pure_move(item)
             continue
         excluded["lines"] += lines
 
@@ -430,15 +462,19 @@ def classify(request, rules):
     if len(risky) > MAX_RISKY_LINES:
         large_reasons.append(f"… and {len(risky) - MAX_RISKY_LINES} more risky paths")
     medium_reasons = []
-    if counted > medium["max_files"]:
-        large_reasons.append(f"{plural(counted, 'counted file')} (medium allows {medium['max_files']})")
+    # Pure moves count for medium, never for large (tier tidy-up rule 3).
+    edited = counted - moves
+    if edited > medium["max_files"]:
+        large_reasons.append(f"{plural(edited, 'changed file')}, plus {moves} only moved (medium allows {medium['max_files']})"
+                             if moves else f"{plural(counted, 'counted file')} (medium allows {medium['max_files']})")
     elif counted > small["max_files"]:
-        medium_reasons.append(f"{plural(counted, 'counted file')} (small allows {small['max_files']})")
+        moved = f", {moves} only moved" if moves else ""
+        medium_reasons.append(f"{plural(counted, 'counted file')}{moved} (small allows {small['max_files']})")
     if line_count > medium["max_lines"]:
         large_reasons.append(f"{plural(line_count, 'counted line')} (medium allows {medium['max_lines']})")
     elif line_count > small["max_lines"]:
         medium_reasons.append(f"{plural(line_count, 'counted line')} (small allows {small['max_lines']})")
-    for key in ("data", "access"):
+    for key in ("data", "access", "handoff"):
         if flags[key]:
             large_reasons.append(FLAG_REASONS[key])
     medium_reasons.extend(f"dependency manifest changed: {shown(path)}" for path in manifests)
@@ -643,6 +679,29 @@ def is_ancestor(older, newer):
     if code in (0, 1):
         return code == 0
     raise TierError("cannot read the history from git")
+
+
+def needs_base_hint(record, branch):
+    """The --base hint only when the task started with commits the default
+    branch does not hold (it came from another branch, or work came before
+    tier set), or when the default branch is unknown (tier tidy-up rule 1).
+    A task moved from the default branch (spec rule 5) keeps its start there,
+    so it gets no hint: git cannot tell its own commits after the branch
+    point from another branch's."""
+    if not record or record.get("base_ref") or branch is None:
+        return False
+    default_full, _, default_name = default_branch()
+    if branch == default_name:
+        return False
+    start = record.get("start_commit") or ""
+    if start == EMPTY_TREE:
+        return False
+    if default_full is None or not OBJECT_ID.fullmatch(start):
+        return True
+    try:
+        return not is_ancestor(start, default_full)
+    except TierError:
+        return True  # a start commit git cannot read: cannot tell
 
 
 def start_base(start, branch, head, default_full, default_name):
@@ -1712,7 +1771,8 @@ def op_set(args):
     if moved is not None:
         print(f"The task moved to branch {shown(branch)} (it was started on {shown(moved)}).")
     count = len(found["files"]) if first and found else 0
-    hint = "" if base is not None else " If this branch starts from another branch, run tier set again with --base <that branch>."
+    hint = (" If this branch starts from another branch, run tier set again with --base <that branch>."
+            if count and needs_base_hint(record, branch) else "")
     if count == 1:
         print("1 file is already changed; it counts toward this task. "
               "Commit or stash it on another branch first if it belongs to other work." + hint)
@@ -1889,6 +1949,149 @@ def op_close(args):
     print(f"Tier closed: {record['declared'] or 'not set'} (task {task})")
 
 
+def parse_time(text):
+    """A history or event time (2026-10-23T08:00:00Z); None when it is not one."""
+    try:
+        return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return None
+
+
+def since_date(value):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise argparse.ArgumentTypeError("--since must be a date like 2026-10-23")
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("--since must be a date like 2026-10-23") from None
+    return value
+
+
+def task_records():
+    """(records, skipped): every readable .agents/tasks/<id>/tier.json."""
+    records, skipped = [], 0
+    try:
+        names = sorted(os.listdir(TASKS_DIR))
+    except FileNotFoundError:
+        return records, skipped
+    for name in names:
+        path = os.path.join(TASKS_DIR, name, "tier.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            record = load_tier(path, name)
+        except (TierError, OSError, UnicodeDecodeError):
+            record = None
+        if record is None:
+            skipped += 1
+        else:
+            records.append(record)
+    return records, skipped
+
+
+def tier_warnings(path, tasks):
+    """{"pre_final"|"push": {task: events}}: pre_final events whose tier
+    block is exceeded, for the given tasks. A missing log or a bad line is
+    skipped."""
+    found = {"pre_final": {}, "push": {}}
+    if not path:
+        return found
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return found
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        block = event.get("tier") if isinstance(event, dict) and event.get("event") == "pre_final" else None
+        if (isinstance(block, dict) and block.get("status") == "exceeded" and isinstance(block.get("task"), str)
+                and block["task"] in tasks):
+            side = found["push" if block.get("committed") is True else "pre_final"]
+            side[block["task"]] = side.get(block["task"], 0) + 1
+    return found
+
+
+def duration(minutes):
+    if minutes < 60:
+        return f"{round(minutes)} min"
+    if minutes < 48 * 60:
+        return f"{minutes / 60:.1f} h"
+    return f"{minutes / 1440:.1f} d"
+
+
+def op_stats(args):
+    """Numbers from the records already kept (tier tidy-up rule 4): tasks per
+    tier, how the declared tier compares with the last suggestion, the
+    warnings at pre-final and at push, and the median time to close."""
+    records, skipped = task_records()
+    if skipped:
+        warn(f"tier stats: {plural(skipped, 'record')} skipped (not readable)")
+    kept = []
+    since = datetime.datetime.strptime(args.since, "%Y-%m-%d") if args.since else None
+    for record in records:
+        first = parse_time(record["history"][0].get("at")) if record["history"] else None
+        if since is None or (first is not None and first >= since):
+            kept.append(record)
+    tiers = {name: 0 for name in TIERS + ("none",)}
+    suggestion = {"kept": 0, "lowered": 0, "raised": 0, "not_compared": 0}
+    handoff, after_coding, closed, minutes = 0, 0, 0, {name: [] for name in TIERS}
+    for record in kept:
+        declared, suggested = record.get("declared"), record.get("suggested")
+        tiers[declared or "none"] += 1
+        inputs = record.get("suggestion_inputs")
+        flags = inputs.get("flags") if isinstance(inputs, dict) else None
+        handoff += isinstance(flags, list) and "handoff" in flags
+        if declared is None or suggested is None:
+            suggestion["not_compared"] += 1
+        elif declared == suggested:
+            suggestion["kept"] += 1
+        elif TIERS.index(declared) < TIERS.index(suggested):
+            suggestion["lowered"] += 1
+        else:
+            suggestion["raised"] += 1
+        started = record.get("coding_started_tier")
+        if declared in TIERS and started in TIERS and TIERS.index(declared) > TIERS.index(started):
+            after_coding += 1
+        if record.get("status") == "closed":
+            closed += 1
+            close = next((entry for entry in reversed(record["history"]) if entry.get("event") == "close"), None)
+            begin, end = parse_time(record["history"][0].get("at")), parse_time((close or {}).get("at"))
+            if declared in TIERS and begin and end and end >= begin:
+                minutes[declared].append((end - begin).total_seconds() / 60)
+    found = tier_warnings(os.environ.get("TIER_EVENTS"), {record["task_id"] for record in kept})
+    warnings = {side: {"events": sum(counts.values()), "tasks": len(counts)} for side, counts in found.items()}
+    medians = {name: statistics.median(values) for name, values in minutes.items() if values}
+    if args.json:
+        print(json.dumps({
+            "schema": "harness-tier-stats/v1", "since": args.since,
+            "tasks": {"total": len(kept), "closed": closed, "open": len(kept) - closed},
+            "tiers": tiers, "handoff": handoff, "raised_after_coding": after_coding, "suggestion": suggestion,
+            "warnings": warnings,
+            "close_minutes_median": {name: round(value, 1) for name, value in medians.items()}, "skipped": skipped,
+        }, indent=2))
+        return
+    if not kept:
+        print(f"No tier records since {args.since}." if args.since and records else "No tier records yet.")
+        return
+    print(f"Tasks: {len(kept)} ({closed} closed, {len(kept) - closed} open)" + (f" since {args.since}" if args.since else ""))
+    line = " · ".join(f"{name} {tiers[name]}" for name in TIERS)
+    # Raised after coding compares with the tier coding started at, not
+    # with the suggestion, so it is a tier fact.
+    print(f"Tier: {line}" + (f" · no tier {tiers['none']}" if tiers["none"] else "")
+          + f" · handoff {handoff} · raised after coding {after_coding}")
+    print(f"Suggestion: kept {suggestion['kept']} · lowered with a reason {suggestion['lowered']} · "
+          f"raised {suggestion['raised']}"
+          + (f" · not compared {suggestion['not_compared']}" if suggestion["not_compared"] else ""))
+    sides = [f"{label} {warnings[side]['events']} on {plural(warnings[side]['tasks'], 'task')}"
+             for side, label in (("pre_final", "pre-final"), ("push", "push")) if warnings[side]["events"]]
+    print("Warnings: " + (" · ".join(sides) if sides else "none"))
+    if medians:
+        print("Time to close (median): " + " · ".join(f"{name} {duration(value)}" for name, value in medians.items()))
+
+
 def op_classify(args):
     """Hidden, for tests and pre-final: prints the classify result as JSON."""
     try:
@@ -1943,7 +2146,8 @@ def op_measure(args):
                 task = active
     record = load_tier(packet_paths(task)[1], task) if task else None
     rules = load_rules(args.policy, args.tech_stack)
-    found = collect(record, *repo_state(), committed=args.committed)
+    branch, head = repo_state()
+    found = collect(record, branch, head, committed=args.committed)
     started = note_coding_start(record, found) if record is not None else None
     result = judge(found, rules)
     record = record or {}
@@ -1954,16 +2158,17 @@ def op_measure(args):
                   suggested_after_set=suggested_after_set(record) if record else False,
                   coding_started_tier=started, raised_after_coding=raised,
                   missing_reviews=missing_reviews(packet_paths(task)[0], declared, args.committed) if raised else [],
-                  base_ref=record.get("base_ref"), branch=repo_state()[0])
+                  base_ref=record.get("base_ref"), branch=branch, base_hint=needs_base_hint(record, branch))
     print(json.dumps(result, ensure_ascii=False))
 
 
 # ---- command line ----
 SYNOPSIS = (
-    "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear]",
+    "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]",
     "tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]",
     "tier show [--task <id>] [--pr-line]",
     "tier close --task <id>",
+    "tier stats [--since YYYY-MM-DD] [--json]",
 )
 USAGE = "".join(("Usage: " if index == 0 else "       ") + "scripts/agent-guard.sh " + line + "\n"
                 for index, line in enumerate(SYNOPSIS))
@@ -1974,11 +2179,14 @@ HELP = USAGE + "\n".join((
     "  --lines is your estimate of changed lines, without tests, lock files and generated files.",
     "  --data: changes stored or sent data. --access: changes who may do what.",
     "  --dependency: adds or upgrades a library. --unclear: the request is not clear yet.",
+    "  --handoff: two or more agents share the packet (one plans, another codes).",
     "  With --task, it also records the suggestion in .agents/tasks/<id>/tier.json.",
     "set records the tier the user confirmed. A tier below the suggestion needs --reason.",
     "  --base names the branch a stacked branch starts from. --answer records a checkpoint answer.",
     "show prints the task record and the change since its base; --pr-line prints one line for the PR body.",
     "close closes the task. Run it only when the user says the task is done.",
+    "stats counts the tasks in this checkout: tiers, suggestions kept or changed, warnings, time to close.",
+    "  --since keeps the tasks started on or after that date.",
 )) + "\n"
 
 
@@ -2066,6 +2274,10 @@ def command_parsers():
     close = parser("close")
     close.add_argument("--task", type=task_id, required=True)
 
+    stats_ = parser("stats")
+    stats_.add_argument("--since", type=since_date)
+    stats_.add_argument("--json", action="store_true")
+
     classify_ = parser("classify")  # hidden: not in SYNOPSIS or HELP
     classify_.add_argument("--request", required=True)
     paths(classify_)
@@ -2076,7 +2288,8 @@ def command_parsers():
 
     return {
         "suggest": (suggest, op_suggest), "set": (set_, op_set), "show": (show, op_show),
-        "close": (close, op_close), "classify": (classify_, op_classify), "measure": (measure_, op_measure),
+        "close": (close, op_close), "stats": (stats_, op_stats), "classify": (classify_, op_classify),
+        "measure": (measure_, op_measure),
     }
 
 
@@ -2099,7 +2312,7 @@ def main(argv):
         return
     if options.command is None:
         sys.stderr.write(USAGE)
-        raise TierError("tier needs a command: suggest, set, show or close")
+        raise TierError("tier needs a command: suggest, set, show, close or stats")
     if options.command not in commands:
         sys.stderr.write(USAGE)
         raise TierError(f"unknown tier command: {shown(options.command)}")
