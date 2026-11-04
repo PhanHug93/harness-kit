@@ -308,7 +308,7 @@ write_infra_agent_docs() {
 
 This repository has only the portable multi-agent infrastructure installed.
 Workflow philosophy is opt-in. Re-run bootstrap with \`--workflow full\` if the
-project wants the Karpathy/council/three-mode contracts.
+project wants the Karpathy/council/seat contracts.
 
 ## Workspace–Repository Guard
 
@@ -406,7 +406,7 @@ Run git directly (\`git ...\`); the kit no longer uses rtk.
 - Other force/rewrite actions need explicit approval.
 - Conventional Commits; no agent names/trailers.
 
-Default planning/coding/reviewing posture is project-local full-flow. Do not
+Default seat posture is project-local full-flow. Do not
 revert unrelated user work.
 EOF
 
@@ -540,7 +540,7 @@ This project has shared Claude Bash and edit/write hooks installed:
 The hook validates the detector lock and guards protected Edit/Write/MultiEdit
 paths. It is not a security boundary for arbitrary Bash commands.
 Workflow command docs are opt-in; run bootstrap with `--workflow full` if the
-project wants planning/coding/reviewing command contracts.
+project wants seat commands.
 EOF
 }
 
@@ -594,7 +594,7 @@ $mobile_skill_read_on_demand_bullet
 
 Large tier, or any \`@seat\` session (such as medium \`@verify\`):
 
-- \`docs/agent-configs/agent-mode-contracts.md\` to select/switch modes.
+- \`docs/agent-configs/agent-mode-contracts.md\` for your seat's rules.
 - \`docs/agent-configs/agent-handoff-schema.md\` for packets, resume and ownership.
 
 Budget: roughly 4k estimated tokens; excludes tool-specific wrappers.
@@ -628,7 +628,9 @@ large (all seats).
    \`--data\` (stored or sent data), \`--access\` (who may do what),
    \`--dependency\` (a library), \`--unclear\` (vague request) or
    \`--handoff\` (another agent codes) when true.
-3. Ask the user in one line (Enter = keep), then \`tier set <tier> --task <id>\`.
+3. Ask the user in one line (\`Enter = keep <tier> · l = large · m = medium · s = small · + = add scope\`),
+   then \`tier set <tier> --task <id>\`; a seat adds \`--by <seat>\` to both and
+   \`--answer keep|switch|scope\` ("not recorded" when read-only).
 4. Pre-final checks the real change; new scope mid-task: suggest again.
    When the user says done: \`tier close --task <id>\`.
 
@@ -639,8 +641,8 @@ Long-term memory across sessions and seats (Claude Code and Codex): follow
 
 ## Collaboration
 
-Mode contracts define the \`planning\`, \`coding\` and \`reviewing\` modes,
-seats and gates. No concurrent same-file edits. For a fresh-context
+Seat contracts (\`docs/agent-configs/agent-mode-contracts.md\`) give each seat
+its duty, gates and exits. No concurrent same-file edits. For a fresh-context
 adversarial check, use \`.agents/skills/doubt-driven/SKILL.md\`.
 
 ## Workspace–Repository Guard
@@ -705,8 +707,8 @@ before broad search. The second fails when agent runtime state is tracked.
 
 $seat_roster_block
 
-Occupants change with \`scripts/agent-seats.sh\`; data lives in
-\`docs/agent-configs/seats.json\`.
+Occupants change with \`scripts/agent-seats.sh\` (per packet: \`--task <id>\`); data
+lives in \`docs/agent-configs/seats.json\`.
 
 ## Detected Project Stack
 
@@ -734,7 +736,7 @@ $warning_bullets
 
 ## Human Approval Policy
 
-Default: project-local full-flow in all modes. Use supervised/read-only/propose
+Default: project-local full-flow for every seat. Use supervised/read-only/propose
 only for user-requested step-by-step approval. Exact approval is required for
 external-path mutations, installs, commits, pushes, force operations, or
 local-only secret/permission file changes.
@@ -822,9 +824,9 @@ EOF
   write_file "$TARGET_DIR/docs/agent-configs/agent-handoff-schema.md" <<'EOF'
 # Agent Handoff Schema
 
-Seat, transition, and gate policy lives only in
+Seat, transition, and gate policy lives in
 `docs/agent-configs/agent-mode-contracts.md`. Allowed values, task relations,
-the closing `## Outcome` and artifact formats live in
+the closing `## Outcome`, artifact formats and review checklists live in
 `docs/agent-configs/agent-handoff-reference.md`; read its State values and the
 section your seat writes or checks.
 
@@ -890,9 +892,9 @@ the `tier.json` `start_commit`).
 > <original request with secrets redacted>
 ```
 
-Record objective, acceptance criteria, scope/non-goals, evidence, constraints,
-interfaces, edge cases, migration/security/privacy impact, verification,
-assumptions, and implementation boundaries. When `@gate` returns `task.md` to
+Required: objective, user-visible behaviour, observable criteria, scope,
+constraints, owner decisions, assumptions, evidence; optional input for
+`@gate`: interfaces, edge cases, implementation notes. When `@gate` returns `task.md` to
 analysis, append `## Specification revision <n>` listing the sections it changed;
 preserve `## Request (verbatim)` and prior history.
 
@@ -920,7 +922,7 @@ Per-seat detail for `docs/agent-configs/agent-handoff-schema.md`.
   `pass → pass; fail, error → fail; unverified → not_run`
 
 `seat` is an optional protocol tag; when absent, derive it from `phase` as in
-the mode contracts' transitions (`closed` → `@owner`). `owner` names the
+each seat's Starts when (`closed` → `@owner`). `owner` names the
 occupant's host class: host `human` uses `owner: user`; hosts other than claude
 and codex use `owner: agent` with `"occupant": {"host": "<host>"}`, and an
 agent runner records `"verification": {"runner": "agent", "runner_host": "<host>"}`.
@@ -979,10 +981,19 @@ model_source: default | CODEX_USE_FALLBACK | <override-variable>
 reviewed_revision: <latest specification revision n, or 0>
 spec_sufficiency: sufficient | partially_sufficient | insufficient
 sufficient_for_coding_model: yes | no
-blocking_gaps: none | <concise list>
+plan: <path> | none
+blocking_gaps: none | <spec findings only>
+resolved_in_plan: none | <technical findings and where the plan answers them>
 ```
 
-State sufficiency matches the latest attempt.
+State sufficiency matches the latest attempt. A later round reads its previous
+verdict and the newest `## Specification revision <n>`, not a git diff. A `spec` finding (unclear or
+conflicting requirement, missing owner decision, scope change, undefined
+behaviour the user sees) blocks and returns the packet to `@spec`. A
+`technical` finding (files, races, test design, migration steps,
+performance) is resolved in the plan and listed in `resolved_in_plan`. The
+plan is `docs/superpowers/plans/<topic>/plan.md` or
+`.agents/tasks/<task-id>/plan.md`; skip writing-plans' execution-method choice.
 
 ### `verify-review.md`
 
@@ -1001,6 +1012,9 @@ verdict: pass | changes_required | blocked
 Review history is append-only and immutable; each round appends the next
 numbered `### Attempt <n>`.
 A medium human review records `reviewer_model: human` and a `pr: <url>` line.
+`@verify` checks the hand-off report against the diff, re-runs only a check
+whose evidence is missing, stale or inconsistent (or one focused test for a
+specific doubt), and recommends heavier validation instead of running it.
 `fresh_session_attestation` is procedural-only and is not proof of session, model, account, or host independence.
 
 ### `implementation.md`
@@ -1009,59 +1023,65 @@ Append `## Implementation attempt <n>` with model/source, route, scope, files,
 verification, deviations, risks, blockers, and adequacy downgrade. A `@gate`
 coding escalation records `policy_exception=gate_coding`,
 `authorization=user_session`, and the reason; readers accept legacy `sol_coding`
-for one release. Its policy meaning is in
-`docs/agent-configs/agent-mode-contracts.md`.
+for one release. Gate coding is an escalation: the user must open a new session for the
+`@gate` occupant to code; its `policy_exception` record is an audit-only
+procedural declaration and cannot provide file-based authorization.
+
+Fixtures cross the boundary they claim (a real HTTP 401,
+not `status: 401` in JSON). An equivalence or invariance guard names the
+production boundary its fixture crosses, declares its mutation in the packet
+before the test is written, and must fail when the fixture transform is
+replaced with identity.
 
 ### `audit-review.md`
 
 Append one findings-first `## Cross-review attempt <n>` with
-`verdict: pass | changes_required`; its checklist and procedural declarations
-live in `docs/agent-configs/agent-mode-contracts.md`.
+`verdict: pass | changes_required`. `@audit` checks state/review consistency,
+`base_commit`, verification, any gate-coding decision and reason, and
+approved scope. It also checks that no `resolved_in_plan` decision
+contradicts an owner decision or acceptance criterion.
+Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
+Check author/reviewer model and session declarations for contradictions.
 
 ### `user-decision.md`
 
 Append one dated entry per user decision: the user's words, action, scope,
 authorization, and alternatives. An entry allowing another pass records
 `revision_rounds` reset to 0.
+
+### Packet seats
+
+The first `tier set` copies the project roster to
+`.agents/tasks/<task-id>/seats.json`;
+`scripts/agent-seats.sh use|set ... --task <id> --reason "<the user's words>"`
+changes and logs it (`--help`). `owner` follows the phase's seat
+there; launchers refuse a seat it gives another host; `tier close` prints the
+final arrangement for the journal. `@audit` reads `show --task <id>` facts.
 EOF
 
   write_overlay_file "$TARGET_DIR/docs/agent-configs/agent-mode-contracts.md" <<'EOF'
-# Agent Mode Contracts
+# Seat Contracts
 
 One phase owner writes at a time; ownership is a coordination convention,
 not an authorization or security boundary.
 
-## Claude–Codex Collaboration Protocol
+## Shared rules
 
-### Constrained transitions
-
-- `analysis` · `@spec` -> `technical_review`
-- `technical_review` · `@gate` -> `analysis` | `implementation` | `resolution`
-- `implementation` · `@build` -> `verification` | `resolution`
-- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`
-- `cross_review` · `@audit` -> `implementation` | `resolution`
-- `resolution` · `@owner` -> `closed` | user-selected prior phase
-
-By tier:
+### Flow by tier
 
 - small: `analysis` -> `implementation` -> `resolution`
 - medium: `analysis` -> `implementation` -> `verification` -> `resolution`
-- large: the list above
+- large: every seat below, in order
 
 `awaiting_user` is valid only with `resolution` · `@owner`. `closed` is valid only with phase `closed`.
-Other active combinations use `open` and the listed owner.
+Other active combinations use `open` and the phase's seat.
 
-### Gates and authority
+### Authority
 
-- Claude implements only after an explicit user decision in the packet.
-  A small or medium tier the user confirmed (in `tier.json`) is that decision;
-  the `@gate` rules apply to large only.
+- Only the packet's `@build` codes, on the host the user picks per task, after
+  a confirmed small or medium tier (in `tier.json`) or, at large, `@gate` approval.
 - `@gate` owns the blocking adequacy verdict on the spec. `@build` may downgrade `yes`
   for a spec gap it finds, but may never upgrade `no`.
-- `@gate` runs `scripts/agent-guard.sh baseline` before its first round:
-  `fail` or `error` → stop and tell the user; `unverified` → note the risk
-  "baseline unknown". A later round reads its previous verdict and the sections
-  the newest `## Specification revision <n>` lists, not a git diff.
 - `revision_rounds` counts returns to `implementation` only; at 2, that seat
   moves the packet to `resolution` with `awaiting_user` and asks whether
   another bounded pass is worth its cost.
@@ -1069,64 +1089,106 @@ Other active combinations use `open` and the listed owner.
   the close included, in `user-decision.md`; these are
   the only writes a non-owner seat may make to a resolution packet.
 - Severity names its trigger condition and frequency, or is marked as an estimate.
+
+### Verification
+
 - Only the executing host may declare a pass for what it ran.
   Skipped or unavailable checks never pass.
 - The seat that changed code runs focused tests while editing, then the
-  declared mutations and full suite once. `@verify` checks that seat's hand-off
-  report against the diff, re-runs only a check whose evidence is missing,
-  stale or inconsistent (or one focused test for a specific doubt), and
-  recommends heavier validation instead of running it.
+  declared mutations and full suite once.
 - Seats do not spawn reviewers beyond the doubt-driven skill or a council the
   user asked for.
-- Every acceptance criterion names its test and what it checks; `@gate` checks
-  this before coding. Fixtures cross the boundary they claim (a real HTTP 401,
-  not `status: 401` in JSON). An equivalence or invariance guard names the
-  production boundary its fixture crosses, declares its mutation in the packet
-  before the test is written, and must fail when the fixture transform is
-  replaced with identity.
-- `@audit` checks state/review consistency, `base_commit`, verification, any
-  gate-coding decision and reason, and approved scope.
-  Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
-  Check author/reviewer model and session declarations for contradictions.
-- Gate coding is an escalation: the user must open a new session for the
-  `@gate` occupant to code; its `policy_exception` record is an audit-only
-  procedural declaration and cannot provide file-based authorization.
 - Memory: `@verify` and `@audit` save a lesson for a defect worth not
   repeating; the seat recording closure turns the packet's out-of-scope
-  follow-ups into agentmemory actions (`.agents/skills/agentmemory-mcp/SKILL.md`).
+  follow-ups into agentmemory actions.
 
-### `@spec` anchor: superpowers brainstorming
+### Tier checkpoint
 
-- `@spec` opens new behaviour with `superpowers:brainstorming` (its steps when
-  the skill is absent). Other seats never brainstorm (an approved packet passes
-  the approval gate); bugs use systematic debugging; on resume or a return to
-  analysis, revise the existing design.
-- The design lives in `task.md` (small change) or
-  `docs/superpowers/plans/<topic>/design.md` (project), linked from `task.md`.
-- The builder check: `@spec` asks the `@build` occupant what it still needs to
-  build from the design; the answers go into the design. For a project, `@build`
-  writes the plan with `superpowers:writing-plans` after `@gate` approves,
-  skipping its execution-method choice, and updates the plan's spec path when
-  the spec moves.
+AGENTS.md `## Pick a tier` steps 2–3 as the seat (Claude Code: the option
+list, keep first). Add scope: revise, then suggest again.
 
-## Planning Mode
+### Report style
 
-Specs, architecture and deep refactor or performance plans: weigh the request,
-evidence, constraints, risks and verification.
+Verdict and blocker count first, then findings as cause and consequence; no
+preamble, recap, pleasantry, alarm words or empty hedges.
 
-## Coding Mode
+## `@spec`
 
-Code after the latest `@gate` approval (large: a
-missing or inconsistent verdict blocks coding) or a confirmed small or medium
-tier: focused root-cause patches with fresh verification; otherwise move to
-resolution.
+- Duty: analysis and specification; the only seat that brainstorms.
+- Starts when: phase `analysis`: a new task, or a spec gap comes back.
+- Writes: `task.md` and the design; new behaviour opens with
+  `superpowers:brainstorming` (its steps when absent), a bug with systematic
+  debugging; a return revises the design.
+- Never: the plan or code.
+- Exits: `technical_review` (large) or `implementation`.
+- By tier: small and medium: request and criteria only.
+- End of turn: the tier checkpoint.
 
-## Reviewing Mode
+## `@gate`
 
-One findings-first, evidence-backed pass; project-local verification allowed.
-Fix only the exact scope the user asked for.
+- Duty: technical gate and plan.
+- Starts when: phase `technical_review` (large).
+  `@gate` runs `scripts/agent-guard.sh baseline` before its first round
+  (`fail` or `error`: stop and tell the user; `unverified`: note "baseline
+  unknown").
+- Writes: checks the spec as requirements;
+  writes the plan with `superpowers:writing-plans`; then
+  the verdict in `gate-review.md`.
+  Every acceptance criterion names its test and what it checks.
+- Never: rewrite the spec, or code.
+- Exits: `analysis` (spec blockers only), `implementation` or `resolution`.
+- By tier: large only.
+- End of turn: the report style with severities; the tier checkpoint
+  (add scope goes to `@spec`).
 
-## Project-Specific Mode Overrides
+## `@build`
+
+- Duty: build from the plan.
+- Starts when: phase `implementation`: the latest `@gate` approval (large: a
+  missing or inconsistent verdict blocks coding), or
+  a confirmed small or medium tier.
+  Default Claude behavior is handoff, not direct implementation.
+- Writes: focused root-cause patches with fresh verification;
+  `implementation.md` (large); updates the plan's spec path when the spec moves.
+- Never: change the spec (gaps go to `@spec`) or, at large, the plan (gaps
+  go to `@gate`).
+- Exits: `verification`, `technical_review` (large: plan gap), `analysis` (spec gap) or `resolution`.
+- By tier: small: one seat checks the request, plans briefly, codes and
+  runs `scripts/agent-guard.sh pre-final --run-verify`; medium:
+  `docs/agent-configs/tier-medium.md`.
+- End of turn: inspect the final diff; hand off.
+
+## `@verify`
+
+- Duty: verification review.
+- Starts when: phase `verification`; medium: a fresh session.
+- Writes: `verify-review.md`.
+- Never: fix beyond the exact scope asked.
+- Exits: `implementation`, `cross_review` or `resolution`.
+- By tier: medium and large.
+- End of turn: the report style.
+
+## `@audit`
+
+- Duty: independent cross-review.
+- Starts when: phase `cross_review` (large).
+- Writes: `audit-review.md`.
+- Never: fix beyond the exact scope asked.
+- Exits: `implementation` or `resolution`.
+- By tier: large only.
+- End of turn: the report style.
+
+## `@owner`
+
+- Duty: the user's decision.
+- Starts when: phase `resolution`.
+- Writes: nothing; the active seat records it.
+- Never: launched.
+- Exits: `closed` or a user-selected prior phase.
+- By tier: all.
+- End of turn: done: `tier close --task <id>`.
+
+## Project-Specific Seat Overrides
 
 <!-- BEGIN USER: mode-contracts:overrides -->
 <!-- Add project-specific mode rules/overrides here; preserved across harness upgrades. -->
@@ -1207,12 +1269,9 @@ Each criterion names the test command that checks it.
 
 ## Checkpoint
 
-After `task.md` is written and before coding, run
-`scripts/agent-guard.sh tier suggest --task <id> --by @build --paths <files>`
-with the files `task.md` plans; add `--data`, `--access`, `--dependency`,
-`--unclear` or `--handoff` when true. Ask one line:
-`Enter = keep medium · l = large · s = small · + = add scope`. Then run
-`scripts/agent-guard.sh tier set <tier> --task <id> --by @build --answer keep|switch|scope`.
+After `task.md` is written and before coding, run the tier checkpoint of
+`docs/agent-configs/agent-mode-contracts.md` as `--by @build`, with the files
+`task.md` plans (`Enter = keep medium · l = large · s = small · + = add scope`).
 
 ## `verify-review.md`
 
@@ -1226,9 +1285,6 @@ fill in the link.
 
 Medium review can run cheaper: `CODEX_REASONING_EFFORT=high .codex/codex-mode.sh @verify`.
 
-## Done
-
-When the user says done, run `scripts/agent-guard.sh tier close --task <id>`.
 EOF
 
 }
@@ -1273,14 +1329,13 @@ Claude Code imports `AGENTS.md` above; anywhere else (Cowork), read `AGENTS.md`
 first. This file adds only what is specific to Claude.
 
 - Claude holds `@spec` (analysis/specification) and `@audit` (independent
-  cross-review) by default; see the seat roster. With a confirmed
-  small or medium tier, Claude implements the change.
-- Roles and gates: `docs/agent-configs/agent-mode-contracts.md`; packets:
+  cross-review) by default; see the seat roster. Who implements: the
+  packet's `@build` (the user picks its host).
+- Seats and gates: `docs/agent-configs/agent-mode-contracts.md`; packets:
   `docs/agent-configs/agent-handoff-schema.md`, under `.agents/tasks/<task-id>/`.
-- Commands in `.claude/commands/`: `/planning`, `/coding`, `/reviewing` (the
-  `-full-flow` names are older aliases), `/codex:setup`, `/codex:rescue`,
-  `/codex:status`, `/doctor`.
-- The Claude host picks the model; these files set behaviour only.
+- Commands in `.claude/commands/`: `/spec`, `/gate`, `/build`, `/verify`,
+  `/audit` (one per seat), `/codex:setup`, `/codex:rescue`, `/codex:status`,
+  `/doctor`.
 EOF
 
   write_file "$TARGET_DIR/.claude/settings.json" <<'EOF'
@@ -1335,82 +1390,82 @@ Do not assume Claude Code hooks run in Cowork.
 If Bash is unavailable, continue analysis and cross-review, and record verification as blocked or delegated with a reason.
 <!-- END COWORK FOLDER INSTRUCTIONS -->
 
-`CLAUDE.md` lists the commands in `.claude/commands/`; `/planning`, `/coding`
-and `/reviewing` are thin entrypoints to
-`docs/agent-configs/agent-mode-contracts.md` and
-`docs/agent-configs/agent-handoff-schema.md` (packets under
-`.agents/tasks/<task-id>/`).
+Seat commands follow `docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 
 In Claude Code, the shared hook denies protected Edit/Write/MultiEdit paths with
 exit 2 unless `pre-edit --ack <reason> <path>` exists for that path. It is not a
 security boundary for Bash.
 EOF
 
-  write_file "$TARGET_DIR/.claude/commands/planning.md" <<'EOF'
-# Planning Mode
+  write_file "$TARGET_DIR/.claude/commands/spec.md" <<'EOF'
+---
+description: Seat @spec, analysis and specification.
+argument-hint: <task-id>
+allowed-tools: Bash(scripts/agent-seats.sh check:*)
+---
 
-Apply `docs/agent-configs/agent-mode-contracts.md` Planning Mode.
-Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
-`.agents/tasks/<task-id>/`.
+!`scripts/agent-seats.sh check spec --host claude --task "$ARGUMENTS"`
 
-Operate project-local full-flow by default. Add `--supervised`, `--read-only`,
-or `--propose` only when the user wants step-by-step approval.
-Run `scripts/detect-agent-tech-stack.sh --markdown` when available. As
-`@spec`, open new behaviour with superpowers brainstorming (the mode contracts'
-`@spec` anchor); use a council only when the user asks for one. End with
-the design and the builder-check answers; `@build` writes the plan after
-`@gate` approves. End with the tier checkpoint: run
-`scripts/agent-guard.sh tier suggest --task <id> --by @spec --paths <files>` (and the
-AGENTS.md flags when true), then ask
-one line (`Enter = keep <tier> · l = large · m = medium · s = small · + = add scope`; in
-Claude Code use the option list, keep first); record the answer with `tier set
-<tier> --task <id> --by @spec --answer keep|switch|scope`, or say "not
-recorded" if read-only. Add scope: write a revision and suggest again. Hand off with `docs/agent-configs/agent-handoff-schema.md`
-when follow-up coding/review is expected. Respect
-`scripts/agent-hook.sh no-scan-paths` before broad search.
+Obey its STOP. Act as `@spec` for `.agents/tasks/$ARGUMENTS/`: follow section `@spec` of
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 EOF
 
-  write_file "$TARGET_DIR/.claude/commands/coding.md" <<'EOF'
-# Coding Mode
+  write_file "$TARGET_DIR/.claude/commands/gate.md" <<'EOF'
+---
+description: Seat @gate, technical gate and plan.
+argument-hint: <task-id>
+allowed-tools: Bash(scripts/agent-seats.sh check:*)
+---
 
-Apply `docs/agent-configs/agent-mode-contracts.md` Coding Mode.
-Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
-`.agents/tasks/<task-id>/`.
+!`scripts/agent-seats.sh check gate --host claude --task "$ARGUMENTS"`
 
-Default Claude behavior is handoff, not direct implementation. Execute only
-after an explicit user decision and a blocking `@gate` adequacy verdict permit
-Claude implementation, or with a confirmed small or medium tier (the user chose
-it; see `scripts/agent-guard.sh tier show`), which needs no `@gate`.
-A medium tier ends `task.md` with a checkpoint: after task.md is written and
-before coding, run `scripts/agent-guard.sh tier suggest --task <id> --by @build
---paths <files>` (and the AGENTS.md flags when true), ask one line (`Enter = keep medium · l = large · s = small · +
-= add scope`), then record it with `tier set <tier> --task <id> --by @build
---answer keep|switch|scope`, or say "not recorded" if read-only. Add scope:
-revise task.md and suggest again. The short `task.md` form and the review rules
-are in `docs/agent-configs/tier-medium.md`.
-Unavailability alone does not change ownership. If
-selected, implement scoped changes, verify, and inspect the final diff. Respect
-`scripts/agent-hook.sh no-scan-paths`.
+Obey its STOP. Act as `@gate` for `.agents/tasks/$ARGUMENTS/`: follow section `@gate` of
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 EOF
 
-  write_file "$TARGET_DIR/.claude/commands/planning-full-flow.md" <<'EOF'
-Same as `/planning`; follow `.claude/commands/planning.md`.
+  write_file "$TARGET_DIR/.claude/commands/build.md" <<'EOF'
+---
+description: Seat @build, build from the plan.
+argument-hint: <task-id>
+allowed-tools: Bash(scripts/agent-seats.sh check:*)
+---
+
+!`scripts/agent-seats.sh check build --host claude --task "$ARGUMENTS"`
+
+Obey its STOP. Act as `@build` for `.agents/tasks/$ARGUMENTS/`: follow section `@build` of
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 EOF
 
-  write_file "$TARGET_DIR/.claude/commands/coding-full-flow.md" <<'EOF'
-Same as `/coding`; follow `.claude/commands/coding.md`.
+  write_file "$TARGET_DIR/.claude/commands/verify.md" <<'EOF'
+---
+description: Seat @verify, verification review.
+argument-hint: <task-id>
+allowed-tools: Bash(scripts/agent-seats.sh check:*)
+---
+
+!`scripts/agent-seats.sh check verify --host claude --task "$ARGUMENTS"`
+
+Obey its STOP. Act as `@verify` for `.agents/tasks/$ARGUMENTS/`: follow section `@verify` of
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 EOF
 
-  write_file "$TARGET_DIR/.claude/commands/reviewing.md" <<'EOF'
-# Reviewing Mode
+  write_file "$TARGET_DIR/.claude/commands/audit.md" <<'EOF'
+---
+description: Seat @audit, independent cross-review.
+argument-hint: <task-id>
+allowed-tools: Bash(scripts/agent-seats.sh check:*)
+---
 
-Apply `docs/agent-configs/agent-mode-contracts.md` Reviewing Mode.
-Use `docs/agent-configs/agent-handoff-schema.md` for the selected packet under
-`.agents/tasks/<task-id>/`.
+!`scripts/agent-seats.sh check audit --host claude --task "$ARGUMENTS"`
 
-Follow the canonical owner and review gates for the selected packet. Report one
-findings-first pass ordered by severity, following the
-mode contracts' severity rule.
+Obey its STOP. Act as `@audit` for `.agents/tasks/$ARGUMENTS/`: follow section `@audit` of
+`docs/agent-configs/agent-mode-contracts.md` and
+`docs/agent-configs/agent-handoff-schema.md`.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/council.md" <<'EOF'
@@ -1435,10 +1490,6 @@ description: Apply the context-first Karpathy coding discipline.
 Follow `docs/agent-configs/karpathy-llm-coding-agent-config.md`: context first,
 small coherent patches, explicit assumptions/risks, evidence before success
 claims.
-EOF
-
-  write_file "$TARGET_DIR/.claude/commands/reviewing-full-flow.md" <<'EOF'
-Same as `/reviewing`; follow `.claude/commands/reviewing.md`.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/codex/setup.md" <<'EOF'
@@ -1477,7 +1528,7 @@ EOF
   write_file "$TARGET_DIR/.claude/commands/codex/rescue.md" <<'EOF'
 ---
 description: Convert current Claude context into a Codex-ready rescue handoff.
-argument-hint: [@spec|@gate|@build|@verify|@audit|planning|coding|reviewing] <stalled task or rescue target>
+argument-hint: [@spec|@gate|@build|@verify|@audit] <stalled task or rescue target>
 ---
 
 # Codex Rescue Handoff
@@ -1497,7 +1548,7 @@ Default to handoff, not direct implementation. Read
 Return one launch command and one schema-compliant handoff:
 
 ```bash
-.codex/codex-mode.sh <@spec|@gate|@build|@verify|@audit|planning|coding|reviewing> "<handoff prompt>"
+.codex/codex-mode.sh <@spec|@gate|@build|@verify|@audit> --task <task-id> "<handoff prompt>"
 ```
 
 Include target files, repo-state caveats, constraints, non-goals, acceptance
@@ -1578,12 +1629,11 @@ EOF
 
 Open a seat that `docs/agent-configs/seats.json` gives to Codex with
 `.codex/codex-mode.sh`, not raw `codex`. Seats and their roles are in the
-`AGENTS.md` roster; `@gate` opens only by its tag, and the route names are
-aliases (`planning` → `@spec`, `coding` → `@build`, `reviewing` → `@verify`).
+`AGENTS.md` roster; `@gate` opens only by its tag.
 
 ```bash
 .codex/codex-mode.sh @spec    # only if the roster assigns @spec to Codex
-.codex/codex-mode.sh @gate    # add --supervised to approve each action
+.codex/codex-mode.sh @gate
 .codex/codex-mode.sh @build
 .codex/codex-mode.sh @verify
 .codex/codex-mode.sh @audit   # only if the roster assigns @audit to Codex
@@ -1592,21 +1642,16 @@ aliases (`planning` → `@spec`, `coding` → `@build`, `reviewing` → `@verify
 .codex/codex-mode.sh doctor
 ```
 
-- A seat held by another host is refused with the command that moves it
-  (`scripts/agent-seats.sh set <seat> --host codex --model <id>`).
 - An `@build` session ends with one `scripts/agent-guard.sh pre-final --run-verify`,
   which is @build's hand-off check (do not run it again). The launcher prints
   its last line and report path and exits with Codex's exit code.
   `CODEX_SKIP_CLOSEOUT=1` skips it; so do SIGTERM/SIGHUP (forwarded to Codex)
   and a Codex exit of 126 or above.
-- When two seats that check each other run on the same primary model, the seed
-  records `model_overlap=<seats>` for `@audit` and the launcher warns once; it
-  is never an authorization.
-- `doctor` warns when the `AGENTS.md` roster drifts from `seats.json`
-  (`scripts/agent-seats.sh show` and `validate` inspect it).
+- Two checking seats on one primary model: the seed records
+  `model_overlap=<seats>` for `@audit`, never an authorization.
+- `--task <id>` follows that packet's seats (default: the only open packet).
 - Approval flags (`--supervised`, `--read-only`, `--propose`, `--standard`)
-  follow the AGENTS.md approval policy. Reviewing is findings-first and edits
-  only on request.
+  follow the AGENTS.md approval policy.
 
 If Codex says `Selected model is at capacity. Please try a different model.`,
 use the seat's fallback once, or override for one launch:
@@ -1617,12 +1662,9 @@ CODEX_MODEL_OVERRIDE=gpt-5.6-terra .codex/codex-mode.sh @gate
 CODEX_REASONING_EFFORT=high CODEX_USE_FALLBACK=1 .codex/codex-mode.sh @build
 ```
 
-Per-route overrides: `CODEX_PLANNING_MODEL_OVERRIDE` (`@spec`),
-`CODEX_GATING_MODEL_OVERRIDE` (`@gate`), `CODEX_CODING_MODEL_OVERRIDE`
-(`@build`), `CODEX_REVIEWING_MODEL_OVERRIDE` (`@verify`, `@audit`).
-`CODEX_MODEL_PROFILE` is ignored with a warning.
+Per-seat overrides: `.codex/codex-mode.sh --help`.
 
-Roles and gates: `docs/agent-configs/agent-mode-contracts.md`. Packets:
+Seat rules: one section per seat in `docs/agent-configs/agent-mode-contracts.md`. Packets:
 `docs/agent-configs/agent-handoff-schema.md`, under `.agents/tasks/<task-id>/`.
 Respect `scripts/agent-hook.sh no-scan-paths` before broad search.
 
@@ -1670,6 +1712,12 @@ LOCKED_TAG=""
 LOCKED_PHASE=""
 LOCKED_HOST=""
 MODEL_OVERLAP=""
+# The packet whose seats this launch follows (empty: the project roster).
+PACKET_TASK=""
+# The packet a launch named with --task; only that one goes into the lock.
+LOCK_TASK=""
+LAUNCH_FLOW=""
+LAUNCH_REST=()
 CODEX_CHILD_PID=""
 CODEX_SIGNAL_PENDING=""
 
@@ -1686,13 +1734,18 @@ trap cleanup EXIT
 usage() {
   printf '%s\n' \
     "Usage:" \
-    "  .codex/codex-mode.sh <@seat|seat|planning|coding|reviewing> [options] [prompt]" \
-    "  .codex/codex-mode.sh run [options] [prompt]   # relaunch the locked seat; @gate when no lock exists" \
+    "  .codex/codex-mode.sh <@seat> [--task <id>] [options] [prompt]" \
+    "  .codex/codex-mode.sh run [--task <id>] [options] [prompt]   # relaunch the locked seat; @gate when no lock exists" \
     "  .codex/codex-mode.sh status" \
     "  .codex/codex-mode.sh doctor" \
     "" \
     "Seats:" \
-    "  @spec spec planning  @gate gate  @build build coding  @verify verify reviewing  @audit audit" \
+    "  @spec @gate @build @verify @audit (also without @)" \
+    "  planning, coding and reviewing are removed: use @spec, @build and @verify." \
+    "" \
+    "Packet:" \
+    "  --task <id>  open the seat as that packet arranges it (scripts/agent-seats.sh show --task <id>);" \
+    "               without it: the locked packet for run, else the only open packet, else the project roster." \
     "" \
     "Flow options:" \
     "  --full-flow | --full_flow | -full_flow" \
@@ -1725,10 +1778,10 @@ is_valid_seat() {
 
 seat_from_arg() {
   case "$1" in
-    @spec|spec|planning) printf '%s' "spec" ;;
+    @spec|spec) printf '%s' "spec" ;;
     @gate|gate) printf '%s' "gate" ;;
-    @build|build|coding) printf '%s' "build" ;;
-    @verify|verify|reviewing) printf '%s' "verify" ;;
+    @build|build) printf '%s' "build" ;;
+    @verify|verify) printf '%s' "verify" ;;
     @audit|audit) printf '%s' "audit" ;;
     @owner|owner) printf '%s' "owner" ;;
     *) return 1 ;;
@@ -1811,6 +1864,54 @@ flow=$flow
 seat=$seat
 updated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 LOCK
+  if [[ -n "$LOCK_TASK" ]]; then
+    printf 'task=%s\n' "$LOCK_TASK" >> "$MODE_FILE"
+  fi
+}
+
+# The lock's packet while its folder still exists.
+read_locked_task() {
+  local task=""
+  if [[ -f "$MODE_FILE" ]]; then
+    task="$(sed -n 's/^task=//p' "$MODE_FILE" | tail -n1)"
+  fi
+  if [[ -n "$task" && -d "$PROJECT_ROOT/.agents/tasks/$task" ]]; then
+    printf '%s' "$task"
+  fi
+}
+
+# Leading launch options, in any order: --task <id> and one flow flag. Sets
+# LAUNCH_FLOW (empty when none was given), PACKET_TASK and LAUNCH_REST.
+parse_launch_options() {
+  LAUNCH_FLOW=""
+  LAUNCH_REST=()
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--task" ]]; then
+      if [[ "$#" -lt 2 || -z "$2" ]]; then
+        echo "ERROR: --task requires a task id." >&2
+        return 2
+      fi
+      PACKET_TASK="$2"
+      shift 2
+    elif [[ -z "$LAUNCH_FLOW" ]] && run_flow_flag "$1"; then
+      LAUNCH_FLOW="$FLOW"
+      shift
+    else
+      break
+    fi
+  done
+  if [[ "$#" -gt 0 ]]; then
+    LAUNCH_REST=("$@")
+  fi
+}
+
+# Without --task, the only open packet decides (agent-seats.sh prints a note
+# and nothing when there are several); none means the project roster.
+select_packet() {
+  if [[ -z "$PACKET_TASK" ]]; then
+    PACKET_TASK="$(AGENT_SEATS_FILE="$SEATS_FILE" AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
+      AGENT_SEATS_AGENTS_MD="$AGENTS_MD" "$SEATS_SCRIPT" open-packet)" || return 1
+  fi
 }
 
 truthy() {
@@ -1865,9 +1966,13 @@ resolve_seat_data() {
   if ! AGENT_SEATS_FILE="$SEATS_FILE" \
     AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
     AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
-    "$SEATS_SCRIPT" resolve "$requested" >"$output_file" 2>"$error_file"; then
+    "$SEATS_SCRIPT" resolve "$requested" ${PACKET_TASK:+--task "$PACKET_TASK"} >"$output_file" 2>"$error_file"; then
     emit_file_stderr "$error_file"
-    echo "ERROR: cannot resolve seat $requested; repair seats.json with scripts/agent-seats.sh validate or reset." >&2
+    if [[ -n "$PACKET_TASK" ]] && grep -Fq ".agents/tasks/$PACKET_TASK/seats.json" "$error_file"; then
+      echo "ERROR: cannot resolve seat $requested for packet $PACKET_TASK; fix it with scripts/agent-seats.sh use project --task $PACKET_TASK --reason \"<your words>\"." >&2
+    else
+      echo "ERROR: cannot resolve seat $requested; repair seats.json with scripts/agent-seats.sh validate or reset." >&2
+    fi
     return 1
   fi
   emit_file_stderr "$error_file"
@@ -2077,7 +2182,7 @@ compute_overlap() {
     AGENT_SEATS_FILE="$SEATS_FILE" \
       AGENT_SEATS_LEGACY_PROFILES="$LEGACY_PROFILES" \
       AGENT_SEATS_AGENTS_MD="$AGENTS_MD" \
-      "$SEATS_SCRIPT" model-overlap --quiet "$seat_id" "$effective_model" 2>"$overlap_stderr"
+      "$SEATS_SCRIPT" model-overlap --quiet "$seat_id" "$effective_model" ${PACKET_TASK:+--task "$PACKET_TASK"} 2>"$overlap_stderr"
   )"; then
     emit_file_stderr "$overlap_stderr"
     echo "ERROR: could not evaluate the model overlap for $seat_id." >&2
@@ -2105,7 +2210,7 @@ print_launch_summary() {
       echo "WARN: model_overlap=$MODEL_OVERLAP: $(seat_tag "$seat_id") runs on $model, the primary model of the listed seat(s); recorded as a fact for @audit, not an authorization."
     fi
     if [[ "$model_source" == "default" ]]; then
-      echo "If Codex reports model capacity, rerun: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $(seat_tag "$seat_id")"
+      echo "If Codex reports model capacity, rerun: CODEX_USE_FALLBACK=1 .codex/codex-mode.sh $(seat_tag "$seat_id")${PACKET_TASK:+ --task $PACKET_TASK}"
     fi
   } >&2
 }
@@ -2127,36 +2232,30 @@ resolve_codex_bin() {
   return 127
 }
 
-mode_prompt() {
-  local route="$1"
-  local flow="$2"
-  local seat_id="$3"
-  local model="$4"
-  local model_source="$5"
-  local effort="$6"
-  local seed
-  seed="SEAT LOCK: $(seat_tag "$seat_id") · phase $LOCKED_PHASE · launch_model=$model model_source=$model_source"
+seat_prompt() {
+  local flow="$1"
+  local seat_id="$2"
+  local model="$3"
+  local model_source="$4"
+  local tag seed
+  tag="$(seat_tag "$seat_id")"
+  local packet=".agents/tasks/<task-id>/"
+  seed="SEAT LOCK: $tag · phase $LOCKED_PHASE"
+  if [[ -n "$PACKET_TASK" ]]; then
+    seed="$seed · packet $PACKET_TASK"
+    packet=".agents/tasks/$PACKET_TASK/"
+  fi
+  seed="$seed · launch_model=$model model_source=$model_source"
   if [[ -n "$MODEL_OVERLAP" ]]; then
     seed="$seed model_overlap=$MODEL_OVERLAP"
   fi
-  case "$route:$flow" in
-    planning:standard)
-      printf '%s' "$seed MODE LOCK: PLANNING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @spec --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @spec --answer keep|switch|scope, or say 'not recorded' if read-only. Add scope: revise and suggest again." ;;
-    planning:full_flow)
-      printf '%s' "$seed MODE LOCK: PLANNING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local execution only; respect scripts/agent-hook.sh no-scan-paths and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @spec --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @spec --answer keep|switch|scope, or say 'not recorded' if read-only. Add scope: revise and suggest again." ;;
-    gating:standard)
-      printf '%s' "$seed MODE LOCK: TECHNICAL-REVIEW-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Before your first round run scripts/agent-guard.sh baseline: on fail or error stop and report to the user; on unverified list the risk 'baseline unknown'. Judge the spec (and a task's plan when one exists) against the contracts; never ask for a project plan before approval. The verdict belongs in the next attempt of gate-review.md. Do not write or rewrite the spec, plan, or code. Open with the verdict (coding-model sufficiency and the blocker count), then the findings, each with a severity per the mode contracts' severity rule. For a later round, first read your previous verdict and the sections that newer ## Specification revision notes list; judge whether each earlier blocker is resolved. No preamble, no recap, no closing pleasantry. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @gate --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @gate --answer keep|switch|scope, or say 'not recorded' if read-only. Add scope goes back to @spec; @gate never rewrites the spec." ;;
-    gating:full_flow)
-      printf '%s' "$seed MODE LOCK: TECHNICAL-REVIEW-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Before your first round run scripts/agent-guard.sh baseline: on fail or error stop and report to the user; on unverified list the risk 'baseline unknown'. Judge the spec (and a task's plan when one exists) against the contracts; never ask for a project plan before approval. The verdict belongs in the next attempt of gate-review.md. Do not write or rewrite the spec, plan, or code. Open with the verdict (coding-model sufficiency and the blocker count), then the findings, each with a severity per the mode contracts' severity rule. For a later round, first read your previous verdict and the sections that newer ## Specification revision notes list; judge whether each earlier blocker is resolved. No preamble, no recap, no closing pleasantry. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @gate --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @gate --answer keep|switch|scope, or say 'not recorded' if read-only. Add scope goes back to @spec; @gate never rewrites the spec." ;;
-    coding:standard)
-      printf '%s' "$seed MODE LOCK: CODING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. This flow is read-only: respect scripts/agent-hook.sh no-scan-paths and do not mutate files unless the user grants that exact action. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @build --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @build --answer keep|switch|scope, or say 'not recorded' if read-only. Medium only: ask after task.md is written, before coding." ;;
-    coding:full_flow)
-      printf '%s' "$seed MODE LOCK: CODING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. The request grants bounded project-local implementation, tests, and verification only; respect pre-edit/no-scan guards and require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes. End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @build --paths <files> (add --data, --access, --dependency, --unclear or --handoff when true), then ask one line (Enter = keep <tier> · l = large · m = medium · s = small · + = add scope); record the answer with tier set <tier> --task <id> --by @build --answer keep|switch|scope, or say 'not recorded' if read-only. Medium only: ask after task.md is written, before coding." ;;
-    reviewing:standard)
-      printf '%s' "$seed MODE LOCK: REVIEWING-SUPERVISED. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity follows the mode contracts' severity rule. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. This flow is findings-first and read-only: respect scripts/agent-hook.sh no-scan-paths and do not remediate unless the user grants an exact patch scope." ;;
-    reviewing:full_flow)
-      printf '%s' "$seed MODE LOCK: REVIEWING-FULL-FLOW. Seat $(seat_tag "$seat_id") is in phase $LOCKED_PHASE; use the packet under .agents/tasks/<task-id>/. Apply docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Severity follows the mode contracts' severity rule. Open with the verdict and the blocker count, then the findings; no preamble, no recap, no closing pleasantry. State each defect as cause and consequence without alarm words. Before sending, delete any hedging adverb that carries no uncertainty; keep a hedge that carries real uncertainty. The request grants project-local review and verification only; respect scripts/agent-hook.sh no-scan-paths and do not remediate unless fixes or an exact patch scope were requested. External paths and mutating git operations require exact approval." ;;
-    *) echo "ERROR: invalid route/flow combination." >&2; return 1 ;;
+  seed="$seed Act as $tag for the packet under $packet: follow section $tag of docs/agent-configs/agent-mode-contracts.md and docs/agent-configs/agent-handoff-schema.md. Respect scripts/agent-hook.sh no-scan-paths before broad search."
+  case "$flow" in
+    standard)
+      printf '%s' "$seed SUPERVISED: read-only; do not mutate files unless the user grants that exact action." ;;
+    full_flow)
+      printf '%s' "$seed FULL-FLOW: project-local execution only; require exact approval for external paths, installs, commits, pushes, force operations, or local-only permission changes." ;;
+    *) echo "ERROR: invalid flow: $flow" >&2; return 1 ;;
   esac
 }
 
@@ -2222,12 +2321,11 @@ run_doctor() {
     .codex/README.md \
     .claude/settings.json \
     .claude/README.md \
-    .claude/commands/planning.md \
-    .claude/commands/planning-full-flow.md \
-    .claude/commands/coding.md \
-    .claude/commands/coding-full-flow.md \
-    .claude/commands/reviewing.md \
-    .claude/commands/reviewing-full-flow.md \
+    .claude/commands/spec.md \
+    .claude/commands/gate.md \
+    .claude/commands/build.md \
+    .claude/commands/verify.md \
+    .claude/commands/audit.md \
     .claude/commands/codex/setup.md \
     .claude/commands/codex/rescue.md \
     .claude/commands/codex/status.md \
@@ -2417,9 +2515,13 @@ run_status() {
   current_mode="$(read_mode)"
   current_flow="$(read_flow)"
   current_seat="$(read_locked_seat)"
+  PACKET_TASK="$(read_locked_task)"
   echo "Current mode: $current_mode"
   echo "Current flow: $current_flow"
   echo "Locked seat: $(seat_tag "$current_seat")"
+  if [[ -n "$PACKET_TASK" ]]; then
+    echo "Locked packet: $PACKET_TASK"
+  fi
   if [[ ! -e "$SEATS_FILE" ]]; then
     echo "WARN: seats.json missing; status is read-only and launch commands will initialize it." >&2
     return 0
@@ -2510,7 +2612,9 @@ run_launch() {
     :
   else
     resolve_rc=$?
-    if [[ "$resolve_rc" -eq 2 ]]; then
+    if [[ "$resolve_rc" -eq 2 && -n "$PACKET_TASK" ]]; then
+      echo "ERROR: seat $LOCKED_TAG sits on $LOCKED_HOST for packet $PACKET_TASK; open it there, or move it with scripts/agent-seats.sh set $LOCKED_SEAT --host codex --model <id> --task $PACKET_TASK --reason '<your words>'" >&2
+    elif [[ "$resolve_rc" -eq 2 ]]; then
       echo "ERROR: seat $LOCKED_TAG is occupied by $LOCKED_HOST; open it there, or move it with scripts/agent-seats.sh set $LOCKED_SEAT --host codex --model <id>" >&2
     fi
     return "$resolve_rc"
@@ -2523,7 +2627,7 @@ run_launch() {
     sandbox="read-only"
     approval="$STANDARD_APPROVAL"
   fi
-  seed="$(mode_prompt "$route" "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE" "$EFFECTIVE_EFFORT")"
+  seed="$(seat_prompt "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE")"
   seed="$seed"$'\n\n'"Workspace–Repository Guard: $workspace_report"$'\n'"Preserve AGENT_WORKSPACE_CONTEXT and AGENT_HOST_SESSION_ID in every subagent handoff. Validate the actual repository before writing; packet paths never grant permission."
   if [[ "$workspace_rc" -eq 3 ]]; then
     seed="$seed"$'\n'"Workspace mismatch: confirm the target repository with the user before writing."
@@ -2622,8 +2726,9 @@ run_build_closeout() {
   fi
   new_temp || return 0
   closeout_out="$NEW_TEMP"
-  echo "@build close-out: scripts/agent-guard.sh pre-final --run-verify" >&2
-  (cd "$PROJECT_ROOT" && "$AGENT_GUARD" pre-final --run-verify) >"$closeout_out" 2>&1 </dev/null || closeout_rc=$?
+  echo "@build close-out: scripts/agent-guard.sh pre-final --run-verify${PACKET_TASK:+ --task $PACKET_TASK}" >&2
+  (cd "$PROJECT_ROOT" && "$AGENT_GUARD" pre-final --run-verify ${PACKET_TASK:+--task "$PACKET_TASK"}) \
+    >"$closeout_out" 2>&1 </dev/null || closeout_rc=$?
   # Its last status line; the report path is printed on its own line below.
   last_line="$(awk '!/^agent-guard: verify_report=/ { line = $0 } END { print line }' "$closeout_out")"
   report="$(sed -n 's/^agent-guard: verify_report=//p' "$closeout_out" | tail -n1)"
@@ -2665,15 +2770,23 @@ case "$cmd" in
   -h|--help|help)
     usage
     ;;
-  planning|coding|reviewing|@spec|spec|@gate|gate|@build|build|@verify|verify|@audit|audit)
+  planning|coding|reviewing)
+    case "$cmd" in
+      planning) new_tag="@spec" ;;
+      coding) new_tag="@build" ;;
+      *) new_tag="@verify" ;;
+    esac
+    echo "ERROR: $cmd: removed: use $new_tag" >&2
+    exit 2
+    ;;
+  @spec|spec|@gate|gate|@build|build|@verify|verify|@audit|audit)
     requested_seat="$(seat_from_arg "$cmd")"
     route="$(route_for_seat "$requested_seat")"
-    flow="$DEFAULT_FLOW"
-    if [[ "$#" -gt 0 ]] && run_flow_flag "$1"; then
-      flow="$FLOW"
-      shift
-    fi
-    run_launch "$requested_seat" "$route" "$flow" true "$@"
+    parse_launch_options "$@" || exit 2
+    flow="${LAUNCH_FLOW:-$DEFAULT_FLOW}"
+    LOCK_TASK="$PACKET_TASK"
+    select_packet || exit 1
+    run_launch "$requested_seat" "$route" "$flow" true ${LAUNCH_REST[@]+"${LAUNCH_REST[@]}"}
     ;;
   @owner|owner)
     echo "ERROR: seat @owner is human-owned and is never launchable by this helper." >&2
@@ -2682,13 +2795,14 @@ case "$cmd" in
   run)
     stored_flow="$(read_flow)"
     stored_seat="$(read_locked_seat)"
-    flow="$stored_flow"
-    if [[ "$#" -gt 0 ]] && run_flow_flag "$1"; then
-      flow="$FLOW"
-      shift
+    parse_launch_options "$@" || exit 2
+    flow="${LAUNCH_FLOW:-$stored_flow}"
+    if [[ -z "$PACKET_TASK" ]]; then
+      PACKET_TASK="$(read_locked_task)"
     fi
+    select_packet || exit 1
     route="$(route_for_seat "$stored_seat")"
-    run_launch "$stored_seat" "$route" "$flow" false "$@"
+    run_launch "$stored_seat" "$route" "$flow" false ${LAUNCH_REST[@]+"${LAUNCH_REST[@]}"}
     ;;
   status)
     run_status

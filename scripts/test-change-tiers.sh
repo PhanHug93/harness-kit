@@ -615,7 +615,11 @@ active_is() {
 # 1. The first set on a clean tree writes tier.json, a minimal state.json and ACTIVE.
 first_head="$(git -C "$tier_target" rev-parse HEAD)"
 expect_rc 0 set small --task fix-logout
-[[ "$TIER_OUT" == "Tier set: small (task fix-logout)" ]] || fail "tier set output: $TIER_OUT"
+[[ "$(sed -n '1p' <<<"$TIER_OUT")" == "Tier set: small (task fix-logout)" && "$(wc -l <<<"$TIER_OUT")" -eq 3 ]] ||
+  fail "tier set output: $TIER_OUT"
+# Then the packet's seats and how to move @build (scripts/test-packet-seats.sh covers them).
+[[ "$(sed -n '2p' <<<"$TIER_OUT")" == "Seats for small: "* ]] || fail "tier set seat line: $TIER_OUT"
+[[ "$(sed -n '3p' <<<"$TIER_OUT")" == "@build codes on "* ]] || fail "tier set @build line: $TIER_OUT"
 HEAD_COMMIT="$first_head" tier_assert fix-logout \
   "d['schema'] == 'harness-tier/v1' and d['task_id'] == 'fix-logout'" \
   "d['branch'] == 'main' and d['base_ref'] is None" \

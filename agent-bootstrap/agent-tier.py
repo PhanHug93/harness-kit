@@ -1362,11 +1362,16 @@ def history_entry(event, tier, printed_by, recorded_by=None, answer=None, reason
     return entry
 
 
-def spec_owner():
+def spec_owner(task):
     """state.json owner for phase analysis: the host class of the @spec
-    occupant in docs/agent-configs/seats.json; claude when unknown."""
+    occupant in the packet's seats.json, else in docs/agent-configs/seats.json;
+    claude when unknown."""
     try:
-        host = read_json(SEATS_PATH)["seats"]["spec"]["occupant"]["host"]
+        packet = read_json(os.path.join(TASKS_DIR, task, "seats.json"), missing=None)
+        if packet is not None:
+            host = packet["seats"]["spec"]["host"]
+        else:
+            host = read_json(SEATS_PATH)["seats"]["spec"]["occupant"]["host"]
     except (TierError, KeyError, TypeError):
         return "claude", None
     if host in ("claude", "codex"):
@@ -1378,9 +1383,35 @@ def spec_owner():
     return "claude", None
 
 
+def seats_line(*argv):
+    """One line from agent-seats.sh next to this file (the packet's seats), or
+    None: no script, no seats.json or a failure (both warned, never fatal)."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent-seats.sh")
+    if not os.path.isfile(script):
+        return None  # the infra preset has no seats
+    if not os.path.isfile(SEATS_PATH):
+        warn("docs/agent-configs/seats.json is missing, so the packet keeps no seats of its own; "
+             "run scripts/agent-seats.sh init")
+        return None
+    env = dict(os.environ, AGENT_SEATS_PROJECT_ROOT=os.path.realpath(ROOT), AGENT_SEATS_FILE=SEATS_PATH,
+               AGENT_SEATS_AGENTS_MD=os.path.join(ROOT, "AGENTS.md"),
+               AGENT_SEATS_LEGACY_PROFILES=os.path.join(ROOT, "docs", "agent-configs", "model-profiles.json"))
+    try:
+        done = subprocess.run(["bash", script, *argv], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        warn(f"the packet's seats are not shown ({exc})")
+        return None
+    if done.returncode != 0:
+        detail = (done.stderr.strip().splitlines() or ["no detail"])[-1]
+        warn(f"the packet's seats are not shown: {detail}")
+        return None
+    return done.stdout.strip() or None
+
+
 def minimal_state(task, tier, base_commit):
     """The handoff schema's initial state, with base_commit = start_commit."""
-    owner, occupant = spec_owner()
+    owner, occupant = spec_owner(task)
     state = {
         "protocol_version": "claude-codex-collaboration/v1", "task_id": task,
         "status": "open", "phase": "analysis", "seat": "@spec", "owner": owner,
@@ -1779,6 +1810,9 @@ def op_set(args):
     elif count:
         print(f"{count} files are already changed; they count toward this task. "
               "Commit or stash them on another branch first if they belong to other work." + hint)
+    line = seats_line("tier-line", "--task", task, "--tier", tier, "--by", args.by)
+    if line:
+        print(line)
 
 
 def one_line(text):
@@ -1947,6 +1981,9 @@ def op_close(args):
             with contextlib.suppress(FileNotFoundError):
                 os.remove(ACTIVE_PATH)
     print(f"Tier closed: {record['declared'] or 'not set'} (task {task})")
+    line = seats_line("close-line", "--task", task)
+    if line:
+        print(line)
 
 
 def parse_time(text):

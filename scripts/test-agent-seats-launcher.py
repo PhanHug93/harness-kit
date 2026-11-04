@@ -341,7 +341,7 @@ def test_generated_surface(target: Path) -> None:
     prose_paths = [
         target / "CLAUDE.md",
         target / ".claude" / "README.md",
-        target / ".claude" / "commands" / "coding.md",
+        target / ".claude" / "commands" / "build.md",
         target / ".claude" / "commands" / "codex" / "rescue.md",
         target / ".codex" / "README.md",
     ]
@@ -389,13 +389,10 @@ def test_resolve_and_model_info(target: Path, env: Dict[str, str]) -> None:
 
 def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_log: Path) -> None:
     expected = {
-        "planning": ("gpt-5.6-luna", "xhigh", "planning"),
         "@gate": ("gpt-6-astra", "ultra", "gating"),
         "gate": ("gpt-6-astra", "ultra", "gating"),
-        "coding": ("gpt-5.6-luna", "xhigh", "coding"),
         "@build": ("gpt-5.6-luna", "xhigh", "coding"),
         "build": ("gpt-5.6-luna", "xhigh", "coding"),
-        "reviewing": ("gpt-6-astra", "ultra", "reviewing"),
         "@verify": ("gpt-6-astra", "ultra", "reviewing"),
         "verify": ("gpt-6-astra", "ultra", "reviewing"),
         "@spec": ("gpt-5.6-luna", "xhigh", "planning"),
@@ -411,6 +408,12 @@ def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_
         check(f'model_reasoning_effort="{effort}"' in args, f"{name} selected the wrong effort")
         hook = hook_log.read_text(encoding="utf-8")
         check(route in hook.splitlines()[-1], f"{name} did not map to route {route} for the hook")
+    # The mode words are removed: exit 2 with the seat to use, never a launch.
+    for word, tag in (("planning", "@spec"), ("coding", "@build"), ("reviewing", "@verify")):
+        result = invoke(target, [word], env)
+        check(result.returncode == 2, f"{word} must exit 2, got {result.returncode}")
+        check(f"removed: use {tag}" in result.stderr, f"{word} must name {tag}: {result.stderr}")
+        assert_no_launch(result, codex_log)
 
     for seat, override, model, effort in (
         ("@gate", {"CODEX_REASONING_EFFORT": "max"}, "gpt-6-astra", "max"),
@@ -451,14 +454,12 @@ def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_
         seed = "\n".join(captured_args(codex_log))
         check("docs/agent-configs/agent-mode-contracts.md" in seed, f"seed variant {seat} {flow_flag} lost mode contract pointer")
         check("docs/agent-configs/agent-handoff-schema.md" in seed, f"seed variant {seat} {flow_flag} lost handoff schema pointer")
-        if seat in ("@gate", "@verify"):
-            check(
-                "mode contracts' severity rule" in seed,
-                f"seed variant {seat} {flow_flag} lost the pointer to the contract severity rule",
-            )
-        if seat == "@gate":
-            check("MODE LOCK: TECHNICAL-REVIEW" in seed, f"seed variant {seat} {flow_flag} lost the technical review lock")
-            check("MODE LOCK: PLANNING" not in seed, f"seed variant {seat} {flow_flag} still carries the planning lock")
+        check(
+            f"follow section {seat} of docs/agent-configs/agent-mode-contracts.md" in seed,
+            f"seed variant {seat} {flow_flag} does not point to its contract section",
+        )
+        check(f"SEAT LOCK: {seat}" in seed, f"seed variant {seat} {flow_flag} lost its seat lock")
+        check("MODE LOCK" not in seed, f"seed variant {seat} {flow_flag} still carries a mode lock")
 
     # The close-out writes guard state, so it runs on a copy of the fixture.
     closeout_target = target.parent / "closeout-target"
@@ -691,8 +692,8 @@ def test_persistence_nested_and_failures(target: Path, env: Dict[str, str], code
     mode_file = target / ".codex-mode-lock"
     if mode_file.exists():
         mode_file.unlink()
-    result = invoke(target, ["coding"], env, trap=True)
-    check(result.returncode == 0, "persistent coding launch failed")
+    result = invoke(target, ["@build"], env, trap=True)
+    check(result.returncode == 0, "persistent @build launch failed")
     check(mode_file.exists() and "mode=coding" in mode_file.read_text(encoding="utf-8"), "coding did not persist mode")
     check(Path(env["TRAP_CAPTURE_FILE"]).exists(), "caller EXIT trap was lost")
     result = invoke(target, ["run"], env)

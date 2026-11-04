@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It writes local
 instructions, agent seats, onboarding helpers and checks into your project. It
 does not change your application code.
 
-Current release: [`2026.11.04.2`](agent-bootstrap/VERSION)
+Current release: [`2026.11.05.1`](agent-bootstrap/VERSION)
 
 ## What you get
 
@@ -41,11 +41,11 @@ lock: no script stops `@build` from starting early.
 
 ## Install
 
-From the project root. This installs release `2026.11.04.2`:
+From the project root. This installs release `2026.11.05.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.04.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.05.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Options go after `| bash -s --`: `--to latest` installs the newest release,
@@ -130,6 +130,20 @@ scripts/agent-seats.sh set gate --host codex --model gpt-6-astra --effort ultra
 
 Assignments live in `docs/agent-configs/seats.json`; `set` and `wizard` update
 the roster in `AGENTS.md`. `.codex/codex-mode.sh` launches the Codex seats.
+In Claude Code, `/spec`, `/gate`, `/build`, `/verify` and `/audit` open a seat
+(they replace `/planning`, `/coding` and `/reviewing`). `@gate` checks the
+spec and writes the plan; only a gap in the spec goes back to `@spec`.
+
+A task can arrange its own seats, for example all on Claude for one packet:
+
+```bash
+scripts/agent-seats.sh show --task fix-logout
+scripts/agent-seats.sh use claude --task fix-logout --reason "Codex is busy this week"
+scripts/agent-seats.sh history --task fix-logout
+```
+
+The first `tier set` copies the project roster into the packet; each change
+keeps the user's words, and both launchers follow the packet.
 
 ## Pick a tier for each change
 

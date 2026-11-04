@@ -331,6 +331,12 @@ def main(argv=None):
             check(ref + " apply keeps seats and legacy", (cfg / "seats.json").read_bytes() == seats_before and legacy.read_bytes() == legacy_before)
             check(ref + " obsolete legacy candidate is not promoted", stale_candidate.read_bytes() == b'{"obsolete_candidate": true}\n')
             check(ref + " no seats candidate", not list(cfg.glob("seats.json.generated.*")))
+            commands = target / ".claude/commands"
+            check(ref + " has the seat commands",
+                  all((commands / (seat + ".md")).is_file() for seat in ("spec", "gate", "build", "verify", "audit")))
+            check(ref + " has no unedited, untracked mode commands",
+                  not any((commands / (mode + suffix + ".md")).exists()
+                          for mode in ("planning", "coding", "reviewing") for suffix in ("", "-full-flow")))
             seats(target, ref + "-validate", "validate")
             status = command(ref + "-status", ["/bin/bash", target / ".codex/codex-mode.sh", "status"], cwd=target)
             check(ref + " launcher uses migrated model", "custom-planner" in status.stdout or "custom-planner" in status.stderr)
@@ -362,7 +368,7 @@ def main(argv=None):
         authoritative.unlink()
         upgrade(target, "malformed-legacy-upgrade", apply=True)
         check("malformed legacy never seeds defaults", not authoritative.exists() and legacy.read_bytes() == damaged_legacy)
-        command("malformed-legacy-no-launch", ["/bin/bash", target / ".codex/codex-mode.sh", "planning", "probe"], cwd=target, expected=1)
+        command("malformed-legacy-no-launch", ["/bin/bash", target / ".codex/codex-mode.sh", "@gate", "probe"], cwd=target, expected=1)
         keep_knowledge(target, brief_before, "malformed legacy")
 
         default_target = seed_target(old, "old-defaults")

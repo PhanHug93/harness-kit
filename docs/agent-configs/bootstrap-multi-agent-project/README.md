@@ -178,8 +178,8 @@ Both presets (`infra` is the generator default; the one-shot entry installs
   `project-onboarding.md` and the empty `project-brief.md`.
 - `.codex/config.toml`, `.codex/codex-mode.sh` (seat launcher and `doctor`),
   `.codex/README.md`.
-- `.claude/commands/`: `/planning`, `/coding`, `/reviewing` (and their
-  `-full-flow` aliases), `/council`, `/karpathy`, `/doctor`,
+- `.claude/commands/`: `/spec`, `/gate`, `/build`, `/verify`, `/audit` (one
+  per seat), `/council`, `/karpathy`, `/doctor`,
   `/project-onboarding`, `/codex:setup`, `/codex:rescue`, `/codex:status`.
 - `.agents/skills/doubt-driven/`.
 - `docs/superpowers/specs/README.md`, `project-tech-stack.{md,json}` and
@@ -294,7 +294,7 @@ prints the numbers):
 
 The core estimate covers `AGENTS.md`, the project agent context and the
 project brief; it excludes tool-specific wrappers such as `CLAUDE.md`. The
-on-demand estimate adds what a working seat reads: mode contracts, handoff
+on-demand estimate adds what a working seat reads: seat contracts, handoff
 schema, the handoff reference's `State values` section and its largest other
 section, and the Karpathy and council workflows. Each estimate is split into
 kit text and project content (the brief, the project agent context,
@@ -380,11 +380,34 @@ default roster is in
 | `gpt-5.6-luna` | `low`, `medium`, `high`, `xhigh`, `max` | `xhigh` |
 | `gpt-5.6-terra` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `xhigh` |
 
-The launcher (`.codex/codex-mode.sh`) accepts a seat or the `planning`,
-`coding` and `reviewing` aliases and launches only occupants with host
-`codex`. `CODEX_MODEL_OVERRIDE`, the mode overrides, `CODEX_USE_FALLBACK` and
+The launcher (`.codex/codex-mode.sh`) accepts a seat tag and launches only
+occupants with host `codex`; the old `planning`, `coding` and `reviewing`
+words exit 2 with the seat to use. `CODEX_MODEL_OVERRIDE`, the route overrides, `CODEX_USE_FALLBACK` and
 `CODEX_REASONING_EFFORT` still work; an explicit effort must be one the model
 supports. `CODEX_MODEL_PROFILE` is a warning no-op; configure seats instead.
+
+### Seats per packet
+
+A packet can arrange its own seats in `.agents/tasks/<task-id>/seats.json`.
+The first `tier set` copies the project roster there, so a later project
+change does not move a task in flight; a packet without the file (an older
+one) follows the project roster.
+
+- `scripts/agent-seats.sh show --task <id>`: seats by host, the tier's seats
+  and the independence facts for `@audit` (`same_host`, `model_overlap`).
+- `use project|claude|codex --task <id> --reason "<the user's words>"`: a
+  preset. `codex` keeps a seat already on Codex, gives another seat its
+  project occupant when that one is on Codex, else the project's `@verify`
+  (or `@gate`) occupant.
+- `set <seat> --host ... --task <id> --reason ...`: one seat.
+- `history --task <id>`: every change with its time, seat, before/after and
+  reason; entries are only appended.
+
+`.codex/codex-mode.sh @<seat> --task <id>` and the Claude seat commands
+(`scripts/agent-seats.sh check`) refuse a seat that the packet gives to
+another host. Without `--task` they use the only open packet, else the
+project roster. `tier set` prints the tier's seats; `tier close` prints the
+final arrangement and the number of changes.
 
 Upgrades from older releases:
 

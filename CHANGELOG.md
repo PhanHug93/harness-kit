@@ -1,5 +1,52 @@
 # Changelog
 
+## 2026.11.05.1 — Seats replace modes, seats per packet
+
+- **@gate writes the plan.** @gate checks the spec as requirements, writes the
+  plan @build follows and records its verdict. Only a spec finding (an unclear
+  or conflicting requirement, a missing owner decision, a scope change) goes
+  back to @spec; a technical finding is answered in the plan and listed in
+  `gate-review.md` as `resolved_in_plan`. @build sends a gap in the plan to
+  @gate and a gap in the spec to @spec. At tier small one seat checks the
+  request, plans, codes and runs pre-final.
+- **Seats replace modes.**
+  - `docs/agent-configs/agent-mode-contracts.md` is now "Seat Contracts": one
+    section per seat with the same seven labels (Duty, Starts when, Writes,
+    Never, Exits, By tier, End of turn). Each review file's checklist is in
+    its section of the handoff reference.
+  - Claude Code: `/spec`, `/gate`, `/build`, `/verify` and `/audit` replace
+    `/planning`, `/coding` and `/reviewing` (and the `-full-flow` aliases).
+  - Codex: one seat prompt points to the seat's section; `planning`,
+    `coding` and `reviewing` exit 2 with the seat to use.
+  - `task.md` requires the request, user-visible behaviour, observable
+    criteria, scope, constraints, owner decisions, assumptions and evidence;
+    interfaces, edge cases and implementation notes are optional.
+  - Migration `2026.11.05.1-remove-mode-commands` (auto) removes the old command files
+    when they are unedited and untracked, with backups. Edited or tracked
+    copies stay, and the doctor warns about each one until it is deleted.
+- **Seats per packet.** A packet keeps its own seats in
+  `.agents/tasks/<id>/seats.json`, copied from the project roster at its
+  first `tier set`.
+  - `scripts/agent-seats.sh show|use|set|history --task <id>`; presets
+    `project`, `claude` and `codex`; each change keeps the user's words
+    (`--reason`) and is only appended.
+  - `.codex/codex-mode.sh @<seat> --task <id>` and the Claude seat commands
+    refuse a seat that the packet gives to another host. Without `--task`
+    they use the only open packet, else the project roster. A task with no
+    packet yet (`/spec <new-id>`) follows the project roster.
+  - Who codes is the packet's @build, on the host the user picks per task;
+    `tier set` prints the tier's seats and the command that moves @build.
+    `tier close` prints the final arrangement and the number of changes.
+  - `use project --task <id>` also repairs a broken packet `seats.json`,
+    keeping the bad file beside it; the @build close-out checks the
+    launched packet.
+- **Updates no longer fail their own check.** The update ran the doctor
+  before preflight, so the context pack of the old install (made before
+  AGENTS.md and the lock changed) failed the guard check with "stale
+  required context". Preflight now runs first and rewrites the pack.
+- **Same budgets.** The agent docs stay under 7,900 words and the on-demand
+  kit text under its 5,203-token ratchet.
+
 ## 2026.11.04.2 — Faster tests and CI, a lighter hook
 
 - **Faster tests and CI.**

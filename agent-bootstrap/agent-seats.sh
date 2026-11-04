@@ -33,6 +33,18 @@ usage() {
     "  scripts/agent-seats.sh roster-check <AGENTS.md>   # exit 1 'roster drift' when the roster block differs from render output" \
     "  scripts/agent-seats.sh conflict <seat|route> <effective-model>   # deprecated: prints 1 when model-overlap for @build is non-empty" \
     "" \
+    "A packet keeps its own seats in .agents/tasks/<id>/seats.json, copied from the project roster at its first" \
+    "tier set; each change is logged with the user's words. A packet without the file follows the project roster." \
+    "  scripts/agent-seats.sh show --task <id>          # seats by host, the tier's seats, facts for @audit" \
+    "  scripts/agent-seats.sh use project|claude|codex --task <id> --reason TEXT [--by TAG]" \
+    "        # project: copy the roster again; claude: every seat but @owner on Claude; codex: every seat but" \
+    "        # @owner on Codex (a seat not yet there takes its project occupant on Codex, else @verify's, else @gate's)" \
+    "  scripts/agent-seats.sh set <seat> --host <h> [...] --task <id> --reason TEXT [--by TAG]" \
+    "  scripts/agent-seats.sh history --task <id>       # the change log, oldest first" \
+    "  scripts/agent-seats.sh check <seat> --host claude|codex [--task <id>]   # ok: (0) or STOP: (1)" \
+    "  scripts/agent-seats.sh resolve <seat> --task <id> | open-packet | tier-line --task <id> --tier <t> | close-line --task <id>" \
+    "        # for the launchers and agent-tier.py; without --task, check uses the only open packet" \
+    "" \
     "Seats: @spec @gate @build @verify @audit @owner. Route aliases: planning=@spec coding=@build reviewing=@verify." \
     "Exit codes: 0 ok; 1 invalid input, refused (lock busy, end of input, unwritable) or usage — nothing written;" \
     "            2 seats.json written but the roster was not rendered; 3 roster markers unbalanced (nothing written);" \
@@ -76,17 +88,31 @@ LEGACY_ROUTE_SEATS = {"planning": "gate", "coding": "build", "reviewing": "verif
 SEAT_ORDER = ["spec", "gate", "build", "verify", "audit", "owner"]
 SEAT_META = {
     "spec": {"tag": "@spec", "phase": "analysis", "duty": "analysis and specification"},
-    "gate": {"tag": "@gate", "phase": "technical_review", "duty": "pre-coding technical review (blocking adequacy verdict)"},
-    "build": {"tag": "@build", "phase": "implementation", "duty": "bounded implementation"},
-    "verify": {"tag": "@verify", "phase": "verification", "duty": "final technical review"},
+    "gate": {"tag": "@gate", "phase": "technical_review", "duty": "technical gate and plan"},
+    "build": {"tag": "@build", "phase": "implementation", "duty": "build from the plan"},
+    "verify": {"tag": "@verify", "phase": "verification", "duty": "verification review"},
     "audit": {"tag": "@audit", "phase": "cross_review", "duty": "independent cross-review"},
     "owner": {"tag": "@owner", "phase": "resolution", "duty": "final decision"},
+}
+# Duty text that earlier kit releases wrote; a seats.json that still carries it
+# shows today's text, while a duty the user wrote stays.
+KIT_DUTIES = {
+    "gate": ("pre-coding technical review (blocking adequacy verdict)",),
+    "build": ("bounded implementation",),
+    "verify": ("final technical review",),
 }
 # Grammar: values that travel through launcher interfaces can never contain
 # whitespace or delimiters.
 MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
 EFFORT_RE = re.compile(r"[a-z][a-z0-9_-]*")
 OCCUPANT_KEYS = ("model", "effort", "fallback_model", "fallback_effort")
+
+
+def duty_of(seat, entry):
+    duty = entry.get("duty")
+    if not duty or duty in KIT_DUTIES.get(seat, ()):
+        return SEAT_META[seat]["duty"]
+    return duty
 
 
 def is_model(v):
@@ -759,7 +785,7 @@ def interactive_wizard(doc):
         entry = doc["seats"][seat]
         occ = entry["occupant"]
         out("")
-        out(f"{entry['tag']} — {entry.get('duty') or SEAT_META[seat]['duty']} (phase {entry['phase']})")
+        out(f"{entry['tag']} — {duty_of(seat, entry)} (phase {entry['phase']})")
         out(f"  suggestion: {occupant_text(occ)}")
         if seat == "owner":
             out("  @owner is always the human user.")
@@ -849,7 +875,493 @@ def lock_for_write(wait_seconds=10.0):
             return
 
 
+def occupant_for(doc, seat, opts):
+    """The occupant `set` writes for a seat of doc, from its options."""
+    prev = doc["seats"][seat]["occupant"]
+    host = opts.get("host") or prev.get("host")
+    occ = {"host": host}
+    if host not in LAUNCHABLE:
+        inapplicable = [k for k in ("model", "effort", "fallback_model", "fallback_effort", "no_fallback") if k in opts]
+        if inapplicable:
+            raise SeatsError(f"host {host} is host-controlled; {', '.join('--' + k.replace('_', '-') for k in inapplicable)} do not apply; nothing written")
+    if host in LAUNCHABLE:
+        if "fallback_effort" in opts and not (opts.get("fallback_model") or prev.get("fallback_model")):
+            raise SeatsError("--fallback-effort requires a fallback model; nothing written")
+        models = doc["catalog"]["models"]
+        occ["model"] = opts.get("model", prev.get("model"))
+        if "effort" in opts:
+            occ["effort"] = opts["effort"]
+        elif prev.get("model") == occ["model"] and prev.get("effort"):
+            occ["effort"] = prev["effort"]
+        else:
+            occ["effort"] = catalog_default_effort(models, occ["model"])
+        if not opts.get("no_fallback"):
+            fb = opts.get("fallback_model", prev.get("fallback_model"))
+            if fb:
+                occ["fallback_model"] = fb
+                if "fallback_effort" in opts:
+                    occ["fallback_effort"] = opts["fallback_effort"]
+                elif prev.get("fallback_model") == fb and prev.get("fallback_effort"):
+                    occ["fallback_effort"] = prev["fallback_effort"]
+                else:
+                    occ["fallback_effort"] = catalog_default_effort(models, fb)
+    return occ
+
+
+PACKET_SCHEMA = "agent-packet-seats/v1"
+PACKET_KEYS = ("schema", "task", "seats", "history")
+HISTORY_KEYS = ("at", "by", "change", "from", "to", "reason")
+TASK_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+BY_RE = re.compile(r"user|@[a-z][a-z0-9-]*")
+PRESETS = ("project", "claude", "codex")
+# The seats a tier's flow uses (the seat contracts' "Flow by tier").
+TIER_SEATS = {"small": ("spec", "build"), "medium": ("spec", "build", "verify"),
+              "large": ("spec", "gate", "build", "verify", "audit")}
+HOST_NAMES = {"claude": "Claude", "codex": "Codex", "human": "You"}
+PACKET_COMMANDS = ("use", "history", "check", "open-packet", "tier-line", "close-line")
+
+
+def take_opts(tokens, names):
+    """Pull `--name value` pairs for the given names; the other tokens keep their order."""
+    opts, rest, it = {}, [], iter(tokens)
+    for token in it:
+        key = token[2:].replace("-", "_") if token.startswith("--") else None
+        if key not in names:
+            rest.append(token)
+            continue
+        try:
+            value = next(it)
+        except StopIteration:
+            raise SeatsError(f"{token} requires a value")
+        if key in opts:
+            raise SeatsError(f"{token} is given twice")
+        opts[key] = value
+    return opts, rest
+
+
+def tasks_dir():
+    return configured_root() / ".agents" / "tasks"
+
+
+def task_folder(task):
+    if task == "active" or not TASK_ID.fullmatch(task or ""):
+        raise SeatsError(f"task id must be lowercase letters, digits and single dashes, like fix-logout (got: {task!r})")
+    return tasks_dir() / task
+
+
+def utc_now():
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def packet_closed(folder):
+    for name in ("tier.json", "state.json"):
+        doc, error = read_json(folder / name)
+        if error is None and isinstance(doc, dict) and doc.get("status") == "closed":
+            return True
+    return False
+
+
+def open_packets():
+    """Packets whose state.json is readable and not closed, by name."""
+    root = tasks_dir()
+    if not root.is_dir():
+        return []
+    found = []
+    for folder in sorted(p for p in root.iterdir() if p.is_dir() and TASK_ID.fullmatch(p.name)):
+        doc, error = read_json(folder / "state.json")
+        if error is None and isinstance(doc, dict) and doc.get("status") != "closed":
+            found.append(folder.name)
+    return found
+
+
+def project_doc():
+    doc = load_current()
+    errors, _ = validate(doc)
+    if errors:
+        report(errors, [])
+        raise SeatsError("the project seats.json is invalid; run scripts/agent-seats.sh validate")
+    return doc
+
+
+def as_roster(project, occupants):
+    """The project document with the packet's occupants, for validate() and the printers."""
+    doc = clone(project)
+    for seat in SEAT_ORDER:
+        doc["seats"][seat]["occupant"] = clone(occupants[seat])
+    return doc
+
+
+def read_packet(task, project):
+    """(document or None when the packet has no seats file, path)."""
+    path = task_folder(task) / "seats.json"
+    if path.is_symlink():
+        raise SeatsError(f"{path} is a link; a packet's seats file must be a plain file")
+    doc, error = read_json(path)
+    if error == "missing":
+        return None, path
+    repair = f"; scripts/agent-seats.sh use project --task {task} --reason TEXT rewrites it from the project roster"
+    if error:
+        raise SeatsError(error + repair)
+    if not isinstance(doc, dict) or doc.get("schema") != PACKET_SCHEMA:
+        raise SeatsError(f"{path}: schema must be {PACKET_SCHEMA}{repair}")
+    problems = []
+    if sorted(doc) != sorted(PACKET_KEYS):
+        problems.append(f"the keys must be {', '.join(PACKET_KEYS)}")
+    if doc.get("task") != task:
+        problems.append(f"task must be {task}")
+    seats = doc.get("seats")
+    # Only the shape is required here: a catalog change must not lock a packet
+    # (use project repairs it); occupants are checked on a change and at launch.
+    if not isinstance(seats, dict) or sorted(seats) != sorted(SEAT_ORDER) or \
+            not all(isinstance(v, dict) for v in seats.values()):
+        problems.append(f"seats must hold one occupant for each of {', '.join(SEAT_ORDER)}")
+    history = doc.get("history")
+    if not isinstance(history, list) or not all(history_entry_ok(e) for e in history):
+        problems.append(f"history must be a list of entries with {', '.join(HISTORY_KEYS)}: text in at, by, change "
+                        "and reason, seat occupants in to, and null or seat occupants in from")
+    if problems:
+        raise SeatsError(f"{path} is invalid: " + "; ".join(problems) + repair)
+    return doc, path
+
+
+def history_entry_ok(entry):
+    def occupants(value):
+        return isinstance(value, dict) and all(isinstance(v, dict) for v in value.values())
+    return (isinstance(entry, dict) and sorted(entry) == sorted(HISTORY_KEYS)
+            and all(isinstance(entry[k], str) for k in ("at", "by", "change", "reason"))
+            and occupants(entry["to"]) and (entry["from"] is None or occupants(entry["from"])))
+
+
+def effective(task, project):
+    """(occupants, packet document or None) for a task, or the project roster.
+    A task with no packet folder yet (a new task) follows the project roster."""
+    if task and task_folder(task).is_dir():
+        doc, _ = read_packet(task, project)
+        if doc is not None:
+            return doc["seats"], doc
+    return {s: project["seats"][s]["occupant"] for s in SEAT_ORDER}, None
+
+
+def lock_packet(folder, wait_seconds=10.0):
+    """Exclusive flock on the packet folder, the lock agent-tier.py takes."""
+    import errno
+    import fcntl
+    import time
+    try:
+        fd = os.open(str(folder), os.O_RDONLY)
+    except OSError as exc:
+        raise SeatsError(f"cannot open {folder} for locking: {exc.strerror}")
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError as exc:
+            if exc.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+                warn(f"cannot lock {folder} ({exc.strerror}); continuing without a lock")
+                return fd
+            if time.monotonic() >= deadline:
+                raise SeatsError(f"another command still holds the packet {folder.name}; try again")
+            time.sleep(0.05)
+
+
+def snapshot(task, project, by, reason):
+    occupants = {s: clone(project["seats"][s]["occupant"]) for s in SEAT_ORDER}
+    return {"schema": PACKET_SCHEMA, "task": task, "seats": occupants,
+            "history": [{"at": utc_now(), "by": by, "change": "snapshot", "from": None,
+                         "to": clone(occupants), "reason": reason}]}
+
+
+def write_packet(path, doc):
+    try:
+        write_atomic(path, (json.dumps(doc, indent=2) + "\n").encode("utf-8"))
+    except OSError as exc:
+        raise SeatsError(f"cannot write {path}: {exc}; nothing written")
+
+
+def occ_short(occ):
+    host = occ.get("host", "?")
+    return f"{host} ({occ.get('model')})" if host in LAUNCHABLE else host
+
+
+def grouped(occupants):
+    order = ["claude", "codex"] + [h for h in HOSTS if h not in ("claude", "codex", "human")] + ["human"]
+    lines = []
+    for host in order:
+        seats = [s for s in SEAT_ORDER if occupants[s].get("host") == host]
+        if seats:
+            names = [f"@{s} ({occupants[s].get('model')} {occupants[s].get('effort')})" if host in LAUNCHABLE else f"@{s}"
+                     for s in seats]
+            lines.append(f"{HOST_NAMES.get(host, host)}: {' '.join(names)}")
+    return lines
+
+
+def tier_line(tier, occupants):
+    line = f"Seats for {tier}: " + " → ".join(f"@{s} {occ_short(occupants[s])}" for s in TIER_SEATS[tier])
+    return line + (", which plans, builds and verifies" if tier == "small" else "")
+
+
+def facts(project, occupants):
+    """Independence facts for @audit; they never block."""
+    build = occupants["build"]
+    same = [r for r in ("gate", "verify", "audit") if occupants[r].get("host") == build.get("host")]
+    items = []
+    if same:
+        items.append(f"same_host @build {' '.join('@' + r for r in same)} ({build.get('host')})")
+    if build.get("host") == "codex" and build.get("model"):
+        overlap = model_overlap(as_roster(project, occupants), "build", build["model"])
+        if overlap:
+            items.append(f"model_overlap @build {' '.join('@' + o for o in overlap)}")
+    return items
+
+
+def preset_occupants(name, task, current, project):
+    if name == "project":
+        return {s: clone(project["seats"][s]["occupant"]) for s in SEAT_ORDER}
+    result = {s: clone(current[s]) for s in SEAT_ORDER}
+    if name == "claude":
+        for s in SEAT_ORDER:
+            if s != "owner":
+                result[s] = {"host": "claude"}
+        return result
+    donor = next((clone(project["seats"][s]["occupant"]) for s in ("verify", "gate")
+                  if project["seats"][s]["occupant"].get("host") == "codex"), None)
+    for s in SEAT_ORDER:
+        if s == "owner" or result[s].get("host") == "codex":
+            continue
+        if project["seats"][s]["occupant"].get("host") == "codex":
+            result[s] = clone(project["seats"][s]["occupant"])
+            continue
+        if donor is None:
+            raise SeatsError(f"the codex preset needs a Codex model for @{s}, and the project has neither @verify nor "
+                             f"@gate on Codex; set it: scripts/agent-seats.sh set {s} --host codex --model <id> "
+                             f"--task {task} --reason TEXT")
+        result[s] = clone(donor)
+    return result
+
+
+def change_packet(task, by, reason, describe, compute):
+    """Load (or snapshot) the packet under its lock, apply compute(current, project),
+    append one history entry when anything changed, and write."""
+    folder = task_folder(task)
+    if not folder.is_dir():
+        raise SeatsError(f"task {task} has no packet ({folder}); start it with scripts/agent-guard.sh tier set")
+    if not reason.strip():
+        raise SeatsError("--reason needs the user's words")
+    if not BY_RE.fullmatch(by):
+        raise SeatsError(f"--by must be user or a seat tag like @spec (got: {by!r})")
+    lock_packet(folder)
+    if packet_closed(folder):
+        raise SeatsError(f"task {task} is closed; its seats no longer change")
+    project = project_doc()
+    try:
+        doc, path = read_packet(task, project)
+    except SeatsError:
+        path = folder / "seats.json"
+        if describe != "preset project" or path.is_symlink():
+            raise
+        return repair_packet(task, path, project, by, reason)
+    if doc is None:
+        doc = snapshot(task, project, by, "first change")
+    current = doc["seats"]
+    new = compute(current, project)
+    errors, warnings = validate(as_roster(project, new))
+    report(errors, warnings)
+    if errors:
+        raise SeatsError("the arrangement is invalid; nothing written")
+    moved = [s for s in SEAT_ORDER if not same_seat(current[s], new[s])]
+    frm = {s: current[s] for s in moved}
+    to = {s: new[s] for s in moved}
+    if not to:
+        out(f"agent-seats: packet {task} already has that arrangement; nothing written")
+        return 0
+    doc["seats"] = new
+    doc["history"].append({"at": utc_now(), "by": by, "change": describe, "from": clone(frm), "to": clone(to), "reason": reason})
+    write_packet(path, doc)
+    out(f"Packet {task} seats ({describe}):")
+    for line in grouped(new):
+        out(f"- {line}")
+    note("record the user's decision in the packet's user-decision.md")
+    return 0
+
+
+def repair_packet(task, path, project, by, reason):
+    """use project on a broken packet file: keep it aside and start a new trail."""
+    kept = path.with_name("seats.json.broken-" + utc_now().replace(":", "").replace("-", ""))
+    try:
+        os.replace(path, kept)
+    except OSError as exc:
+        raise SeatsError(f"cannot move {path} aside: {exc}; nothing written")
+    doc = snapshot(task, project, by, reason)
+    doc["history"][0]["change"] = "repair"
+    write_packet(path, doc)
+    out(f"Packet {task} seats (repaired from the project roster; the broken file is {kept.name}):")
+    for line in grouped(doc["seats"]):
+        out(f"- {line}")
+    note("record the user's decision in the packet's user-decision.md")
+    return 0
+
+
+def same_seat(one, other):
+    """Equal as a launcher reads them: a host-controlled seat is its host only."""
+    def shape(occ):
+        if occ.get("host") not in LAUNCHABLE:
+            return {"host": occ.get("host")}
+        return {k: v for k, v in occ.items() if v is not None}
+    return shape(one) == shape(other)
+
+
+def history_line(entry):
+    details = ", ".join(f"@{s} {occ_short((entry['from'] or {}).get(s, {}))} -> {occ_short(occ)}"
+                        for s, occ in entry["to"].items()) if entry["from"] is not None else "from the project roster"
+    return f"{entry['at']} {entry['by']} {entry['change']}: {entry['reason']} ({details})"
+
+
+def packet_main():
+    task_opts = ("task", "reason", "by", "tier", "host") if cmd == "check" else ("task", "reason", "by", "tier")
+    opts, rest = take_opts(args, task_opts)
+    task = opts.get("task")
+    if cmd == "open-packet":
+        if rest or opts:
+            raise SeatsError("open-packet takes no arguments")
+        found = open_packets()
+        if len(found) == 1:
+            out(found[0])
+        elif len(found) > 1:
+            note(f"several open packets ({', '.join(found)}); pass --task <id> to use a packet's seats")
+        return 0
+    if cmd == "check":
+        if len(rest) != 1 or opts.get("host") not in ("claude", "codex"):
+            raise SeatsError("check needs a seat and --host claude|codex (see --help)")
+        seat, host = seat_from_arg(rest[0]), opts["host"]
+        if not task:
+            # The launcher's rule: the only open packet, else the project roster.
+            found = open_packets()
+            task = found[0] if len(found) == 1 else None
+            if len(found) > 1:
+                out(f"note: several open packets ({', '.join(found)}); pass --task <id> to follow a packet's seats")
+        project = project_doc()
+        occupants, doc = effective(task, project)
+        has_packet = bool(task) and task_folder(task).is_dir()
+        if task and not has_packet:
+            where = f"the project roster (no packet {task} yet)"
+        else:
+            where = f"packet {task}" if task else "the project roster"
+        occ = occupants[seat]
+        if occ.get("host") == host:
+            out(f"ok: @{seat} sits on {host} for {where}")
+            return 0
+        if occ.get("host") == "codex":
+            there = f"open it with .codex/codex-mode.sh @{seat}" + (f" --task {task}" if task else "")
+        else:
+            there = f"open it on {occ.get('host')}"
+        # A packet change needs the packet folder; before it exists only the project roster moves.
+        move = (f"scripts/agent-seats.sh set {seat} --host {host}" + (" --model <id>" if host in LAUNCHABLE else "")
+                + (f' --task {task} --reason "<your words>"' if has_packet else ""))
+        out(f"STOP: @{seat} sits on {occ_short(occ)} for {where}, not on {host}; {there}, or move it with {move}")
+        return 1
+    if not task:
+        raise SeatsError(f"{cmd} needs --task <id> (see --help)")
+    task_folder(task)
+    if cmd == "model-overlap":
+        if len(rest) != 2 or not is_model(rest[1]):
+            raise SeatsError("model-overlap requires a seat and a model (see --help)")
+        project = project_doc()
+        occupants, _ = effective(task, project)
+        overlap = model_overlap(as_roster(project, occupants), seat_from_arg(rest[0]), rest[1])
+        if overlap:
+            out(",".join(overlap))
+        return 0
+    if cmd == "resolve":
+        if len(rest) != 1:
+            raise SeatsError("resolve requires exactly one seat or route (see --help)")
+        seat = seat_from_arg(rest[0])
+        occupants, _ = effective(task, project_doc())
+        occ = occupants[seat]
+        for value in (seat, SEAT_META[seat]["tag"], SEAT_META[seat]["phase"], occ.get("host", ""), occ.get("model") or "",
+                      occ.get("effort") or "", occ.get("fallback_model") or "", occ.get("fallback_effort") or ""):
+            out(value)
+        return 0
+    if cmd in ("show", "history", "close-line"):
+        if rest:
+            raise SeatsError(f"{cmd} takes only --task (see --help)")
+        project = project_doc()
+        occupants, doc = effective(task, project)
+        if cmd == "history":
+            if doc is None:
+                out(f"Packet {task} has no seats file; it follows the project roster.")
+            for entry in (doc or {}).get("history", []):
+                out(history_line(entry))
+            return 0
+        changes = len(doc["history"]) - 1 if doc else 0
+        if cmd == "close-line":
+            source = "" if doc else " (the project roster)"
+            out(f"Seats at close{source}: " + " · ".join(grouped(occupants)) + f" ({changes} change{'' if changes == 1 else 's'})")
+            return 0
+        out(f"Packet {task} seats:" if doc else f"Packet {task} follows the project roster (no seats file yet):")
+        for error in validate(as_roster(project, occupants))[0] if doc else []:
+            warn(f"packet {task}: {error}; scripts/agent-seats.sh use project --task {task} repairs it")
+        for line in grouped(occupants):
+            out(f"- {line}")
+        tier_doc, error = read_json(task_folder(task) / "tier.json")
+        tier = tier_doc.get("declared") if error is None and isinstance(tier_doc, dict) else None
+        if tier in TIER_SEATS:
+            out(tier_line(tier, occupants))
+        found = facts(project, occupants)
+        out("Facts for @audit: " + ("; ".join(found) if found else "none"))
+        out(f"Changes: {changes} (scripts/agent-seats.sh history --task {task})")
+        return 0
+    if cmd == "tier-line":
+        if rest or opts.get("tier") not in TIER_SEATS:
+            raise SeatsError("tier-line needs --task <id> --tier small|medium|large")
+        folder = task_folder(task)
+        if not folder.is_dir():
+            raise SeatsError(f"task {task} has no packet ({folder})")
+        by = opts.get("by", "user")
+        lock_packet(folder)
+        project = project_doc()
+        doc, path = read_packet(task, project)
+        if doc is None and not packet_closed(folder):
+            doc = snapshot(task, project, by if BY_RE.fullmatch(by) else "user", "first tier set")
+            write_packet(path, doc)
+        occupants = doc["seats"] if doc else {s: project["seats"][s]["occupant"] for s in SEAT_ORDER}
+        out(tier_line(opts["tier"], occupants))
+        # Who codes is the user's choice per task: say how to move @build.
+        build_host = occupants["build"].get("host")
+        other = "claude" if build_host == "codex" else "codex --model <id>"
+        out(f"@build codes on {build_host}; the user can move it: scripts/agent-seats.sh set build --host {other} "
+            f"--task {task} --reason \"<the user's words>\"")
+        return 0
+    if cmd == "use":
+        if len(rest) != 1 or rest[0] not in PRESETS:
+            raise SeatsError(f"use needs one preset: {', '.join(PRESETS)}")
+        if "reason" not in opts:
+            raise SeatsError("use --task needs --reason with the user's words")
+        preset = rest[0]
+        return change_packet(task, opts.get("by", "user"), opts["reason"], f"preset {preset}",
+                             lambda current, project: preset_occupants(preset, task, current, project))
+    if cmd == "set":
+        if not rest:
+            raise SeatsError("set requires a seat")
+        seat = seat_from_arg(rest[0])
+        set_opts = parse_opts(rest[1:])
+        if "reason" not in opts:
+            raise SeatsError("set --task needs --reason with the user's words")
+
+        def compute(current, project):
+            new = {s: clone(current[s]) for s in SEAT_ORDER}
+            new[seat] = occupant_for(as_roster(project, current), seat, set_opts)
+            return new
+        return change_packet(task, opts.get("by", "user"), opts["reason"], f"seat {seat}", compute)
+    raise SeatsError(f"{cmd} does not take --task")
+
+
 def main():
+    if cmd in PACKET_COMMANDS or (cmd in ("show", "set", "resolve", "model-overlap") and "--task" in args):
+        return packet_main()
+    if cmd == "set" and any(a in ("--reason", "--by") for a in args):
+        raise SeatsError("--reason and --by go with --task <id>")
     validate_command_args()
     if cmd in ("render", "set", "wizard", "reset", "init"):
         check_destinations()
@@ -1015,34 +1527,7 @@ def main():
         doc, source, notes = proposal(repairing=True)
         for n in notes:
             note(n)
-        prev = doc["seats"][seat]["occupant"]
-        host = opts.get("host") or prev.get("host")
-        occ = {"host": host}
-        if host not in LAUNCHABLE:
-            inapplicable = [k for k in ("model", "effort", "fallback_model", "fallback_effort", "no_fallback") if k in opts]
-            if inapplicable:
-                raise SeatsError(f"host {host} is host-controlled; {', '.join('--' + k.replace('_', '-') for k in inapplicable)} do not apply; nothing written")
-        if host in LAUNCHABLE:
-            if "fallback_effort" in opts and not (opts.get("fallback_model") or prev.get("fallback_model")):
-                raise SeatsError("--fallback-effort requires a fallback model; nothing written")
-            models = doc["catalog"]["models"]
-            occ["model"] = opts.get("model", prev.get("model"))
-            if "effort" in opts:
-                occ["effort"] = opts["effort"]
-            elif prev.get("model") == occ["model"] and prev.get("effort"):
-                occ["effort"] = prev["effort"]
-            else:
-                occ["effort"] = catalog_default_effort(models, occ["model"])
-            if not opts.get("no_fallback"):
-                fb = opts.get("fallback_model", prev.get("fallback_model"))
-                if fb:
-                    occ["fallback_model"] = fb
-                    if "fallback_effort" in opts:
-                        occ["fallback_effort"] = opts["fallback_effort"]
-                    elif prev.get("fallback_model") == fb and prev.get("fallback_effort"):
-                        occ["fallback_effort"] = prev["fallback_effort"]
-                    else:
-                        occ["fallback_effort"] = catalog_default_effort(models, fb)
+        occ = occupant_for(doc, seat, opts)
         doc["seats"][seat]["occupant"] = occ
         errors, warnings = validate(doc)
         report(errors, warnings)
@@ -1068,7 +1553,7 @@ PY
 
 cmd="${1:-}"
 case "$cmd" in
-  show|validate|suggest|wizard|set|init|reset|render|roster-block|resolve|model-info|conflict|model-overlap|roster-check)
+  show|validate|suggest|wizard|set|init|reset|render|roster-block|resolve|model-info|conflict|model-overlap|roster-check|use|history|check|open-packet|tier-line|close-line)
     python3 -c 'import sys' >/dev/null 2>&1 || fail "python3 is required (a working interpreter, not the macOS command-line-tools stub)"
     shift
     SEATS_FILE="$SEATS_FILE" LEGACY_PROFILES="$LEGACY_PROFILES" AGENTS_MD="$AGENTS_MD" \

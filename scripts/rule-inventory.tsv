@@ -57,13 +57,13 @@ agents.agents-startup-references-onboarding	full	AGENTS.md	no	project-brief.md
 contract.stop-hook	both	CLAUDE.md	no	Claude Code runs the fast close-out check through its Stop hook when the session changed files
 contract.not-security-boundary	both	CLAUDE.md	no	not a security boundary for arbitrary Bash commands
 modes.gate-requires-named-acceptance-tests	full	docs/agent-configs/agent-mode-contracts.md	no	Every acceptance criterion names its test
-modes.gate-requires-production-boundary-fixtures	full	docs/agent-configs/agent-mode-contracts.md	no	a real HTTP 401
-modes.analysis-transition	full	docs/agent-configs/agent-mode-contracts.md	no	- `analysis` · `@spec` -> `technical_review`
-modes.technical-review-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- `technical_review` · `@gate` -> `analysis` | `implementation` | `resolution`
-modes.implementation-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- `implementation` · `@build` -> `verification` | `resolution`
-modes.verification-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`
-modes.cross-review-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- `cross_review` · `@audit` -> `implementation` | `resolution`
-modes.resolution-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- `resolution` · `@owner` -> `closed` | user-selected prior phase
+modes.gate-requires-production-boundary-fixtures	full	docs/agent-configs/agent-handoff-reference.md	no	a real HTTP 401
+modes.analysis-transition	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `technical_review` (large) or `implementation`.
+modes.technical-review-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `analysis` (spec blockers only), `implementation` or `resolution`.
+modes.implementation-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `verification`, `technical_review` (large: plan gap), `analysis` (spec gap) or `resolution`.
+modes.verification-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `implementation`, `cross_review` or `resolution`.
+modes.cross-review-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `implementation` or `resolution`.
+modes.resolution-transitions	full	docs/agent-configs/agent-mode-contracts.md	no	- Exits: `closed` or a user-selected prior phase.
 modes.mode-contracts-awaiting-user-invariant	full	docs/agent-configs/agent-mode-contracts.md	no	awaiting_user
 modes.mode-contracts-awaiting-user-owner-restriction	full	docs/agent-configs/agent-mode-contracts.md	no	only with `resolution` · `@owner`
 modes.mode-contracts-closed-invariant	full	docs/agent-configs/agent-mode-contracts.md	no	closed` is valid only with phase `closed`
@@ -73,14 +73,14 @@ modes.mode-contracts-luna-no-upgrade	full	docs/agent-configs/agent-mode-contract
 modes.mode-remediation-checkpoint	full	docs/agent-configs/agent-mode-contracts.md	no	`revision_rounds` counts returns to `implementation` only
 modes.mode-remediation-bounded-cost	full	docs/agent-configs/agent-mode-contracts.md	no	asks whether another bounded pass is worth its cost.
 modes.mode-contracts-executing-host-pass-rule	full	docs/agent-configs/agent-mode-contracts.md	no	Only the executing host may declare a pass for what it ran.
-modes.mode-contracts-verify-re-runs-only-on-missing-or	full	docs/agent-configs/agent-mode-contracts.md	no	re-runs only a check whose
+modes.mode-contracts-verify-re-runs-only-on-missing-or	full	docs/agent-configs/agent-handoff-reference.md	no	re-runs only a check whose
 modes.mode-contracts-no-helper-reviewers	full	docs/agent-configs/agent-mode-contracts.md	no	Seats do not spawn reviewers beyond the doubt-driven skill
-modes.mode-contracts-anti-tautology-guard-obligation	full	docs/agent-configs/agent-mode-contracts.md	no	replaced with identity
-modes.mode-contracts-claude-declaration-contradiction-	full	docs/agent-configs/agent-mode-contracts.md	no	Check author/reviewer model and session declarations for contradictions.
-modes.mode-contracts-claude-provenance-declarations	full	docs/agent-configs/agent-mode-contracts.md	no	Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
-modes.mode-contracts-new-session-escalation	full	docs/agent-configs/agent-mode-contracts.md	no	user must open a new session for the `@gate` occupant to code
-modes.mode-contracts-sol-coding-audit-limitation	full	docs/agent-configs/agent-mode-contracts.md	no	audit-only procedural declaration
-modes.mode-contracts-no-file-authorization	full	docs/agent-configs/agent-mode-contracts.md	no	cannot provide file-based authorization
+modes.mode-contracts-anti-tautology-guard-obligation	full	docs/agent-configs/agent-handoff-reference.md	no	replaced with identity
+modes.mode-contracts-claude-declaration-contradiction-	full	docs/agent-configs/agent-handoff-reference.md	no	Check author/reviewer model and session declarations for contradictions.
+modes.mode-contracts-claude-provenance-declarations	full	docs/agent-configs/agent-handoff-reference.md	no	Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.
+modes.mode-contracts-new-session-escalation	full	docs/agent-configs/agent-handoff-reference.md	no	user must open a new session for the `@gate` occupant to code
+modes.mode-contracts-sol-coding-audit-limitation	full	docs/agent-configs/agent-handoff-reference.md	no	audit-only procedural declaration
+modes.mode-contracts-no-file-authorization	full	docs/agent-configs/agent-handoff-reference.md	no	cannot provide file-based authorization
 modes.mode-contracts-record-user-decisions-in-user-dec	full	docs/agent-configs/agent-mode-contracts.md	no	records each user decision, the close included, in `user-decision.md`
 modes.mode-contracts-security-boundary-limitation	full	docs/agent-configs/agent-mode-contracts.md	no	not an authorization or security boundary
 modes.severity-rule	full	docs/agent-configs/agent-mode-contracts.md	yes	Severity names its trigger condition and frequency, or is marked as an estimate.
@@ -107,7 +107,7 @@ handoff.handoff-prior-attempt-preservation	full	docs/agent-configs/agent-handoff
 handoff.handoff-numbered-remediation-attempts	full	docs/agent-configs/agent-handoff-schema.md	no	next numbered attempt
 handoff.handoff-numbered-specification-revisions	full	docs/agent-configs/agent-handoff-schema.md	no	When `@gate` returns `task.md` to analysis, append `## Specification revision <n>`
 handoff.handoff-specification-history-preservation	full	docs/agent-configs/agent-handoff-schema.md	no	preserve `## Request (verbatim)` and prior history
-handoff.handoff-defers-collaboration-policy	full	docs/agent-configs/agent-handoff-schema.md	no	Seat, transition, and gate policy lives only in
+handoff.handoff-defers-collaboration-policy	full	docs/agent-configs/agent-handoff-schema.md	no	Seat, transition, and gate policy lives in
 handoff.handoff-verification-evidence-fields	full	docs/agent-configs/agent-handoff-schema.md	no	"verification": {"runner": "none", "status": "not_run", "reason": null, "report": null}
 handoff.state-field-protocol-version	full	docs/agent-configs/agent-handoff-schema.md	no	"protocol_version"
 handoff.state-field-task-id	full	docs/agent-configs/agent-handoff-schema.md	no	"task_id"
@@ -155,8 +155,8 @@ handoff-ref.handoff-sectioned-review-history	full	docs/agent-configs/agent-hando
 handoff-ref.handoff-state-sufficiency-follows-the-latest-gat	full	docs/agent-configs/agent-handoff-reference.md	no	State sufficiency matches the latest attempt.
 handoff-ref.handoff-fresh-session-declaration-limitation	full	docs/agent-configs/agent-handoff-reference.md	no	`fresh_session_attestation` is procedural-only
 handoff-ref.handoff-fresh-session-non-proof	full	docs/agent-configs/agent-handoff-reference.md	no	not proof of session, model, account, or host independence
-handoff-ref.handoff-cross-review-points-to-canonical-checkli	full	docs/agent-configs/agent-handoff-reference.md	no	checklist and procedural declarations live in
-handoff-ref.handoff-gate-coding-points-to-canonical-policy	full	docs/agent-configs/agent-handoff-reference.md	no	policy meaning is in
+handoff-ref.audit-checklist-in-audit-review	full	docs/agent-configs/agent-handoff-reference.md	no	`verdict: pass | changes_required`. `@audit` checks
+handoff-ref.gate-coding-in-implementation	full	docs/agent-configs/agent-handoff-reference.md	no	for one release. Gate coding is an escalation
 handoff-ref.handoff-same-task-pass-resets-the-count	full	docs/agent-configs/agent-handoff-reference.md	no	An entry allowing another pass records `revision_rounds` reset to 0
 recovery.status	both	docs/agent-configs/RECOVERY.md	no	scripts/agent-guard.sh status
 recovery.take-kit	both	docs/agent-configs/RECOVERY.md	no	scripts/harness-kit.sh --take-kit <path>
@@ -206,17 +206,17 @@ agents.workspace-check-when	both	AGENTS.md	no	`scripts/agent-guard.sh workspace-
 agents.no-scan-sensitive	full	AGENTS.md	no	The first lists the no-scan paths, sensitive project files included: run it before broad search.
 agents.infra-read-context	infra	AGENTS.md	no	Before substantive work, read `docs/agent-configs/project-agent-context.md` and the filled project brief when available.
 agents.infra-no-scan	infra	AGENTS.md	no	Run `scripts/agent-hook.sh no-scan-paths` before broad search; read the paths it lists (sensitive project files included) only on an exact user request.
-modes.audit-checklist	full	docs/agent-configs/agent-mode-contracts.md	no	`@audit` checks state/review consistency, `base_commit`, verification, any gate-coding decision and reason, and approved scope.
-modes.claude-implements-after-decision	full	docs/agent-configs/agent-mode-contracts.md	no	Claude implements only after an explicit user decision in the packet.
+modes.audit-checklist	full	docs/agent-configs/agent-handoff-reference.md	no	`@audit` checks state/review consistency, `base_commit`, verification, any gate-coding decision and reason, and approved scope.
+modes.claude-implements-after-decision	full	docs/agent-configs/agent-mode-contracts.md	no	- Only the packet's `@build` codes, on the host the user picks per task, after
 modes.gate-baseline	full	docs/agent-configs/agent-mode-contracts.md	no	`@gate` runs `scripts/agent-guard.sh baseline` before its first round
 modes.skipped-never-pass	full	docs/agent-configs/agent-mode-contracts.md	no	Skipped or unavailable checks never pass.
 modes.memory-moments	full	docs/agent-configs/agent-mode-contracts.md	yes	`@verify` and `@audit` save a lesson for a defect worth not repeating
-modes.invariance-guard	full	docs/agent-configs/agent-mode-contracts.md	no	An equivalence or invariance guard names the production boundary its fixture crosses
+modes.invariance-guard	full	docs/agent-configs/agent-handoff-reference.md	no	An equivalence or invariance guard names the production boundary its fixture crosses
 modes.plan-spec-path	full	docs/agent-configs/agent-mode-contracts.md	no	updates the plan's spec path when the spec moves
-modes.verify-focused-test	full	docs/agent-configs/agent-mode-contracts.md	no	(or one focused test for a specific doubt)
+modes.verify-focused-test	full	docs/agent-configs/agent-handoff-reference.md	no	(or one focused test for a specific doubt)
 contract.pre-final-not-covered	both	CLAUDE.md	no	before a hand-off the hook does not cover
 claude-readme.pre-edit-ack	full	.claude/README.md	no	unless `pre-edit --ack <reason> <path>` exists for that path
-commands.coding-handoff	full	.claude/commands/coding.md	no	Default Claude behavior is handoff, not direct implementation.
+commands.coding-handoff	full	docs/agent-configs/agent-mode-contracts.md	no	Default Claude behavior is handoff, not direct implementation.
 guard.no-chat-switch	both	docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md	yes	Never switch the chat project or create a chat.
 tier-medium.human-review	full	docs/agent-configs/tier-medium.md	no	A human review counts only as `reviewer_model: human` with a `pr: <url>` line
 onboarding.no-invent	full	docs/agent-configs/project-onboarding.md	no	Do NOT invent facts.
@@ -225,3 +225,16 @@ memory.verified-only	both	.agents/skills/agentmemory-mcp/SKILL.md	no	Save only v
 memory.corrective	both	.agents/skills/agentmemory-mcp/SKILL.md	no	save a corrective memory
 memory.skipped	both	.agents/skills/agentmemory-mcp/SKILL.md	no	say that recall and save were skipped
 memory.global-server	both	.agents/skills/agentmemory-mcp/SKILL.md	no	never configure a project-local memory MCP server
+seats.gate-writes-plan	full	docs/agent-configs/agent-mode-contracts.md	no	writes the plan with `superpowers:writing-plans`
+seats.gate-technical-in-plan	full	docs/agent-configs/agent-handoff-reference.md	no	is resolved in the plan and listed in `resolved_in_plan`
+seats.small-one-seat	full	docs/agent-configs/agent-mode-contracts.md	no	small: one seat checks the request
+seats.audit-resolved-in-plan	full	docs/agent-configs/agent-handoff-reference.md	no	no `resolved_in_plan` decision contradicts an owner decision
+handoff.gate-review-plan	full	docs/agent-configs/agent-handoff-reference.md	no	resolved_in_plan: none | <technical findings and where the plan answers them>
+handoff.task-md-optional	full	docs/agent-configs/agent-handoff-schema.md	no	optional input for `@gate`: interfaces, edge cases, implementation notes
+commands.seat-commands	full	CLAUDE.md	no	`/spec`, `/gate`, `/build`, `/verify`, `/audit` (one per seat)
+seats.packet-copy	full	docs/agent-configs/agent-handoff-reference.md	no	The first `tier set` copies the project roster to
+seats.packet-change-reason	full	docs/agent-configs/agent-handoff-reference.md	no	--task <id> --reason "<the user's words>"`
+seats.packet-owner	full	docs/agent-configs/agent-handoff-reference.md	no	`owner` follows the phase's seat
+commands.seat-host-check	full	.claude/commands/gate.md	no	!`scripts/agent-seats.sh check gate --host claude --task "$ARGUMENTS"`
+codex-readme.packet-task	full	.codex/README.md	no	`--task <id>` follows that packet's seats
+agents.packet-seats	full	AGENTS.md	no	(per packet: `--task <id>`)

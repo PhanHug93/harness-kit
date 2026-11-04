@@ -41,8 +41,9 @@ modes=docs/agent-configs/agent-mode-contracts.md
 doc_has "$modes" "$severity_rule" 'the close included' 'the seat the user is talking to' \
   'the only writes a non-owner seat' 'counts returns to' 'beyond the doubt-driven skill' \
   '`@gate` runs `scripts/agent-guard.sh baseline` before its first round' \
-  'not a git diff' 'The builder check:'
-doc_lacks "$modes" 'defined by the reviewing launcher' 'Seats do not spawn extra reviewer helpers' \
+  'writes the plan with `superpowers:writing-plans`' \
+  'Default Claude behavior is handoff' 'a confirmed small or medium tier'
+doc_lacks "$modes" 'The builder check' 'Planning Mode' 'defined by the reviewing launcher' 'Seats do not spawn extra reviewer helpers' \
   'names the condition that triggers it' 'diff since that revision'
 doc_has docs/agent-configs/agent-handoff-schema.md 'is not `closed`' 'gate-review.md' 'verify-review.md' 'audit-review.md' \
   'An older `codex-review.md` keeps its two sections' \
@@ -61,14 +62,13 @@ doc_lacks AGENTS.md 'Before completion, run' 'do not commit them until' 'not a c
 # phases and the coding rule; the schema says who writes tier.json.
 doc_has AGENTS.md '## Pick a tier' 'scripts/agent-guard.sh tier suggest' 'new scope mid-task: suggest again' \
   'tier suggest --task' 'When the user says done: `tier close --task <id>`'
-doc_has "$modes" 'A small or medium tier the user confirmed' \
+doc_has "$modes" 'a confirmed small or medium tier (in `tier.json`)' \
   'small: `analysis` -> `implementation` -> `resolution`' \
   'medium: `analysis` -> `implementation` -> `verification` -> `resolution`' \
   'Skipped or unavailable checks never pass.' 'missing or inconsistent verdict blocks coding'
-doc_has CLAUDE.md 'small or medium tier'
+doc_has CLAUDE.md "packet's \`@build\` (the user picks its host)"
 doc_has docs/agent-configs/agent-handoff-schema.md 'tier.json' 'written only by `scripts/agent-guard.sh`' \
   '`tier set` fills a null one with'
-doc_has .claude/commands/coding.md 'a confirmed small or medium tier'
 # The journal rule lives in AGENTS.md (read at startup), the journal guide and the plans README.
 for journal_doc in AGENTS.md docs/agent-configs/task-journal.md docs/superpowers/plans/README.md; do
   doc_has "$journal_doc" "$journal_rule"
@@ -78,34 +78,29 @@ doc_lacks docs/agent-configs/task-journal.md 'Mirroring is optional'
 ignore_file=.git/info/exclude; [[ -f "$target/.gitignore" ]] && ignore_file=.gitignore
 doc_has "$ignore_file" 'plans never leave'
 doc_lacks "$ignore_file" 'analyses and plans stay'
-doc_has .claude/commands/planning.md 'builder-check answers' 'use a council only when the user asks for one'
-doc_lacks .claude/commands/planning.md 'concrete plan'
-doc_has .claude/commands/reviewing.md "mode contracts' severity rule"
-for alias in planning coding reviewing; do
-  doc_has ".claude/commands/$alias-full-flow.md" "Same as \`/$alias\`" ".claude/commands/$alias.md"
+for seat in spec gate build verify audit; do
+  doc_has ".claude/commands/$seat.md" "section \`@$seat\` of" 'argument-hint: <task-id>'
 done
 doc_has docs/agent-configs/llm-council-agent-workflow.md 'never changes the phase owner'
 doc_has .claude/commands/codex/rescue.md 'whose host is `codex`'
 doc_has .claude/commands/codex/setup.md 'whose host is `codex`'
-doc_has .codex/codex-mode.sh 'gate-review.md' 'scripts/agent-guard.sh baseline' "mode contracts' severity rule" \
-  'never ask for a project plan before approval'
+doc_has "$modes" 'gate-review.md' 'scripts/agent-guard.sh baseline' 'Verdict and blocker count first'
+doc_has .codex/codex-mode.sh 'follow section $tag of docs/agent-configs/agent-mode-contracts.md'
 doc_lacks .codex/codex-mode.sh 'codex-review.md' 'verify-review.md' 'Judge the spec and plan' 'diff since' \
   'Severity must name' 'mark the severity as an estimate' "$severity_rule"
 doc_has .codex/README.md "@build's hand-off check"
-doc_has .claude/commands/planning.md 'Enter = keep' '--answer' 'tier suggest'
-doc_has .claude/commands/coding.md 'after task.md' 'Enter = keep' '--answer'
-doc_has .codex/codex-mode.sh 'End with the tier checkpoint: run scripts/agent-guard.sh tier suggest --task <id> --by @spec' \
-  'tier suggest --task <id> --by @gate' 'Add scope goes back to @spec' 'say '"'"'not recorded'"'"' if read-only'
-# Every tier checkpoint passes the facts it knows: a suggest with no --paths
-# would judge "files unknown".
-doc_has .codex/codex-mode.sh '--by @spec --paths <files>' '--by @gate --paths <files>' '--by @build --paths <files>' \
-  'l = large · m = medium · s = small'
-doc_lacks .codex/codex-mode.sh 'Enter = keep · m · s'
-doc_has docs/agent-configs/tier-medium.md '--by @build --paths <files>' '`--unclear`' '`--handoff`'
-doc_has AGENTS.md '`--handoff`'
-doc_has .codex/codex-mode.sh '--unclear or --handoff when true'
-doc_has .claude/commands/planning.md '--by @spec --paths <files>'
-doc_has .claude/commands/coding.md '--paths <files>` (and the AGENTS.md flags when true)'
+doc_has AGENTS.md 'Enter = keep <tier>' '--answer keep|switch|scope' '"not recorded" when read-only' \
+  'a seat adds `--by <seat>` to both' 'l = large · m = medium · s = small'
+doc_has "$modes" 'AGENTS.md `## Pick a tier` steps 2–3 as the seat' 'add scope goes to `@spec`'
+doc_has docs/agent-configs/agent-handoff-reference.md 'listed in `resolved_in_plan`' 'not a git diff' \
+  'previous' 'Specification revision' 'returns the packet to `@spec`'
+doc_has docs/agent-configs/tier-medium.md 'After `task.md` is written and before coding' '`--by @build`'
+# Every tier checkpoint passes the facts it knows: the contracts' checkpoint
+# runs AGENTS.md's steps, whose suggest has --paths and the flags (a suggest
+# with no --paths would judge "files unknown").
+doc_has AGENTS.md 'tier suggest --task <id> --paths <files>' '`--unclear` (vague request)' \
+  '`--handoff` (another agent codes) when true'
+doc_lacks .codex/codex-mode.sh 'Enter = keep · m · s' 'MODE LOCK'
 doc_has docs/agent-configs/RECOVERY.md 'scripts/harness-kit.sh --take-kit' 'agent-init --apply-candidates --only' \
   'bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --apply-candidates --only'
 doc_lacks docs/agent-configs/RECOVERY.md 'scripts/bootstrap-multi-agent-project.sh'
@@ -612,37 +607,42 @@ launched_ok() {  # the launch exited 0 and Codex received arguments
 launched() { cat "$TMP_ROOT/launch.out" "$TMP_ROOT/launch.err"; }
 write_contract "{\"verification\":[{\"command\":\"$(stub closeout)\",\"purpose\":\"stub\",\"source\":\"test\"}]}"
 : > "$mark"
-# 27 planning opens @spec; a seat held by another host is refused with the move hint
+# 27 the removed mode word planning names @spec without launching; a seat
+# held by another host is refused with the move hint
 launch .codex/codex-mode.sh planning x
-[[ "$rc" -ne 0 && ! -e "$codex_args" ]] || fail "planning on a claude-held @spec must refuse without launching (rc=$rc)"
+[[ "$rc" -eq 2 && ! -e "$codex_args" ]] || fail "planning must exit 2 without launching (rc=$rc)"
+grep -qF 'planning: removed: use @spec' "$TMP_ROOT/launch.err" || fail "planning must name @spec: $(launched)"
+launch .codex/codex-mode.sh @spec x
+[[ "$rc" -ne 0 && ! -e "$codex_args" ]] || fail "a claude-held @spec must refuse without launching (rc=$rc)"
 grep -qF 'seat @spec is occupied by claude; open it there, or move it with scripts/agent-seats.sh set spec --host codex --model <id>' \
-  "$TMP_ROOT/launch.err" || fail "planning must resolve @spec with the move hint: $(launched)"
-# @gate gets the technical-review lock (baseline, verdict first, contract severity, later rounds read revisions)
+  "$TMP_ROOT/launch.err" || fail "@spec must get the move hint: $(launched)"
+# @gate gets its seat lock, which points to its contract section; the section
+# holds the baseline, verdict-first and later-round rules
 launch .codex/codex-mode.sh @gate x
 [[ "$rc" -eq 0 ]] || fail "@gate launch failed (rc=$rc): $(launched)"
-grep -q 'MODE LOCK: TECHNICAL-REVIEW' "$codex_args" || fail "@gate must get the technical review lock"
-grep -q 'MODE LOCK: PLANNING' "$codex_args" && fail "@gate must not get the planning lock"
-for rule in 'agent-guard.sh baseline' 'Open with the verdict' "severity rule" 'previous verdict' 'Specification revision'; do
-  grep -qF "$rule" "$codex_args" || fail "@gate lock must state: $rule"
-done
+grep -qF 'SEAT LOCK: @gate' "$codex_args" || fail "@gate must get its seat lock"
+grep -qF 'follow section @gate of docs/agent-configs/agent-mode-contracts.md' "$codex_args" ||
+  fail "@gate seed must point to section @gate"
+if grep -q 'MODE LOCK' "$codex_args"; then fail "@gate must not get a mode lock"; fi
+doc_has "$modes" 'agent-guard.sh baseline' 'Verdict and blocker count first' 'severities'
 grep -q 'authorization=' "$codex_args" "$TMP_ROOT/launch.err" && fail "launcher must never write authorization"
 grep -qx 'mode=gating' "$target/.codex-mode-lock" || fail "@gate must persist route gating"
 launch .codex/codex-mode.sh status
 [[ "$rc" -eq 0 ]] && grep -qx 'Current mode: gating' "$TMP_ROOT/launch.out" || fail "status must accept route gating: $(launched)"
 launch .codex/codex-mode.sh run x
 launched_ok "run must relaunch the locked @gate"
-grep -q 'MODE LOCK: TECHNICAL-REVIEW' "$codex_args" || fail "run must relaunch the locked @gate with its lock"
+grep -qF 'SEAT LOCK: @gate' "$codex_args" || fail "run must relaunch the locked @gate with its lock"
 # a lock without seat= (mode=planning meant @gate) and no lock at all both relaunch @gate
 cp "$target/.codex-mode-lock" "$TMP_ROOT/lock.orig"
 printf 'mode=planning\nflow=full_flow\n' > "$target/.codex-mode-lock"
 launch .codex/codex-mode.sh run x
 launched_ok "a legacy planning lock must relaunch"
-grep -q 'MODE LOCK: TECHNICAL-REVIEW' "$codex_args" && grep -qx "$gate_model" "$codex_args" ||
+grep -qF 'SEAT LOCK: @gate' "$codex_args" && grep -qx "$gate_model" "$codex_args" ||
   fail "a legacy mode=planning lock must relaunch @gate: $(cat "$codex_args")"
 rm -f "$target/.codex-mode-lock"
 launch .codex/codex-mode.sh run x
 launched_ok "run without a lock must launch"
-grep -q 'MODE LOCK: TECHNICAL-REVIEW' "$codex_args" || fail "run without a lock must open @gate"
+grep -qF 'SEAT LOCK: @gate' "$codex_args" || fail "run without a lock must open @gate"
 cp "$TMP_ROOT/lock.orig" "$target/.codex-mode-lock"
 # the planning route override now belongs to @spec; @gate warns and names its own override
 launch CODEX_PLANNING_MODEL_OVERRIDE=unrelated-model-x .codex/codex-mode.sh @gate x
@@ -800,8 +800,8 @@ assert tiers["large"]["kit"] <= 5203, tiers
 PY
 saved_target="$target"; target="$budget"
 doc_has docs/agent-configs/tier-medium.md '## Planned files' 'same_vendor' 'reviewer_model: human' \
-  'CODEX_REASONING_EFFORT=high' 'tier close'
-doc_has AGENTS.md 'tier-medium.md'
+  'CODEX_REASONING_EFFORT=high'
+doc_has AGENTS.md 'tier-medium.md' 'When the user says done: `tier close --task <id>`'
 target="$saved_target"
 budget_run "$TMP_ROOT/budget-only.json" --json --context-budget
 python3 -B -c 'import json,sys; a, b = (json.load(open(p))["context_budget"] for p in sys.argv[1:]); assert a == b, (a, b)' \
@@ -848,7 +848,7 @@ cp "$TMP_ROOT/brief.orig" "$brief"
 # (b) Kit text past a gate fails the verifier.
 contracts="$budget/docs/agent-configs/agent-mode-contracts.md"
 cp "$contracts" "$TMP_ROOT/contracts.orig"
-pad_section "$contracts" '## Planning Mode' $(( (6300 - base_on_demand_kit) * 4 ))
+pad_section "$contracts" '## `@owner`' $(( (6300 - base_on_demand_kit) * 4 ))
 budget_run "$TMP_ROOT/budget-kit-over.out" --context-budget
 [[ "$rc" -ne 0 ]] || fail "kit text above the on-demand gate must fail the verifier: $(cat "$TMP_ROOT/budget-kit-over.out")"
 grep -Eq 'FAIL  kit on-demand full workflow context estimate: [0-9]+ tokens exceeds gate 6200' "$TMP_ROOT/budget-kit-over.out" ||

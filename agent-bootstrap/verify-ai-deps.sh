@@ -948,12 +948,11 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   .codex/codex-mode.sh \
   .codex/README.md \
   .agents/skills/doubt-driven/SKILL.md \
-  .claude/commands/planning.md \
-  .claude/commands/planning-full-flow.md \
-  .claude/commands/coding.md \
-  .claude/commands/coding-full-flow.md \
-  .claude/commands/reviewing.md \
-  .claude/commands/reviewing-full-flow.md \
+  .claude/commands/spec.md \
+  .claude/commands/gate.md \
+  .claude/commands/build.md \
+  .claude/commands/verify.md \
+  .claude/commands/audit.md \
   .claude/commands/project-onboarding.md \
   .claude/commands/codex/setup.md \
   .claude/commands/codex/rescue.md \
@@ -964,6 +963,12 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   docs/superpowers/specs/project-tech-stack.json \
   docs/superpowers/plans/README.md; do
     need_file "$path"
+  done
+  # The update keeps a mode command that is tracked by git or edited; name it here.
+  for path in planning coding reviewing planning-full-flow coding-full-flow reviewing-full-flow; do
+    if [[ -e "$ROOT_DIR/.claude/commands/$path.md" || -L "$ROOT_DIR/.claude/commands/$path.md" ]]; then
+      warn "old mode command still here: .claude/commands/$path.md (the seat commands /spec /gate /build /verify /audit replace it); delete it, with git rm if tracked, unless you keep it on purpose"
+    fi
   done
   if command -v python3 >/dev/null 2>&1; then
     if validate_project_tech_stack_contract >/dev/null; then
