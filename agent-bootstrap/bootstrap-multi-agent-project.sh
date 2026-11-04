@@ -13,9 +13,8 @@ if [[ -n "${AGENT_BOOTSTRAP_STAMP:-}" ]]; then
   fi
   STAMP="$AGENT_BOOTSTRAP_STAMP"
 fi
-AGENT_BOOTSTRAP_VERSION="2026.10.24.1"
+AGENT_BOOTSTRAP_VERSION="2026.11.04.1"
 AGENT_BOOTSTRAP_CHANNEL="stable"
-RTK_VERSION="0.37.2"
 WORKFLOW_PRESET="infra"
 IGNORE_TARGET=""
 WORKFLOW_EXPLICIT=false
@@ -1669,14 +1668,9 @@ print_upgrade_plan() {
 
 print_first_10() {
   local lock_file="$TARGET_DIR/docs/agent-configs/agent-bootstrap.lock.json"
-  local onboarding_status rtk_state guard_state
+  local onboarding_status guard_state
   onboarding_status="$(onboarding_status_for_target)"
-  rtk_state="missing"
   guard_state="missing"
-  if [[ -x "$TARGET_DIR/scripts/rtk" ]] &&
-    (cd "$TARGET_DIR" && scripts/rtk --version >/dev/null 2>&1); then
-    rtk_state="installed"
-  fi
   if [[ -x "$TARGET_DIR/scripts/agent-guard.sh" ]]; then
     guard_state="installed"
   fi
@@ -1684,7 +1678,6 @@ print_first_10() {
   printf 'First 10 Minutes\n'
   printf 'target=%s\n' "$TARGET_DIR"
   printf 'workflow_preset=%s\n' "$WORKFLOW_PRESET"
-  printf 'rtk=%s\n' "$rtk_state"
   printf 'agent_guard=%s\n' "$guard_state"
   printf 'onboarding_status=%s\n' "$onboarding_status"
   printf '\n'
@@ -1699,16 +1692,14 @@ print_first_10() {
     return 0
   fi
 
-  printf '1. Install the pinned runtime wrapper when missing:\n'
-  printf '   bash scripts/install-rtk.sh\n'
-  printf '2. Validate generated agent infrastructure:\n'
+  printf '1. Validate generated agent infrastructure:\n'
   printf '   scripts/agent-hook.sh doctor\n'
-  printf '3. Refresh the local context pack for this checkout:\n'
+  printf '2. Refresh the local context pack for this checkout:\n'
   printf '   scripts/agent-guard.sh preflight\n'
-  printf '4. Fill or verify the onboarding contract:\n'
+  printf '3. Fill or verify the onboarding contract:\n'
   printf '   scripts/agent-onboarding.sh next\n'
   printf '   scripts/agent-onboarding.sh check\n'
-  printf '5. Final harness verification:\n'
+  printf '4. Final harness verification:\n'
   printf '   scripts/verify-ai-deps.sh\n'
 
   if [[ -x "$TARGET_DIR/scripts/agent-onboarding.sh" ]]; then
@@ -1805,10 +1796,9 @@ main() {
   write_template_catalog
   write_skill_mobile_optimization
   write_recovery_runbook
-  write_schema_model_and_provenance_catalog
+  write_schema_and_model_catalog
   write_portable_enforcement
   write_agentmemory_skill
-  write_rtk_tools
   write_tech_stack_lib
   write_runtime_detector
   write_agent_guard

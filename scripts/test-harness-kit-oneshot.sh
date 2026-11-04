@@ -328,6 +328,25 @@ grep -qx 'local patch' "$c1/.claude/commands/coding.md" || fail "case 2: a local
 [[ "$OUT" == *"RESULT: done (verify skipped)"* ]] || fail "case 2: the result line must say verify skipped: $OUT"
 grep -q 'taking over a stale run lock' "$TMP_ROOT/hk.err" || fail "run lock: a dead holder must be taken over with a note"
 [[ ! -e "$lockdir" ]] || fail "run lock: not released"
+
+# An agentmemory older than the tested version adds one summary item (inside
+# the 12-line budget) and one report note; it never runs agentmemory or changes
+# the result.
+am="$TMP_ROOT/am-old"
+am_pkg="$am/lib/node_modules/@agentmemory/agentmemory"
+mkdir -p "$am_pkg/dist" "$am/bin"
+printf '{"name": "@agentmemory/agentmemory", "version": "0.9.21"}\n' >"$am_pkg/package.json"
+printf '#!/bin/sh\ntouch "%s/am-ran"\n' "$TMP_ROOT" >"$am_pkg/dist/cli.mjs"
+chmod +x "$am_pkg/dist/cli.mjs"
+ln -s ../lib/node_modules/@agentmemory/agentmemory/dist/cli.mjs "$am/bin/agentmemory"
+PATH="$am/bin:$PATH" hk "$c1" --skip-verify
+expect 0 "agentmemory reminder run"
+grep -q '^agentmemory 0.9.21 is older than the version this kit was tested with' <<<"$OUT" ||
+  fail "agentmemory reminder: not in the console summary: $OUT"
+[[ "$(tail -n 1 <<<"$OUT")" == report:* ]] || fail "agentmemory reminder: the report line must stay last: $OUT"
+[[ "$(jget "$REPORT" 'any(n.startswith("agentmemory 0.9.21 is older") for n in d["notes"])')" == True ]] ||
+  fail "agentmemory reminder: not in the report notes: $(jget "$REPORT" 'd["notes"]')"
+[[ ! -e "$TMP_ROOT/am-ran" ]] || fail "agentmemory reminder: the run executed agentmemory"
 kits="$(for dir in "$c1"/.harness-kit/v*; do printf '%s\n' "${dir##*/}"; done | LC_ALL=C sort | tr '\n' ' ')"
 want="$(printf '%s\n' v2026.02.01.1 "v$VERSION" v2026.10.13.2-rc1 vjunk | LC_ALL=C sort | tr '\n' ' ')"
 [[ "$kits" == "$want" ]] || fail "kit copy pruning: $kits (want $want)"
@@ -681,7 +700,7 @@ expect 3 "case 6 --decline"
 [[ "$(jget "$REPORT" '([m["id"] for m in d["migrations"]["declined"]], [m["id"] for m in d["migrations"]["pending"]])')" == \
   "(['$UNTRACK_ID'], ['$TOEXCL_ID'])" ]] ||
   fail "case 6: decline: $(jget "$REPORT" 'd["migrations"]')"
-git -C "$c6" add -f GEMINI.md
+git -C "$c6" add -f .claude/README.md
 git_c "$c6" commit -qm "legacy: one more tracked harness file"
 head="$(git -C "$c6" rev-parse HEAD)"
 hk "$c6" --skip-verify
@@ -696,7 +715,7 @@ expect 3 "case 6 --accept on a feature branch"
 staged="$(git -C "$c6" diff --cached --name-status)"
 [[ "$(grep -cv "^D$(printf '\t')" <<<"$staged" || true)" -eq 0 ]] || fail "case 6: --accept may only remove index entries: $staged"
 [[ -z "$(git -C "$c6" diff --name-only)" ]] || fail "case 6: --accept changed tracked work-tree files: $(git -C "$c6" diff --name-only)"
-for rel in AGENTS.md CLAUDE.md GEMINI.md; do
+for rel in AGENTS.md CLAUDE.md .claude/README.md; do
   grep -qx "D$(printf '\t')$rel" <<<"$staged" || fail "case 6: $rel was not untracked: $staged"
   [[ -f "$c6/$rel" ]] || fail "case 6: untrack removed $rel from disk"
 done

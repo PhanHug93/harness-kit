@@ -2,8 +2,8 @@
 
 This is the source repository for the portable harness bundle. The rules below
 apply to work on this repository and to all feature, maintenance and release
-branches. Read README.md for the affected verification commands before changing
-the bundle.
+branches. Read CONTRIBUTING.md for the affected verification commands before
+changing the bundle.
 
 ## Mandatory Git-flow authorization
 

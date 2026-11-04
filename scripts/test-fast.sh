@@ -8,7 +8,7 @@ set -uo pipefail
 # reproduce a CI failure or when CI cannot run.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CHECKS=(syntax release-pins release-script guard onboarding retirement detector path-policy guard-race local-only
-  verification-evidence entry knowledge migrations staging oneshot tiers matrix)
+  verification-evidence entry knowledge migrations staging oneshot tiers matrix rules agentmemory)
 
 usage() {
   printf '%s\n' \
@@ -24,7 +24,7 @@ run_check() {
       while IFS= read -r file; do
         bash -n "$file" || status=1
       done < <(grep -lE '^#!/usr/bin/env bash|^#!/bin/bash' "$ROOT_DIR"/scripts/*.sh "$ROOT_DIR"/agent-bootstrap/*.sh \
-        "$ROOT_DIR"/agent-bootstrap/lib/*.sh "$ROOT_DIR"/agent-bootstrap/rtk "$ROOT_DIR"/agent-bootstrap/githooks/pre-push)
+        "$ROOT_DIR"/agent-bootstrap/lib/*.sh "$ROOT_DIR"/agent-bootstrap/githooks/pre-push)
       return "$status"
       ;;
     release-pins) bash "$ROOT_DIR/scripts/release.sh" --check ;;
@@ -44,6 +44,8 @@ run_check() {
     oneshot) bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh" ;;
     tiers) bash "$ROOT_DIR/scripts/test-change-tiers.sh" ;;
     matrix) bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh" ;;
+    rules) bash "$ROOT_DIR/scripts/test-rule-inventory.sh" ;;
+    agentmemory) bash "$ROOT_DIR/scripts/test-agentmemory-check.sh" ;;
   esac
 }
 

@@ -8,15 +8,12 @@ write_project_onboarding() {
   write_file "$TARGET_DIR/docs/agent-configs/first-10-minutes.md" <<'EOF_FIRST_10'
 # First 10 Minutes
 
-Use this as the first operator path after generating the harness into a project.
-It is intentionally short: install the pinned runtime, validate the guardrails,
-then let an agent fill the project-specific onboarding contract from source
-evidence.
+The first steps after generating the harness: check the guardrails, then let
+an agent fill the project brief from source evidence.
 
 ## Operator path
 
 ```bash
-bash scripts/install-rtk.sh
 scripts/agent-hook.sh doctor
 scripts/agent-guard.sh preflight
 scripts/agent-onboarding.sh next
@@ -33,11 +30,10 @@ scripts/agent-onboarding.sh check
 scripts/verify-ai-deps.sh
 ```
 
-`status` and `next` are guidance commands. `check` is the strict gate and exits
-non-zero until `docs/agent-configs/project-brief.md` and
-`docs/superpowers/specs/project-tech-stack.json` are source-backed and filled.
-The verifier reports onboarding readiness but does not fail a fresh bootstrap
-only because onboarding is still unfilled.
+`status` and `next` only guide. `check` fails until
+`docs/agent-configs/project-brief.md` and
+`docs/superpowers/specs/project-tech-stack.json` are filled from source; the
+verifier only reports an unfilled brief.
 EOF_FIRST_10
 
   write_file "$TARGET_DIR/docs/agent-configs/project-onboarding.md" <<'EOF_ONBOARD'
@@ -45,18 +41,17 @@ EOF_FIRST_10
 
 Run this once when landing in a project whose
 `docs/agent-configs/project-brief.md` still carries the `<!-- UNFILLED -->`
-marker. Tool-agnostic: Claude, Codex, Gemini, or any agent can follow it.
+marker; any agent can follow it.
 Run `scripts/agent-onboarding.sh next` to see the current missing pieces.
 
 ## Procedure
 1. Read `docs/agent-configs/project-agent-context.md` (detected stack, modules,
    verification commands) as the seed.
 2. Run `scripts/detect-agent-tech-stack.sh --markdown` to refresh detected facts.
-3. Explore the codebase to understand: what the project is, top-level
-   architecture, module/package responsibilities, key domains, conventions,
-   protected/sensitive areas, build/test/run commands, and known gotchas. Prefer
-   the repo's code-intelligence (e.g. CodeGraph) and entry points over
-   exhaustive reading.
+3. Explore the codebase: purpose, architecture, module responsibilities, key
+   domains, conventions, protected or sensitive areas, build/test/run commands
+   and known gotchas. Prefer code intelligence (e.g. CodeGraph) and entry
+   points over reading everything.
 4. Fill every section of `docs/agent-configs/project-brief.md`, removing the
    `<!-- UNFILLED -->` marker. Be concrete: name real files, modules, and
    commands. State uncertainty explicitly instead of guessing.
@@ -81,34 +76,25 @@ Run `scripts/agent-onboarding.sh next` to see the current missing pieces.
    data).
    Respect `scripts/agent-hook.sh no-scan-paths`.
 9. Set the `Last verified:` line near the top of the brief to the current commit
-   sha (`./scripts/rtk git rev-parse --short HEAD`) and today's date. Re-run this
+   sha (`git rev-parse --short HEAD`) and today's date. Re-run this
    onboarding when the brief's recorded commit is far behind `HEAD`.
 10. Run `scripts/agent-onboarding.sh status`, then
     `scripts/agent-onboarding.sh check`. If the strict check fails, fix the
     missing brief sections, evidence, verification entries, or `Last verified`
     values before substantive implementation work.
 
-## Definition of Done
+## Done when
 
-- `docs/agent-configs/project-brief.md` no longer contains
-  `<!-- UNFILLED -->`.
-- Every required brief section has source-backed content or an explicit open
-  question.
-- `docs/superpowers/specs/project-tech-stack.md` no longer contains
-  `<!-- UNFILLED -->` and every required section has concrete content.
-- `docs/superpowers/specs/project-tech-stack.json` has
-  `"status": "filled"`, non-empty `last_verified.commit`,
-  `last_verified.date`, `source_evidence`, and `verification`.
-- Every `source_evidence[].path` is a safe project-relative path to an existing
-  file, every evidence claim is non-empty, and every verification entry has
-  non-empty `command`, `purpose`, and `source`.
-- `scripts/agent-onboarding.sh check` exits 0.
-- `scripts/verify-ai-deps.sh` exits 0.
+`scripts/agent-onboarding.sh check` and `scripts/verify-ai-deps.sh` exit 0. The
+check requires: no `<!-- UNFILLED -->` left in the brief or
+`project-tech-stack.md`; every required section source-backed or an explicit
+open question; `project-tech-stack.json` with `"status": "filled"`, its
+`last_verified` commit and date, and evidence paths and verification entries
+that exist and are complete.
 
 ## Output
 A fully-filled `project-brief.md` — the durable deep-context an agent reads at
-the start of work in this project. Commit only when the user asks; git via
-`./scripts/rtk git`.
+the start of work in this project. Commit only when the user asks.
 EOF_ONBOARD
 
   write_file "$TARGET_DIR/.claude/commands/project-onboarding.md" <<'EOF_CMD'
@@ -167,12 +153,9 @@ Specs here are pushed, so keep only specs of work that has started. Draft a new
 spec in `docs/superpowers/plans/<topic>/` (local-only) and move it here in the
 first commit that implements it.
 
-On first onboarding, fill `docs/superpowers/specs/project-tech-stack.md` with
-the verified project-specific tech-stack, module map, conventions, protected
-paths, generated-file ownership, and verification matrix. Keep it source-backed:
-cite real files and commands rather than guesses. Keep the paired
-`docs/superpowers/specs/project-tech-stack.json` schema-valid for lightweight
-tooling checks.
+Project onboarding (`docs/agent-configs/project-onboarding.md`) fills the
+source-backed `project-tech-stack.md` and its schema-valid
+`project-tech-stack.json` here.
 EOF_SPECS
 
   write_user_owned_file "$TARGET_DIR/docs/superpowers/specs/project-tech-stack.md" <<'EOF_TECH_STACK_SPEC'

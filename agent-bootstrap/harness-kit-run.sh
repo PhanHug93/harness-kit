@@ -57,6 +57,7 @@ REASON=""
 WOULD_REFUSE=""
 RESULT=""
 ROLLBACK_REF=""
+AGENTMEMORY_NOTE=""
 MIG_META=""
 KEEPS=()
 RUN_STARTED=false
@@ -578,6 +579,8 @@ def cmd_report(run_dir):
         if migrations["applied"] or migrations["failed"] or migration_backups(run_dir):
             items.append(("--rollback does not undo migration changes (index, .gitignore); "
                           "their backups are in %s/journal/migrations/" % rel_run, []))
+    if env.get("R_AGENTMEMORY_NOTE"):
+        items.append((env["R_AGENTMEMORY_NOTE"], []))
     if plan_only and not failed and not would_refuse:
         items.append(("apply: %s" % cmd, [cmd]))
     nexts = []
@@ -1662,7 +1665,7 @@ write_report() {
     R_TO="$KIT_VERSION" R_PLAN_ONLY="$PLAN_ONLY" R_SKIP_VERIFY="$SKIP_VERIFY" R_REASON="$REASON" \
     R_WOULD_REFUSE="$WOULD_REFUSE" R_APPLIED="$APPLY_STARTED" \
     R_BRANCH_IDS="$(branch_ids)" R_PROTECTED="$protected" R_WORK_BRANCH="$WORK_BRANCH_HINT" \
-    R_ROLLBACK_ID="$ROLLBACK_REF" py report "$RUN_DIR")"
+    R_ROLLBACK_ID="$ROLLBACK_REF" R_AGENTMEMORY_NOTE="$AGENTMEMORY_NOTE" py report "$RUN_DIR")"
 }
 
 show_summary() {
@@ -1675,6 +1678,10 @@ show_summary() {
 
 finish() {
   local rc
+  # One line when the local agentmemory is older than the version this kit was
+  # tested with: a report note and a console item; it never changes the result.
+  AGENTMEMORY_NOTE="$(bash "$KIT_DIR/verify-ai-deps.sh" --agentmemory 2>/dev/null || true)"
+  [ -z "$AGENTMEMORY_NOTE" ] || printf '%s\n' "$AGENTMEMORY_NOTE" >>"$RUN_DIR/notes.txt"
   if ! write_report; then
     FINISHED=true
     err "could not write the report in ${RUN_DIR#"$TARGET"/}"

@@ -54,9 +54,8 @@ doc_lacks docs/agent-configs/agent-handoff-reference.md 'Mirroring is optional' 
 doc_has AGENTS.md 'The seat that changed code' 'short, plain words, and an example instead of jargon' 'plans never leave' "$journal_rule" \
   'USER and detected blocks) only warns' 'entries follow `docs/agent-configs/task-journal.md`' \
   'printed by the guard' 'session ends; do not run it again' 'agent-handoff-schema.md` for packets, resume and ownership'
-for readme in README.md docs/agent-configs/bootstrap-multi-agent-project/README.md agent-bootstrap/README.md; do
-  grep -q 'detector-filled managed blocks' "$ROOT_DIR/$readme" || fail "$readme must list detector-filled managed blocks as project content"
-done
+grep -q 'detector-filled managed blocks' "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/README.md" ||
+  fail "the reference README must list detector-filled managed blocks as project content"
 doc_lacks AGENTS.md 'Before completion, run' 'do not commit them until' 'not a closure gate'
 # Change tiers: AGENTS.md says how to pick one; the contracts give each tier's
 # phases and the coding rule; the schema says who writes tier.json.

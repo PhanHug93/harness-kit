@@ -42,7 +42,6 @@ PINS = [
     ("README.md", URL),
     ("README.md", r"installs release `(?P<v>[^`]+)`"),
     ("agent-bootstrap/README.md", URL),
-    ("docs/agent-configs/bootstrap-multi-agent-project/README.md", URL),
 ]
 VERSION_RE = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$")
 version_file = root / "agent-bootstrap/VERSION"

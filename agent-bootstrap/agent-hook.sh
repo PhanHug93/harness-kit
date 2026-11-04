@@ -5,7 +5,6 @@ set -euo pipefail
 WORKFLOW_PRESET="full"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-RTK="$PROJECT_ROOT/scripts/rtk"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 LOCK_FILE="$PROJECT_ROOT/docs/agent-configs/agent-bootstrap.lock.json"
 CODEX_HELPER="$PROJECT_ROOT/.codex/codex-mode.sh"
@@ -92,10 +91,6 @@ required_executable() {
   [[ -x "$1" ]] || fail "missing executable file: ${1#"$PROJECT_ROOT"/}"
 }
 
-rtk_available() {
-  [[ -x "$RTK" ]] && "$RTK" --version >/dev/null 2>&1
-}
-
 hash_text() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum | awk '{print $1}'
@@ -171,15 +166,6 @@ verify_detector_lock() {
 is_tracked() {
   local pathspec="$1"
   local tracked_path
-  if rtk_available; then
-    while IFS= read -r tracked_path; do
-      [[ -n "$tracked_path" ]] || continue
-      if [[ -e "$PROJECT_ROOT/$tracked_path" ]]; then
-        return 0
-      fi
-    done < <("$RTK" git -C "$PROJECT_ROOT" ls-files -- "$pathspec")
-    return 1
-  fi
   if command -v git >/dev/null 2>&1 &&
     git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     while IFS= read -r tracked_path; do
@@ -637,15 +623,7 @@ claude_pretool() {
     esac
   fi
   verify_detector_lock warn
-  if [[ -n "$ask_reason" ]]; then
-    claude_ask "$ask_reason"
-    exit 0
-  fi
-  cd "$PROJECT_ROOT"
-  if rtk_available; then
-    exec "$RTK" hook claude
-  fi
-  echo "agent-hook: warn: pinned rtk binary is not installed; skipping rtk Claude hook. Run: bash scripts/install-rtk.sh" >&2
+  [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
   exit 0
 }
 

@@ -53,7 +53,7 @@ printf 'node_modules/\n' > "$proj/.gitignore"
 for i in $(seq 1 40); do printf 'x\n' > "$proj/src/f$i.js"; done
 bash "$BOOTSTRAP" --target "$proj" --workflow full >/dev/null 2>&1 || fail "fixture generation failed"
 baseline="$proj/.tools/agent-state/harness-baseline/files"
-printf '\n# local note\n' >> "$proj/GEMINI.md"
+printf '\n# local note\n' >> "$proj/.claude/README.md"
 printf '# older kit line\n' >> "$proj/CLAUDE.md"
 printf '# older kit line\n' >> "$baseline/CLAUDE.md"
 python3 -B - "$proj" <<'PY'
@@ -153,7 +153,7 @@ if planned != actions:
 lock = "docs/agent-configs/agent-bootstrap.lock.json"
 if planned.get(lock) != actions.get(lock):
     errors.append("lock class differs: plan %s, real %s" % (planned.get(lock), actions.get(lock)))
-for rel, want in (("GEMINI.md", "kept"), ("CLAUDE.md", "update"), (".claude/settings.json", "conflict"),
+for rel, want in ((".claude/README.md", "kept"), ("CLAUDE.md", "update"), (".claude/settings.json", "conflict"),
                   ("docs/agent-configs/context-policy.json", "kept"),
                   ("docs/agent-configs/project-brief.md", "preserved")):
     if planned.get(rel) != want:
