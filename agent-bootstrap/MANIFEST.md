@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.10.24.1`
+Version: `2026.11.04.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -29,7 +29,7 @@ tag or source branch to complete a feature PR.
 | `harness-kit-run.sh` | One-shot orchestrator: install, reinstall or update one project in phases (preflight, stage, apply, migrate, verify, report). | Must match canonical home export; never emitted into targets. |
 | `agent-bootstrap-update.sh` | Git-backed updater for canonical home and target upgrade planning. | Must match canonical home export. |
 | `install-agent-bootstrap-home.sh` | Exports this bundle into `$AGENT_BOOTSTRAP_HOME`. | Must copy every other file listed in this manifest; it does not copy itself. |
-| `README.md` | Operator guide for the copyable bundle. | Must match canonical home export. |
+| `README.md` | Short guide for the copyable bundle: contents, install line, links. | Must match canonical home export. |
 | `VERSION` | Bundle version stamp. | Must match `bootstrap-multi-agent-project.sh --version`. |
 | `MANIFEST.md` | Bundle inventory and ownership map. | Must match canonical home export. |
 | `agent-tech-stack-lib.sh` | Runtime detector library snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-tech-stack-lib.sh`. |
@@ -42,13 +42,10 @@ tag or source branch to complete a feature PR.
 | `detect-agent-tech-stack.sh` | Runtime detector entrypoint snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/detect-agent-tech-stack.sh`. |
 | `githooks/pre-push` | Optional portable git pre-push close-out gate copied into generated target `scripts/githooks/pre-push`. | Must match generated target hook and remain opt-in via `scripts/install-git-hooks.sh`. |
 | `install-git-hooks.sh` | Optional installer that sets `core.hooksPath=scripts/githooks` without clobbering an existing hooks path unless `--force` is used. | Must match generated target `scripts/install-git-hooks.sh`. |
-| `install-rtk.sh` | Runtime rtk installer snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/install-rtk.sh`. |
-| `rtk` | Runtime rtk wrapper snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/rtk`. |
 | `verify-ai-deps.sh` | Runtime verifier snapshot for generated full-workflow projects. | Must match `--workflow full` generated `scripts/verify-ai-deps.sh`. |
 | `model-profiles/codex-model-profiles.json` | Legacy model profile catalog retained as one-release migration input; fresh targets do not receive `model-profiles.json`. | Must match canonical home export; used only when `seats.json` is missing. |
 | `policies/agent-context-policy.json` | Source Agent Guard Lite context policy copied into generated target `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target context policy. |
 | `policies/retired-artifacts-v1.json` | Closed HK-07 inventory of retired generated files with pinned historical size/SHA-256 provenance; read only by `lib/retirement.py`. | Must match canonical home export and the inventory pinned in `lib/retirement.py`; never emitted into targets. |
-| `provenance/rtk-v0.37.2.sha256` | Pinned rtk release asset checksums used by generated installer verification. | Must match canonical home export and generated target provenance catalog. |
 | `schemas/agent-context-policy-v1.schema.json` | JSON Schema for `policies/agent-context-policy.json` and generated `docs/agent-configs/context-policy.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-model-profiles-v1.schema.json` | JSON Schema for the legacy model profile migration input and its generated schema catalog copy. | Must match canonical home export and generated target schema catalog. |
 | `schemas/agent-seats-v1.schema.json` | JSON Schema for generated `docs/agent-configs/seats.json`. | Must match canonical home export and generated target schema catalog. |
@@ -64,7 +61,7 @@ tag or source branch to complete a feature PR.
 | `schemas/harness-kit-run-report-v1.schema.json` | JSON Schema for the one-shot run report `.tools/agent-state/upgrades/<STAMP>/report.json`. | Must match canonical home export and generated target schema catalog. |
 | `schemas/harness-tier-v1.schema.json` | JSON Schema for the per-task change tier record `.agents/tasks/<id>/tier.json`, written only by the tier script. | Must match canonical home export and generated target schema catalog. |
 | `templates/base/README.md` | Base generated template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
-| `templates/tool-contract/shared.md` | Shared managed tool contract rendered into CLAUDE/GEMINI/Windsurf/Cursor entrypoints. | Must match canonical home export, source docs template, and generated target template. |
+| `templates/tool-contract/shared.md` | Managed tool contract rendered into CLAUDE.md. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/android_kotlin.md` | Android/Kotlin overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/generic.md` | Generic overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
 | `templates/overlays/ios_swift.md` | iOS/Swift overlay template copied into target projects. | Must match canonical home export, source docs template, and generated target template. |
@@ -98,6 +95,8 @@ tag or source branch to complete a feature PR.
 | `migrations/2026.10.20.1-ignore-block-to-exclude.sh` | Migration `2026.10.20.1-ignore-block-to-exclude`. | Must match canonical home export; never emitted into targets. |
 | `migrations/2026.10.20.1-retire-files.sh` | Migration `2026.10.20.1-retire-files`. | Must match canonical home export; never emitted into targets. |
 | `migrations/2026.10.20.1-untrack-local-records.sh` | Migration `2026.10.20.1-untrack-local-records`. | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.11.04.1-remove-rtk.sh` | Migration `2026.11.04.1-remove-rtk`. | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.11.04.1-remove-legacy-entrypoints.sh` | Migration `2026.11.04.1-remove-legacy-entrypoints`. | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

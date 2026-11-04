@@ -58,7 +58,7 @@ while IFS= read -r snapshot; do
     cp "$generated" "$snapshot"
     echo "synced agent-bootstrap/$base"
   fi
-done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BUNDLE_DIR"/*.sh "$BUNDLE_DIR"/rtk 2>/dev/null | sort)
+done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BUNDLE_DIR"/*.sh 2>/dev/null | sort)
 
 if [[ "$drift" != 0 ]]; then
   [[ "$MODE" == "check" ]] && echo "run scripts/sync-runtime-snapshots.sh to refresh" >&2

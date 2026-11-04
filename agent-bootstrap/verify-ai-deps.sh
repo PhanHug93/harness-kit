@@ -9,12 +9,16 @@ FAIL=0
 WARN=0
 OUTPUT_JSON=false
 BUDGET_ONLY=false
+AGENTMEMORY_ONLY=false
 CHECKS=()
 CONTEXT_BUDGET_JSON=""
+# The agentmemory version this kit was tested with (CONTRIBUTING.md, "Agentmemory version pin").
+AGENTMEMORY_TESTED="0.9.31"
 
 usage() {
-  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget]" \
-    "  --context-budget  run only the context budget check (core startup and on-demand)"
+  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget | --agentmemory]" \
+    "  --context-budget  run only the context budget check (core startup and on-demand)" \
+    "  --agentmemory     print one line when the local agentmemory is older than the tested version"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -25,6 +29,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --context-budget)
       BUDGET_ONLY=true
+      shift
+      ;;
+    --agentmemory)
+      AGENTMEMORY_ONLY=true
       shift
       ;;
     -h|--help)
@@ -38,6 +46,59 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Reads package.json and never runs agentmemory: before 0.9.24,
+# `agentmemory --version` is not a version flag and may start the server.
+agentmemory_note() {
+  local bin
+  bin="$(command -v agentmemory 2>/dev/null)" || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -I -B - "$bin" "$AGENTMEMORY_TESTED" <<'PY'
+import json, os, sys
+
+binary, tested = sys.argv[1], sys.argv[2]
+
+
+def parse(text):
+    core, _, pre = text.split("+")[0].partition("-")
+    try:
+        numbers = [int(part) for part in core.split(".")]
+    except ValueError:
+        return None
+    numbers += [0] * (3 - len(numbers))
+    # A prerelease sorts before its release.
+    return tuple(numbers) + ((0,) if pre else (1,))
+
+
+found, path = None, os.path.dirname(os.path.realpath(binary))
+while found is None:
+    manifest = os.path.join(path, "package.json")
+    if os.path.isfile(manifest):
+        try:
+            with open(manifest, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict) and data.get("name") == "@agentmemory/agentmemory":
+            found = str(data.get("version", ""))
+    parent = os.path.dirname(path)
+    if parent == path:
+        break
+    path = parent
+steps = (f"stop it, npm install -g @agentmemory/agentmemory@{tested}, start it, then re-run "
+         "agentmemory connect claude-code --with-hooks and agentmemory connect codex --with-hooks.")
+have = parse(found) if found else None
+if have is None:
+    print(f"agentmemory: could not read its version; this kit was tested with {tested}: {steps}")
+elif have < parse(tested):
+    print(f"agentmemory {found} is older than the version this kit was tested with ({tested}): {steps}")
+PY
+}
+
+if [[ "$AGENTMEMORY_ONLY" == "true" ]]; then
+  agentmemory_note || true
+  exit 0
+fi
 
 json_escape() {
   if command -v python3 >/dev/null 2>&1; then
@@ -126,10 +187,7 @@ need_bash_syntax() {
 is_bootstrap_generated_base() {
   local relpath="$1"
   case "$relpath" in
-    AGENTS.md|CLAUDE.md|GEMINI.md|.windsurfrules|.gitignore)
-      return 0
-      ;;
-    .cursor/rules/agent-conventions.mdc)
+    AGENTS.md|CLAUDE.md|.gitignore)
       return 0
       ;;
     .claude/README.md|.claude/settings.json|.claude/commands/*)
@@ -147,7 +205,7 @@ is_bootstrap_generated_base() {
     docs/superpowers/specs/*|docs/superpowers/plans/*)
       return 0
       ;;
-    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/verify-ai-deps.sh)
       return 0
       ;;
     *)
@@ -496,12 +554,6 @@ if isinstance(lock, dict):
     require(lock.get("schema") == "agent-bootstrap-lock/v1", "lock.schema must be agent-bootstrap-lock/v1")
     for key in ("version", "channel", "project_name", "generated_at", "detector_summary_sha256", "detector_summary"):
         require(non_empty_string(lock.get(key)), f"lock.{key} must be a non-empty string")
-    rtk = lock.get("rtk")
-    require(isinstance(rtk, dict), "lock.rtk must be an object")
-    if isinstance(rtk, dict):
-        require(rtk.get("required") is True, "lock.rtk.required must be true")
-        require(non_empty_string(rtk.get("version")), "lock.rtk.version must be a non-empty string")
-        require(non_empty_string(rtk.get("install_command")), "lock.rtk.install_command must be a non-empty string")
     templates = lock.get("templates")
     require(isinstance(templates, dict), "lock.templates must be an object")
     if isinstance(templates, dict):
@@ -614,31 +666,6 @@ for filename, schema_id in expected_schema_ids.items():
     if isinstance(schema, dict):
         require(schema.get("$id") == schema_id, f"{filename} has unexpected $id")
         require(schema.get("type") == "object", f"{filename} must describe an object")
-
-provenance_path = root / "docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
-entries = {}
-try:
-    for line_no, raw_line in enumerate(provenance_path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        require(len(parts) == 2, f"rtk provenance line {line_no} must contain '<sha256> <asset>'")
-        if len(parts) == 2:
-            digest, asset = parts
-            require(re.fullmatch(r"[0-9a-f]{64}", digest) is not None, f"rtk provenance digest for {asset} must be lowercase sha256")
-            entries[asset] = digest
-except Exception as exc:
-    errors.append(f"rtk provenance manifest cannot be read: {exc}")
-
-required_assets = (
-    "rtk-aarch64-apple-darwin.tar.gz",
-    "rtk-x86_64-apple-darwin.tar.gz",
-    "rtk-aarch64-unknown-linux-gnu.tar.gz",
-    "rtk-x86_64-unknown-linux-musl.tar.gz",
-)
-for asset in required_assets:
-    require(asset in entries, f"rtk provenance missing asset {asset}")
 
 if errors:
     for error in errors:
@@ -828,7 +855,6 @@ for path in \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json \
-  docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256 \
   .claude/settings.json \
   .claude/README.md \
   .agents/skills/agentmemory-mcp/SKILL.md \
@@ -874,12 +900,6 @@ if grep -Eq '"schema"[[:space:]]*:[[:space:]]*"agent-context-policy/v1"' "$ROOT_
   ok "agent context policy schema is agent-context-policy/v1"
 else
   bad "agent context policy schema is not agent-context-policy/v1"
-fi
-
-if grep -Fq 'rtk-aarch64-apple-darwin.tar.gz' "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"; then
-  ok "rtk provenance manifest exists"
-else
-  bad "rtk provenance manifest is missing expected assets"
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -984,9 +1004,6 @@ else
   ok "workflow preset is infra-only; workflow philosophy files are opt-in"
 fi
 
-need_file scripts/install-rtk.sh
-need_executable scripts/install-rtk.sh
-need_executable scripts/rtk
 need_file scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
@@ -997,8 +1014,6 @@ need_executable scripts/harness-kit.sh
 need_executable scripts/detect-agent-tech-stack.sh
 need_executable scripts/verify-ai-deps.sh
 
-need_bash_syntax scripts/install-rtk.sh
-need_bash_syntax scripts/rtk
 need_bash_syntax scripts/agent-tech-stack-lib.sh
 need_bash_syntax scripts/agent-hook.sh
 need_bash_syntax scripts/agent-guard.sh
@@ -1012,12 +1027,6 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   need_executable scripts/agent-onboarding.sh
   need_bash_syntax scripts/agent-onboarding.sh
   need_bash_syntax .codex/codex-mode.sh
-fi
-
-if "$ROOT_DIR/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
-  ok "rtk wrapper resolves pinned version 0.37.2"
-else
-  warn "rtk pinned binary is not installed; run: bash scripts/install-rtk.sh before using rtk-specific hooks"
 fi
 
 if command -v python3 >/dev/null 2>&1; then

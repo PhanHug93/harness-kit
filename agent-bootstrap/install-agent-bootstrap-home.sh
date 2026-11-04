@@ -195,6 +195,30 @@ copy_file() {
   log "copied $dest_name"
 }
 
+# Kits up to 2026.10.24.1 installed these rtk files (same fingerprints as the
+# 2026.11.04.1-remove-rtk migration); a copy still byte-identical to one of
+# them is moved aside like any replaced file. Edited copies stay.
+RTK_RELEASED_SHA256="f3ceb17366230f8b2a2256592276757830403d1141308f688791f40ce8803af7 d4442098b00f79f9e28cbc962479aac514fb4955ef8b74e741a2f36723425794 3b856c4667a20719cbf1801020cce85f029140a8fde0564d887f0d9a508b5a3a 76879f8e42cfba1a2d7cdf8bd1b5ce025e509b15965b65bf3ca476b6053329de aca3c45dfa1d677433287cdb62b8795a59be5ff2960b1700e4d5e077bbbbc578 24ab69864ef6939103c564abafaaa59d6726521f91e6a0587cc8c2e3808c30f1 ec98b8c667d720a30d8c24a13cc845f1f30825bb7b7fa38fa9205b07bbdcd38e 3208557b7b1274a4b2e2d93e8ad776e5777fc85c34503a7d6747a6ca5740b01a"
+retire_rtk_copies() {
+  local rel sum
+  for rel in rtk install-rtk.sh provenance/rtk-v0.37.2.sha256; do
+    [[ -f "$DEST_DIR/$rel" && ! -L "$DEST_DIR/$rel" ]] || continue
+    sum="$( { sha256sum "$DEST_DIR/$rel" 2>/dev/null || shasum -a 256 "$DEST_DIR/$rel"; } | awk '{print $1}')"
+    case " $RTK_RELEASED_SHA256 " in
+      *" $sum "*)
+        if [[ "$DRY_RUN" == true ]]; then
+          log "would retire $rel (backup $rel.bak.$STAMP)"
+        else
+          mv "$DEST_DIR/$rel" "$DEST_DIR/$rel.bak.$STAMP"
+          log "retired $rel (backup $rel.bak.$STAMP)"
+        fi
+        ;;
+      *) warn "kept edited $rel; the kit no longer uses rtk" ;;
+    esac
+  done
+  [[ "$DRY_RUN" == true ]] || rmdir "$DEST_DIR/provenance" 2>/dev/null || true
+}
+
 write_shell_functions() {
   local tmp
   local export_path
@@ -248,11 +272,11 @@ init_history() {
     log "history already initialized"
     return 0
   fi
-  if [[ -x "$BUNDLE_DIR/rtk" ]] && "$BUNDLE_DIR/rtk" --version >/dev/null 2>&1; then
-    "$BUNDLE_DIR/rtk" git -C "$DEST_DIR" init >/dev/null
-    log "initialized local history via rtk"
+  if command -v git >/dev/null 2>&1; then
+    git -C "$DEST_DIR" init >/dev/null
+    log "initialized local history"
   else
-    warn "rtk is unavailable; skipped local history init. Run scripts/install-rtk.sh, then rerun without --no-git."
+    warn "git is unavailable; skipped local history init"
   fi
 }
 
@@ -317,13 +341,10 @@ main() {
   copy_file "detect-agent-tech-stack.sh" "detect-agent-tech-stack.sh"
   copy_file "githooks/pre-push" "githooks/pre-push"
   copy_file "install-git-hooks.sh" "install-git-hooks.sh"
-  copy_file "install-rtk.sh" "install-rtk.sh"
-  copy_file "rtk" "rtk"
   copy_file "verify-ai-deps.sh" "verify-ai-deps.sh"
   copy_file "model-profiles/codex-model-profiles.json" "model-profiles/codex-model-profiles.json"
   copy_file "policies/agent-context-policy.json" "policies/agent-context-policy.json"
   copy_file "policies/retired-artifacts-v1.json" "policies/retired-artifacts-v1.json"
-  copy_file "provenance/rtk-v0.37.2.sha256" "provenance/rtk-v0.37.2.sha256"
   copy_file "schemas/agent-context-policy-v1.schema.json" "schemas/agent-context-policy-v1.schema.json"
   copy_file "schemas/agent-model-profiles-v1.schema.json" "schemas/agent-model-profiles-v1.schema.json"
   copy_file "schemas/agent-seats-v1.schema.json" "schemas/agent-seats-v1.schema.json"
@@ -373,6 +394,9 @@ main() {
   copy_file "migrations/2026.10.20.1-ignore-block-to-exclude.sh" "migrations/2026.10.20.1-ignore-block-to-exclude.sh"
   copy_file "migrations/2026.10.20.1-retire-files.sh" "migrations/2026.10.20.1-retire-files.sh"
   copy_file "migrations/2026.10.20.1-untrack-local-records.sh" "migrations/2026.10.20.1-untrack-local-records.sh"
+  copy_file "migrations/2026.11.04.1-remove-rtk.sh" "migrations/2026.11.04.1-remove-rtk.sh"
+  copy_file "migrations/2026.11.04.1-remove-legacy-entrypoints.sh" "migrations/2026.11.04.1-remove-legacy-entrypoints.sh"
+  retire_rtk_copies
   write_source_metadata
   init_history
 

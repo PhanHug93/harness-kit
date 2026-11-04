@@ -152,7 +152,7 @@ need_contains "$(cat "$copy/agent-bootstrap/harness-kit-one-shot.sh")" 'DEFAULT_
 need_contains "$(cat "$copy/agent-bootstrap/harness-kit-one-shot.sh")" "Defaults to v2099.01.01.1." "entry help pin"
 cmp -s "$copy/agent-bootstrap/harness-kit-one-shot.sh" "$copy/agent-bootstrap/harness-kit-one-shot-upgrade.sh" || fail "bump must keep entry files identical"
 need_contains "$(cat "$copy/README.md")" "Current release: [\`2099.01.01.1\`]" "README current release"
-for doc in README.md agent-bootstrap/README.md docs/agent-configs/bootstrap-multi-agent-project/README.md; do
+for doc in README.md agent-bootstrap/README.md; do
   need_contains "$(cat "$copy/$doc")" "harness-kit/v2099.01.01.1/agent-bootstrap/harness-kit-one-shot.sh" "$doc one-shot URL"
 done
 need_contains "$(cat "$copy/CHANGELOG.md")" "## 2099.01.01.1 — Test release" "changelog release heading"

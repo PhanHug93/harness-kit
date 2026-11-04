@@ -1461,7 +1461,8 @@ def slow_one_shot_apply3(c, work):
     fresh = [name for name in backups(target, WORKFLOW) if not name.endswith("20200101T000000Z-0123456789abcdef")]
     c.check("R12 one-shot apply retired the exact local-only workflow", after[WORKFLOW] is None and len(fresh) == 1)
     c.check("R12 one-shot apply preserved the modified template", after[TEMPLATE] == before[TEMPLATE])
-    c.check("R12 one-shot retirement with a preserved file is applied", decisions["applied"] == [RETIRE_ID], decisions)
+    c.check("R12 one-shot retirement with a preserved file is applied",
+            RETIRE_ID in decisions["applied"] and RETIRE_ID not in decisions["pending"], decisions)
     c.check("R12 one-shot exit 3 comes from the remaining conflicts", report.get("result") == "needs review"
             and report["files"]["conflicts"], report.get("result"))
 

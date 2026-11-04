@@ -42,6 +42,10 @@ jobs:
         run: python3 scripts/test-workspace-repository-guard.py
       - name: Run retirement lifecycle checks
         run: python3 scripts/test-agent-retirement.py
+      - name: Run rule inventory checks
+        run: bash scripts/test-rule-inventory.sh
+      - name: Run agentmemory version check tests
+        run: bash scripts/test-agentmemory-check.sh
       - name: Run bootstrap drift test
         run: bash scripts/test-bootstrap-multi-agent-project.sh
       # Bootstrap already runs onboarding and seats/launcher with inherited PATH.
@@ -108,8 +112,6 @@ jobs:
               scripts/test-change-tiers.sh \
               agent-bootstrap/agent-bootstrap-update.sh \
               agent-bootstrap/install-agent-bootstrap-home.sh \
-              agent-bootstrap/install-rtk.sh \
-              agent-bootstrap/rtk \
               agent-bootstrap/agent-hook.sh \
               agent-bootstrap/agent-guard.sh \
               agent-bootstrap/agent-seats.sh \

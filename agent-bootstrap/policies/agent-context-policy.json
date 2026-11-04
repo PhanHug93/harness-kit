@@ -27,14 +27,6 @@
       "reason": "claude entrypoint"
     },
     {
-      "pattern": "GEMINI.md",
-      "reason": "gemini entrypoint"
-    },
-    {
-      "pattern": ".windsurfrules",
-      "reason": "windsurf entrypoint"
-    },
-    {
       "pattern": ".github/**",
       "reason": "ci-release"
     },
@@ -93,14 +85,6 @@
     {
       "pattern": "scripts/verify-ai-deps.sh",
       "reason": "verifier"
-    },
-    {
-      "pattern": "scripts/install-rtk.sh",
-      "reason": "tool install"
-    },
-    {
-      "pattern": "scripts/rtk",
-      "reason": "git wrapper"
     }
   ],
   "change_protocol": {

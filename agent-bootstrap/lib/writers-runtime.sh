@@ -4,121 +4,6 @@
 # Do not execute directly. No `set` here; inherits the entrypoint's shell options.
 # Relies on entrypoint-owned globals; see lib/core.sh header for the contract.
 
-write_rtk_tools() {
-  write_file "$TARGET_DIR/scripts/install-rtk.sh" <<'EOF'
-#!/usr/bin/env bash
-# AGENT_BOOTSTRAP_GENERATED
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RTK_VERSION="0.37.2"
-# Runtime snapshot: run from generated target projects as scripts/install-rtk.sh.
-# Source/canonical bundle copies do not carry the generated docs/agent-configs tree.
-PROVENANCE_FILE="${ROOT_DIR}/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v${RTK_VERSION}.sha256"
-
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-PLATFORM="${OS}-${ARCH}"
-
-case "${PLATFORM}" in
-  Darwin-arm64)
-    ASSET="rtk-aarch64-apple-darwin.tar.gz"
-    ;;
-  Darwin-x86_64)
-    ASSET="rtk-x86_64-apple-darwin.tar.gz"
-    ;;
-  Linux-aarch64)
-    ASSET="rtk-aarch64-unknown-linux-gnu.tar.gz"
-    ;;
-  Linux-x86_64)
-    ASSET="rtk-x86_64-unknown-linux-musl.tar.gz"
-    ;;
-  *)
-    echo "Unsupported platform: ${PLATFORM}" >&2
-    exit 1
-    ;;
-esac
-
-if [ ! -f "${PROVENANCE_FILE}" ]; then
-  echo "Missing rtk provenance manifest: ${PROVENANCE_FILE}" >&2
-  exit 1
-fi
-SHA256="$(awk -v asset="${ASSET}" '$2 == asset { print $1 }' "${PROVENANCE_FILE}" | head -n1)"
-if [ -z "${SHA256}" ]; then
-  echo "No checksum for ${ASSET} in ${PROVENANCE_FILE}" >&2
-  exit 1
-fi
-
-DOWNLOAD_URL="https://github.com/rtk-ai/rtk/releases/download/v${RTK_VERSION}/${ASSET}"
-INSTALL_DIR="${ROOT_DIR}/.tools/rtk/v${RTK_VERSION}"
-ARCHIVE_PATH="${INSTALL_DIR}/${ASSET}"
-BIN_PATH="${INSTALL_DIR}/rtk"
-LINK_PATH="${ROOT_DIR}/.tools/bin/rtk"
-
-mkdir -p "${INSTALL_DIR}" "${ROOT_DIR}/.tools/bin"
-if command -v curl >/dev/null 2>&1; then
-  curl --proto '=https' --proto-redir '=https' -fL "${DOWNLOAD_URL}" -o "${ARCHIVE_PATH}"
-elif command -v wget >/dev/null 2>&1; then
-  wget -O "${ARCHIVE_PATH}" "${DOWNLOAD_URL}"
-else
-  echo "Need curl or wget to download rtk." >&2; exit 1
-fi
-
-if command -v sha256sum >/dev/null 2>&1; then
-  ACTUAL_SHA256="$(sha256sum "${ARCHIVE_PATH}" | awk '{print $1}')"
-elif command -v shasum >/dev/null 2>&1; then
-  ACTUAL_SHA256="$(shasum -a 256 "${ARCHIVE_PATH}" | awk '{print $1}')"
-else
-  echo "Need sha256sum or shasum to verify rtk." >&2; exit 1
-fi
-if [ "${ACTUAL_SHA256}" != "${SHA256}" ]; then
-  echo "Checksum mismatch for ${ASSET}" >&2
-  echo "Expected: ${SHA256}" >&2
-  echo "Actual  : ${ACTUAL_SHA256}" >&2
-  exit 1
-fi
-
-ARCHIVE_MEMBERS="$(tar -tzf "${ARCHIVE_PATH}")"
-# Pinned rtk v0.37.2 archives contain exactly one top-level binary. When
-# bumping RTK, verify upstream archive layout and update this policy if needed.
-case "${ARCHIVE_MEMBERS}" in
-  "rtk"|"./rtk")
-    ;;
-  *)
-    echo "Unexpected rtk archive contents:" >&2
-    printf '%s\n' "${ARCHIVE_MEMBERS}" >&2
-    exit 1
-    ;;
-esac
-tar -xzf "${ARCHIVE_PATH}" -C "${INSTALL_DIR}"
-chmod +x "${BIN_PATH}"
-ln -sfn "../rtk/v${RTK_VERSION}/rtk" "${LINK_PATH}"
-
-echo "Installed pinned rtk v${RTK_VERSION} at ${BIN_PATH}"
-"${BIN_PATH}" --version
-EOF
-  make_executable "$LAST_WRITTEN_FILE"
-
-  write_file "$TARGET_DIR/scripts/rtk" <<'EOF'
-#!/usr/bin/env bash
-# AGENT_BOOTSTRAP_GENERATED
-set -euo pipefail
-
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RTK_VERSION="0.37.2"
-RTK_BIN="${ROOT_DIR}/.tools/rtk/v${RTK_VERSION}/rtk"
-
-if [ ! -x "${RTK_BIN}" ]; then
-  echo "Pinned rtk v${RTK_VERSION} not found at ${RTK_BIN}." >&2
-  echo "Run: ./scripts/install-rtk.sh" >&2
-  exit 1
-fi
-
-exec "${RTK_BIN}" "$@"
-EOF
-  make_executable "$LAST_WRITTEN_FILE"
-}
-
 write_template_catalog() {
   local template
   for template in \
@@ -142,82 +27,59 @@ write_recovery_runbook() {
   write_file "$TARGET_DIR/docs/agent-configs/RECOVERY.md" <<'EOF'
 # Agent Bootstrap Recovery
 
-Use this runbook when an upgrade or regeneration stops halfway, leaves visible
-candidates, or parks a USER overlay that no longer has a matching managed
-section.
+Each case: what you see, then what to run.
 
 ## partial upgrade
 
-Inspect the current harness state first:
-
-```bash
-scripts/agent-guard.sh status
-```
-
-If `pending_generated_candidates=` lists a file, review the generated candidate
-next to the preserved file. Accept it only after review, or restore the managed
-file back to the committed state:
+An upgrade or regeneration stopped halfway, or
+`scripts/agent-guard.sh status` lists `pending_generated_candidates=`.
+Compare the candidate with your file, then keep yours or restore the
+committed version:
 
 ```bash
 git diff -- <path>
 git restore --staged --worktree <path>
 ```
 
-For bootstrap-managed `.generated.<stamp>` candidates that should replace their
-base file, take the kit version of that one file (the local file is backed up):
+To take the kit version of one file instead (yours is backed up):
 
 ```bash
 scripts/harness-kit.sh --take-kit <path>
 ```
 
-Without `scripts/harness-kit.sh`, apply the reviewed candidate from the kit that
-created it: `agent-init --apply-candidates --only <path>` (or
-`bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --apply-candidates --only <path>`).
-
-Then run:
-
-```bash
-scripts/agent-guard.sh status
-scripts/verify-ai-deps.sh
-```
+Without `scripts/harness-kit.sh`: `agent-init --apply-candidates --only <path>`
+(or `bash "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" --target . --apply-candidates --only <path>`).
+Then check with `scripts/agent-guard.sh status` and `scripts/verify-ai-deps.sh`.
 
 ## parked USER overlays
 
-If `parked_user_overlays=` names a managed markdown file, open that file and
-look for:
+`parked_user_overlays=` names a file holding:
 
 ```markdown
 <!-- USER (orphaned): re-home into a current USER block or delete -->
 ```
 
-Move the parked text into the current `<!-- BEGIN USER: ... -->` block that now
-owns the customization, or delete it if it is obsolete. Do not remove unrelated
-managed blocks while doing this.
+Move that text into the `<!-- BEGIN USER: ... -->` block that now owns it, or
+delete it. Leave the managed blocks alone.
 
 ## overwritten local settings
 
-`.claude/settings.json` is generated wholesale. Re-apply any local-only Claude
-customization from git history or your local notes after bootstrap regenerates
-the file. Keep machine-specific or personal settings in local files where the
-tool supports them.
+`.claude/settings.json` is generated wholesale: re-apply local Claude settings
+from git history or your notes, and keep personal settings in the tool's local
+settings file.
 
 ## retired artifact recovery
 
 `bootstrap-multi-agent-project.sh --apply-retirements` removes only exact
 copies of the retired agent-guard CI files (`.github/workflows/agent-guard.yml`
 and `docs/agent-configs/bootstrap-multi-agent-project/templates/ci/agent-guard.yml`),
-and only after writing a verified backup next to each one named
-`<path>.bak.retirement.<run-id>`. Backups are never removed automatically, and
-status never reads them to infer history.
+each after writing a verified backup `<path>.bak.retirement.<run-id>` that is
+never removed automatically.
 
-To restore one file, run this from the project root after setting the path and
-the run ID printed in the retirement report. It walks the parent directories
-without following links, requires a single-link regular backup holding the
-known 605-byte SHA-256, refuses an existing original, then creates the original
-exclusively with the backup's mode and mtime and verifies the restored bytes.
-On any failed check it stops without overwriting either file; keep the backup
-for audit. A restored file is eligible again and is retired only by a later
-explicit `--apply-retirements`.
+To restore one, set the path and the run ID from the retirement report and run
+this from the project root. It restores only the known 605-byte file, never
+overwrites an existing one or follows links, and keeps the backup on failure.
+A restored file is retired again only by a later `--apply-retirements`.
 
 ```bash
 RETIRED_PATH=.github/workflows/agent-guard.yml
@@ -312,7 +174,7 @@ write_portable_enforcement() {
   make_executable "$LAST_WRITTEN_FILE"
 }
 
-write_schema_model_and_provenance_catalog() {
+write_schema_and_model_catalog() {
   copy_bundle_file \
     "policies/agent-context-policy.json" \
     "$TARGET_DIR/docs/agent-configs/context-policy.json"
@@ -358,9 +220,6 @@ write_schema_model_and_provenance_catalog() {
   copy_bundle_file \
     "schemas/harness-tier-v1.schema.json" \
     "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/harness-tier-v1.schema.json"
-  copy_bundle_file \
-    "provenance/rtk-v0.37.2.sha256" \
-    "$TARGET_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
 }
 
 write_tech_stack_lib() {
@@ -495,7 +354,6 @@ set -euo pipefail
 WORKFLOW_PRESET="__WORKFLOW_PRESET__"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-RTK="$PROJECT_ROOT/scripts/rtk"
 DETECTOR="$PROJECT_ROOT/scripts/detect-agent-tech-stack.sh"
 LOCK_FILE="$PROJECT_ROOT/docs/agent-configs/agent-bootstrap.lock.json"
 CODEX_HELPER="$PROJECT_ROOT/.codex/codex-mode.sh"
@@ -582,10 +440,6 @@ required_executable() {
   [[ -x "$1" ]] || fail "missing executable file: ${1#"$PROJECT_ROOT"/}"
 }
 
-rtk_available() {
-  [[ -x "$RTK" ]] && "$RTK" --version >/dev/null 2>&1
-}
-
 hash_text() {
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum | awk '{print $1}'
@@ -661,15 +515,6 @@ verify_detector_lock() {
 is_tracked() {
   local pathspec="$1"
   local tracked_path
-  if rtk_available; then
-    while IFS= read -r tracked_path; do
-      [[ -n "$tracked_path" ]] || continue
-      if [[ -e "$PROJECT_ROOT/$tracked_path" ]]; then
-        return 0
-      fi
-    done < <("$RTK" git -C "$PROJECT_ROOT" ls-files -- "$pathspec")
-    return 1
-  fi
   if command -v git >/dev/null 2>&1 &&
     git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     while IFS= read -r tracked_path; do
@@ -1127,15 +972,7 @@ claude_pretool() {
     esac
   fi
   verify_detector_lock warn
-  if [[ -n "$ask_reason" ]]; then
-    claude_ask "$ask_reason"
-    exit 0
-  fi
-  cd "$PROJECT_ROOT"
-  if rtk_available; then
-    exec "$RTK" hook claude
-  fi
-  echo "agent-hook: warn: pinned rtk binary is not installed; skipping rtk Claude hook. Run: bash scripts/install-rtk.sh" >&2
+  [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
   exit 0
 }
 
@@ -1358,12 +1195,16 @@ FAIL=0
 WARN=0
 OUTPUT_JSON=false
 BUDGET_ONLY=false
+AGENTMEMORY_ONLY=false
 CHECKS=()
 CONTEXT_BUDGET_JSON=""
+# The agentmemory version this kit was tested with (CONTRIBUTING.md, "Agentmemory version pin").
+AGENTMEMORY_TESTED="0.9.31"
 
 usage() {
-  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget]" \
-    "  --context-budget  run only the context budget check (core startup and on-demand)"
+  printf '%s\n' "Usage: scripts/verify-ai-deps.sh [--json] [--context-budget | --agentmemory]" \
+    "  --context-budget  run only the context budget check (core startup and on-demand)" \
+    "  --agentmemory     print one line when the local agentmemory is older than the tested version"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -1374,6 +1215,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --context-budget)
       BUDGET_ONLY=true
+      shift
+      ;;
+    --agentmemory)
+      AGENTMEMORY_ONLY=true
       shift
       ;;
     -h|--help)
@@ -1387,6 +1232,59 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Reads package.json and never runs agentmemory: before 0.9.24,
+# `agentmemory --version` is not a version flag and may start the server.
+agentmemory_note() {
+  local bin
+  bin="$(command -v agentmemory 2>/dev/null)" || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -I -B - "$bin" "$AGENTMEMORY_TESTED" <<'PY'
+import json, os, sys
+
+binary, tested = sys.argv[1], sys.argv[2]
+
+
+def parse(text):
+    core, _, pre = text.split("+")[0].partition("-")
+    try:
+        numbers = [int(part) for part in core.split(".")]
+    except ValueError:
+        return None
+    numbers += [0] * (3 - len(numbers))
+    # A prerelease sorts before its release.
+    return tuple(numbers) + ((0,) if pre else (1,))
+
+
+found, path = None, os.path.dirname(os.path.realpath(binary))
+while found is None:
+    manifest = os.path.join(path, "package.json")
+    if os.path.isfile(manifest):
+        try:
+            with open(manifest, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict) and data.get("name") == "@agentmemory/agentmemory":
+            found = str(data.get("version", ""))
+    parent = os.path.dirname(path)
+    if parent == path:
+        break
+    path = parent
+steps = (f"stop it, npm install -g @agentmemory/agentmemory@{tested}, start it, then re-run "
+         "agentmemory connect claude-code --with-hooks and agentmemory connect codex --with-hooks.")
+have = parse(found) if found else None
+if have is None:
+    print(f"agentmemory: could not read its version; this kit was tested with {tested}: {steps}")
+elif have < parse(tested):
+    print(f"agentmemory {found} is older than the version this kit was tested with ({tested}): {steps}")
+PY
+}
+
+if [[ "$AGENTMEMORY_ONLY" == "true" ]]; then
+  agentmemory_note || true
+  exit 0
+fi
 
 json_escape() {
   if command -v python3 >/dev/null 2>&1; then
@@ -1475,10 +1373,7 @@ need_bash_syntax() {
 is_bootstrap_generated_base() {
   local relpath="$1"
   case "$relpath" in
-    AGENTS.md|CLAUDE.md|GEMINI.md|.windsurfrules|.gitignore)
-      return 0
-      ;;
-    .cursor/rules/agent-conventions.mdc)
+    AGENTS.md|CLAUDE.md|.gitignore)
       return 0
       ;;
     .claude/README.md|.claude/settings.json|.claude/commands/*)
@@ -1496,7 +1391,7 @@ is_bootstrap_generated_base() {
     docs/superpowers/specs/*|docs/superpowers/plans/*)
       return 0
       ;;
-    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/verify-ai-deps.sh)
       return 0
       ;;
     *)
@@ -1845,12 +1740,6 @@ if isinstance(lock, dict):
     require(lock.get("schema") == "agent-bootstrap-lock/v1", "lock.schema must be agent-bootstrap-lock/v1")
     for key in ("version", "channel", "project_name", "generated_at", "detector_summary_sha256", "detector_summary"):
         require(non_empty_string(lock.get(key)), f"lock.{key} must be a non-empty string")
-    rtk = lock.get("rtk")
-    require(isinstance(rtk, dict), "lock.rtk must be an object")
-    if isinstance(rtk, dict):
-        require(rtk.get("required") is True, "lock.rtk.required must be true")
-        require(non_empty_string(rtk.get("version")), "lock.rtk.version must be a non-empty string")
-        require(non_empty_string(rtk.get("install_command")), "lock.rtk.install_command must be a non-empty string")
     templates = lock.get("templates")
     require(isinstance(templates, dict), "lock.templates must be an object")
     if isinstance(templates, dict):
@@ -1963,31 +1852,6 @@ for filename, schema_id in expected_schema_ids.items():
     if isinstance(schema, dict):
         require(schema.get("$id") == schema_id, f"{filename} has unexpected $id")
         require(schema.get("type") == "object", f"{filename} must describe an object")
-
-provenance_path = root / "docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
-entries = {}
-try:
-    for line_no, raw_line in enumerate(provenance_path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split()
-        require(len(parts) == 2, f"rtk provenance line {line_no} must contain '<sha256> <asset>'")
-        if len(parts) == 2:
-            digest, asset = parts
-            require(re.fullmatch(r"[0-9a-f]{64}", digest) is not None, f"rtk provenance digest for {asset} must be lowercase sha256")
-            entries[asset] = digest
-except Exception as exc:
-    errors.append(f"rtk provenance manifest cannot be read: {exc}")
-
-required_assets = (
-    "rtk-aarch64-apple-darwin.tar.gz",
-    "rtk-x86_64-apple-darwin.tar.gz",
-    "rtk-aarch64-unknown-linux-gnu.tar.gz",
-    "rtk-x86_64-unknown-linux-musl.tar.gz",
-)
-for asset in required_assets:
-    require(asset in entries, f"rtk provenance missing asset {asset}")
 
 if errors:
     for error in errors:
@@ -2177,7 +2041,6 @@ for path in \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json \
   docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json \
-  docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256 \
   .claude/settings.json \
   .claude/README.md \
   .agents/skills/agentmemory-mcp/SKILL.md \
@@ -2223,12 +2086,6 @@ if grep -Eq '"schema"[[:space:]]*:[[:space:]]*"agent-context-policy/v1"' "$ROOT_
   ok "agent context policy schema is agent-context-policy/v1"
 else
   bad "agent context policy schema is not agent-context-policy/v1"
-fi
-
-if grep -Fq 'rtk-aarch64-apple-darwin.tar.gz' "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"; then
-  ok "rtk provenance manifest exists"
-else
-  bad "rtk provenance manifest is missing expected assets"
 fi
 
 if command -v python3 >/dev/null 2>&1; then
@@ -2333,9 +2190,6 @@ else
   ok "workflow preset is infra-only; workflow philosophy files are opt-in"
 fi
 
-need_file scripts/install-rtk.sh
-need_executable scripts/install-rtk.sh
-need_executable scripts/rtk
 need_file scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-tech-stack-lib.sh
 need_executable scripts/agent-hook.sh
@@ -2346,8 +2200,6 @@ need_executable scripts/harness-kit.sh
 need_executable scripts/detect-agent-tech-stack.sh
 need_executable scripts/verify-ai-deps.sh
 
-need_bash_syntax scripts/install-rtk.sh
-need_bash_syntax scripts/rtk
 need_bash_syntax scripts/agent-tech-stack-lib.sh
 need_bash_syntax scripts/agent-hook.sh
 need_bash_syntax scripts/agent-guard.sh
@@ -2361,12 +2213,6 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   need_executable scripts/agent-onboarding.sh
   need_bash_syntax scripts/agent-onboarding.sh
   need_bash_syntax .codex/codex-mode.sh
-fi
-
-if "$ROOT_DIR/scripts/rtk" --version 2>/dev/null | grep -Fq '0.37.2'; then
-  ok "rtk wrapper resolves pinned version 0.37.2"
-else
-  warn "rtk pinned binary is not installed; run: bash scripts/install-rtk.sh before using rtk-specific hooks"
 fi
 
 if command -v python3 >/dev/null 2>&1; then

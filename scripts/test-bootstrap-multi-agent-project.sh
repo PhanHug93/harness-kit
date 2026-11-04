@@ -104,7 +104,6 @@ run_guard_hook_focus() {
   note "focused guard and Claude hook regression"
   local focus_dir="$FIXTURE_DIR/guard-hook-focus"
   local focus_input="$TMP_DIR/out/focus-hook-input.json"
-  local focus_fake_rtk_log="$TMP_DIR/out/focus-fake-rtk.log"
   local focus_marker="$TMP_DIR/out/focus-shell-marker"
   local protected_path="$focus_dir/docs/agent-configs/quoted \"path\" \$(touch $focus_marker).md"
   local other_path="$focus_dir/docs/agent-configs/other.md"
@@ -135,15 +134,6 @@ print(pathlib.Path(sys.argv[1]).resolve())
 PY
 )"
   canonical_protected_quoted="$(printf '%q' "$canonical_protected_path")"
-
-  mkdir -p "$focus_dir/.tools/rtk/v0.37.2" "$focus_dir/.tools/bin"
-  cat > "$focus_dir/.tools/rtk/v0.37.2/rtk" <<'EOF_FOCUS_RTK'
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$*" >> "${FAKE_RTK_LOG:?}"
-EOF_FOCUS_RTK
-  chmod +x "$focus_dir/.tools/rtk/v0.37.2/rtk"
-  ln -sfn ../rtk/v0.37.2/rtk "$focus_dir/.tools/bin/rtk"
 
   focus_write_hook_input() {
     local tool_name="$1"
@@ -365,11 +355,12 @@ PY
   focus_assert_rc "$TMP_DIR/out/focus-unprotected.rc" 0 "unprotected edit"
   need_contains "$(cat "$TMP_DIR/out/focus-unprotected.out")" "protected_path=false" "unprotected classification"
 
-  : > "$focus_fake_rtk_log"
-  focus_write_hook_input Bash "$other_path"
-  focus_run_hook bash-dispatch FAKE_RTK_LOG="$focus_fake_rtk_log"
+  python3 -I -c 'import json, sys; print(json.dumps({"tool_name": "Bash", "cwd": sys.argv[1], "tool_input": {"command": "git diff > fix.patch"}}))' \
+    "$focus_dir" >"$focus_input"
+  focus_run_hook bash-dispatch
   focus_assert_rc "$TMP_DIR/out/focus-bash-dispatch.rc" 0 "Bash hook dispatch"
-  need_contains "$(cat "$focus_fake_rtk_log")" "hook claude" "Bash detector and RTK dispatch"
+  [[ ! -s "$TMP_DIR/out/focus-bash-dispatch.out" ]] ||
+    fail "Bash hook must not rewrite commands: $(cat "$TMP_DIR/out/focus-bash-dispatch.out")"
 
   saved_file="$TMP_DIR/out/focus-AGENTS.md"
   cp "$focus_dir/AGENTS.md" "$saved_file"
@@ -1539,18 +1530,6 @@ sha256_file() {
   fi
 }
 
-current_rtk_asset() {
-  local platform
-  platform="$(uname -s)-$(uname -m)"
-  case "$platform" in
-    Darwin-arm64) printf '%s\n' "rtk-aarch64-apple-darwin.tar.gz" ;;
-    Darwin-x86_64) printf '%s\n' "rtk-x86_64-apple-darwin.tar.gz" ;;
-    Linux-aarch64) printf '%s\n' "rtk-aarch64-unknown-linux-gnu.tar.gz" ;;
-    Linux-x86_64) printf '%s\n' "rtk-x86_64-unknown-linux-musl.tar.gz" ;;
-    *) fail "unsupported RTK fixture platform: $platform" ;;
-  esac
-}
-
 assert_json_escape_handles_control_chars() {
   # shellcheck source=/dev/null
   source "$BOOTSTRAP_BUNDLE/lib/core.sh"
@@ -1705,117 +1684,6 @@ PY
     fail "project upgrade apply left candidates for unedited managed files: $stray_candidates"
 }
 
-write_fake_curl() {
-  local fakebin="$1"
-  mkdir -p "$fakebin"
-  cat > "$fakebin/curl" <<'EOF_FAKE_CURL'
-#!/usr/bin/env bash
-set -euo pipefail
-
-has_proto=false
-has_proto_redir=false
-output=""
-url=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --proto)
-      shift
-      [[ "${1:-}" == "=https" ]] || { echo "unexpected --proto value: ${1:-}" >&2; exit 44; }
-      has_proto=true
-      ;;
-    --proto-redir)
-      shift
-      [[ "${1:-}" == "=https" ]] || { echo "unexpected --proto-redir value: ${1:-}" >&2; exit 45; }
-      has_proto_redir=true
-      ;;
-    -o)
-      shift
-      output="${1:-}"
-      ;;
-    https://*)
-      url="$1"
-      ;;
-  esac
-  shift || true
-done
-
-[[ "$has_proto" == "true" ]] || { echo "missing --proto '=https'" >&2; exit 40; }
-[[ "$has_proto_redir" == "true" ]] || { echo "missing --proto-redir '=https'" >&2; exit 41; }
-[[ "$url" == https://github.com/rtk-ai/rtk/releases/download/v0.37.2/* ]] ||
-  { echo "unexpected RTK URL: $url" >&2; exit 42; }
-[[ -n "$output" ]] || { echo "missing -o output path" >&2; exit 43; }
-
-printf '%s\n' "$url" >> "${FAKE_CURL_LOG:?}"
-cp "${FAKE_RTK_ARCHIVE:?}" "$output"
-EOF_FAKE_CURL
-  chmod +x "$fakebin/curl"
-}
-
-make_fixture_rtk_archive() {
-  local archive="$1"
-  local build_dir="$FIXTURE_DIR/rtk-archive-build"
-  rm -rf "$build_dir"
-  mkdir -p "$build_dir"
-  cat > "$build_dir/rtk" <<'EOF_FIXTURE_RTK'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  --version)
-    printf '%s\n' "rtk 0.37.2"
-    ;;
-  *)
-    printf '%s\n' "fixture rtk"
-    ;;
-esac
-EOF_FIXTURE_RTK
-  chmod +x "$build_dir/rtk"
-  (cd "$build_dir" && tar -czf "$archive" rtk)
-}
-
-test_pinned_rtk_installer_fixture() {
-  local asset archive checksum fakebin curl_log install_dir bad_dir
-  asset="$(current_rtk_asset)"
-  archive="$FIXTURE_DIR/$asset"
-  make_fixture_rtk_archive "$archive"
-  checksum="$(sha256_file "$archive")"
-  fakebin="$FIXTURE_DIR/fake-curl-bin"
-  curl_log="$TMP_DIR/out/fake-curl.log"
-  : > "$curl_log"
-  write_fake_curl "$fakebin"
-
-  install_dir="$FIXTURE_DIR/rtk-install-ok"
-  mkdir -p "$install_dir"
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$install_dir" --workflow full >"$TMP_DIR/out/rtk-install-ok-bootstrap.out"
-  printf '%s %s\n' "$checksum" "$asset" \
-    > "$install_dir/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
-
-  (cd "$install_dir" &&
-    PATH="$fakebin:$PATH" \
-    FAKE_RTK_ARCHIVE="$archive" \
-    FAKE_CURL_LOG="$curl_log" \
-    scripts/install-rtk.sh >"$TMP_DIR/out/rtk-install-ok.out" 2>"$TMP_DIR/out/rtk-install-ok.err")
-
-  [[ -x "$install_dir/.tools/rtk/v0.37.2/rtk" ]] || fail "pinned RTK installer did not install executable"
-  [[ -L "$install_dir/.tools/bin/rtk" ]] || fail "pinned RTK installer did not create wrapper symlink"
-  need_contains "$(cat "$TMP_DIR/out/rtk-install-ok.out")" "Installed pinned rtk v0.37.2" "pinned RTK install output"
-  need_contains "$(cat "$curl_log")" "/v0.37.2/$asset" "pinned RTK download URL"
-
-  bad_dir="$FIXTURE_DIR/rtk-install-bad-checksum"
-  mkdir -p "$bad_dir"
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$bad_dir" --workflow full >"$TMP_DIR/out/rtk-install-bad-bootstrap.out"
-  printf '%064d %s\n' 0 "$asset" \
-    > "$bad_dir/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256"
-  if (cd "$bad_dir" &&
-    PATH="$fakebin:$PATH" \
-    FAKE_RTK_ARCHIVE="$archive" \
-    FAKE_CURL_LOG="$curl_log" \
-    scripts/install-rtk.sh >"$TMP_DIR/out/rtk-install-bad.out" 2>"$TMP_DIR/out/rtk-install-bad.err"); then
-    fail "pinned RTK installer accepted checksum mismatch"
-  fi
-  need_contains "$(cat "$TMP_DIR/out/rtk-install-bad.err")" "Checksum mismatch" "pinned RTK checksum mismatch rejection"
-}
-
 command -v python3 >/dev/null 2>&1 || fail "python3 is required for bootstrap contract tests"
 [[ -x "$BOOTSTRAP" ]] || fail "missing executable bootstrap script: ${BOOTSTRAP#"$ROOT_DIR"/}"
 [[ -x "$HOME_INSTALLER" ]] || fail "missing executable home installer: ${HOME_INSTALLER#"$ROOT_DIR"/}"
@@ -1842,7 +1710,7 @@ design_doc="$(cat "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/RE
 need_contains "$design_doc" "model-profiles/" "design doc bundle model profile directory"
 need_contains "$design_doc" "schemas/" "design doc bundle schema directory"
 need_contains "$design_doc" "templates/" "design doc bundle template directory"
-need_contains "$design_doc" "provenance/" "design doc bundle provenance directory"
+need_not_contains "$design_doc" "provenance/" "design doc lists no provenance bundle folder"
 need_contains "$design_doc" "agent-init --apply-candidates" "design doc candidate apply lifecycle"
 need_contains "$design_doc" "scripts/test-onboarding-fixtures.sh" "design doc onboarding fixture validation"
 need_contains "$design_doc" "agent-guard.sh" "design doc agent guard runtime"
@@ -1855,11 +1723,10 @@ need_contains "$extension_guide" "need_same_file" "extension guide names the mir
 need_contains "$extension_guide" "available advisory" "extension guide records optional skill advisory decision"
 root_readme="$(cat "$ROOT_DIR/README.md")"
 need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
-need_contains "$root_readme" "rtk is intentionally hard-pinned" "root README RTK pinning intent"
 need_contains "$root_readme" "not a security boundary" "root README Agent Guard boundary"
-need_contains "$root_readme" "manual contract validation" "root README schema enforcement wording"
-need_contains "$root_readme" "excludes tool-specific wrappers" "root README token budget boundary"
-bundle_readme="$(cat "$ROOT_DIR/agent-bootstrap/README.md")"
+need_contains "$design_doc" "manual contract validation" "reference schema enforcement wording"
+need_contains "$design_doc" "excludes tool-specific wrappers" "reference token budget boundary"
+contributing="$(cat "$ROOT_DIR/CONTRIBUTING.md")"
 for sp_needle in \
   "https://github.com/obra/superpowers" \
   "does not install, update, or synchronize it and adds no updater" \
@@ -1869,8 +1736,7 @@ for sp_needle in \
   "Freeze on the last validated release when a new one gives no relevant benefit" \
   "reverify it before any update" \
   "Kit guidance is written for v7.0.0"; do
-  need_contains "$root_readme" "$sp_needle" "root README Superpowers policy"
-  need_contains "$bundle_readme" "$sp_needle" "bundle README Superpowers policy"
+  need_contains "$contributing" "$sp_needle" "CONTRIBUTING Superpowers policy"
 done
 if grep -rqE "sync-to-codex-plugin|npm install[^\n]*superpowers|superpowers[^\n]*--update" "$BOOTSTRAP_BUNDLE" 2>/dev/null; then
   fail "bundle references a Superpowers installation or update path"
@@ -1884,8 +1750,6 @@ for root_runtime_snapshot in \
   agent-onboarding.sh \
   agent-tech-stack-lib.sh \
   detect-agent-tech-stack.sh \
-  install-rtk.sh \
-  rtk \
   verify-ai-deps.sh; do
   [[ ! -e "$ROOT_DIR/scripts/$root_runtime_snapshot" ]] ||
     fail "root scripts must not carry generated runtime snapshots: scripts/$root_runtime_snapshot"
@@ -1916,6 +1780,20 @@ assert_hash_text_uses_sha256_without_crc32_fallback
 
 CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
 AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
+for rtk_file in rtk install-rtk.sh provenance/rtk-v0.37.2.sha256; do
+  mkdir -p "$(dirname "$CANONICAL_DIR/$rtk_file")"
+  tar -xOf "$ROOT_DIR/scripts/fixtures/historical-bundles/v2026.09.07.1.tar" "agent-bootstrap/$rtk_file" >"$CANONICAL_DIR/$rtk_file"
+done
+printf '# local\n' >>"$CANONICAL_DIR/install-rtk.sh"
+AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-rtk.out 2>&1
+[[ ! -e "$CANONICAL_DIR/rtk" && ! -e "$CANONICAL_DIR/provenance/rtk-v0.37.2.sha256" ]] ||
+  fail "home installer kept unedited rtk copies"
+compgen -G "$CANONICAL_DIR/rtk.bak.*" >/dev/null || fail "home installer did not back up rtk"
+compgen -G "$CANONICAL_DIR/provenance/rtk-v0.37.2.sha256.bak.*" >/dev/null ||
+  fail "home installer did not back up the rtk checksum file"
+[[ -f "$CANONICAL_DIR/install-rtk.sh" ]] || fail "home installer removed an edited install-rtk.sh"
+need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-rtk.out)" "kept edited install-rtk.sh" "home installer names the edited rtk copy"
+rm -rf "$CANONICAL_DIR/install-rtk.sh" "$CANONICAL_DIR"/rtk.bak.* "$CANONICAL_DIR/provenance"
 [[ -x "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" ]] || fail "canonical installer did not export bootstrap script"
 [[ -x "$CANONICAL_DIR/agent-bootstrap-update.sh" ]] || fail "canonical installer did not export updater script"
 [[ -x "$CANONICAL_DIR/agent-hook.sh" ]] || fail "canonical installer did not export agent hook snapshot"
@@ -1943,13 +1821,10 @@ for canonical_file in \
   detect-agent-tech-stack.sh \
   githooks/pre-push \
   install-git-hooks.sh \
-  install-rtk.sh \
-  rtk \
   verify-ai-deps.sh \
   model-profiles/codex-model-profiles.json \
   policies/agent-context-policy.json \
   policies/retired-artifacts-v1.json \
-  provenance/rtk-v0.37.2.sha256 \
   schemas/agent-context-policy-v1.schema.json \
   schemas/agent-model-profiles-v1.schema.json \
   schemas/agent-seats-v1.schema.json \
@@ -1998,7 +1873,9 @@ for canonical_file in \
   lib/migrations.sh \
   migrations/2026.10.20.1-ignore-block-to-exclude.sh \
   migrations/2026.10.20.1-retire-files.sh \
-  migrations/2026.10.20.1-untrack-local-records.sh; do
+  migrations/2026.10.20.1-untrack-local-records.sh \
+  migrations/2026.11.04.1-remove-rtk.sh \
+  migrations/2026.11.04.1-remove-legacy-entrypoints.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \
@@ -2012,7 +1889,6 @@ need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-init()" 
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-update()" "canonical installer update shell snippet"
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-upgrade()" "canonical installer upgrade shell snippet"
 need_contains "$(cat "$TMP_DIR"/out/bootstrap-home-install.out)" "agent-next()" "canonical installer first 10 shell snippet"
-test_pinned_rtk_installer_fixture
 test_git_driven_harness_update_lifecycle
 run_native_verification_fixture_suite
 run_linked_ancestor_snapshot_focus
@@ -2107,50 +1983,16 @@ EOF_FEATURE_MANIFEST
   cd "$TMP_DIR"
   bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-smoke.out
   if ! fixture_workspace scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
-    fail "fresh checkout Claude hook failed before rtk install: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
+    fail "fresh checkout Claude hook failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
   fi
-  need_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "pinned rtk binary is not installed" "fresh checkout Claude hook warning"
+  need_not_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "rtk" "fresh checkout Claude hook"
   if ! .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.out 2>"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err; then
-    fail "fresh checkout Codex doctor failed before rtk install: $(cat "$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err)"
+    fail "fresh checkout Codex doctor failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err)"
   fi
   bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --refresh-lock >"$TMP_DIR"/out/bootstrap-refresh-lock.out
   need_contains "$(cat docs/agent-configs/agent-bootstrap.lock.json)" '"workflow_preset": "full"' "refresh-lock preserved workflow preset"
-  mkdir -p .tools/rtk/v0.37.2 .tools/bin
-  cat > .tools/rtk/v0.37.2/rtk <<'EOF_FAKE_RTK'
-#!/usr/bin/env bash
-set -euo pipefail
-case "${1:-}" in
-  --version)
-    echo "rtk 0.37.2"
-    ;;
-  git)
-    shift
-    if [[ "${1:-}" == "-C" ]]; then
-      shift 2
-    fi
-    case "${1:-}" in
-      ls-files)
-        exit 1
-        ;;
-      *)
-        exit 0
-        ;;
-    esac
-    ;;
-  hook)
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-EOF_FAKE_RTK
-  chmod +x .tools/rtk/v0.37.2/rtk
-  ln -sfn ../rtk/v0.37.2/rtk .tools/bin/rtk
   bash -n scripts/agent-tech-stack-lib.sh
   bash -n scripts/detect-agent-tech-stack.sh
-  bash -n scripts/install-rtk.sh
-  bash -n scripts/rtk
   bash -n scripts/agent-hook.sh
   bash -n scripts/agent-guard.sh
   bash -n scripts/agent-onboarding.sh
@@ -2219,7 +2061,6 @@ bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >"$TMP_DIR"/out/bo
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-lock-v1.schema.json" ]] || fail "root bootstrap wrapper did not generate lock schema"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-status-v1.schema.json" ]] || fail "root bootstrap wrapper did not generate status schema"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/schemas/agent-bootstrap-verify-report-v1.schema.json" ]] || fail "root bootstrap wrapper did not generate verifier schema"
-[[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256" ]] || fail "root bootstrap wrapper did not generate rtk provenance"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/project-onboarding.md")" "project-specific tech-stack" "onboarding tech-stack guidance"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/project-onboarding.md")" "project-tech-stack.json" "onboarding tech-stack machine contract guidance"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/first-10-minutes.md")" "scripts/agent-onboarding.sh check" "first 10 readiness check"
@@ -2243,7 +2084,6 @@ need_not_contains "$root_codex_config" 'model = ' "Codex config has no hard-code
 need_not_contains "$root_codex_config" 'model_reasoning_effort' "Codex config has no hard-coded effort"
 need_contains "$root_codex_config" '"CODEX_HARNESS_SESSION"' "Codex shell policy passes nesting marker"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/context-policy.json")" '"schema": "agent-context-policy/v1"' "context policy schema"
-need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256")" "rtk-aarch64-apple-darwin.tar.gz" "rtk provenance darwin arm64 asset"
 if command -v python3 >/dev/null 2>&1; then
   python3 -m json.tool "$ROOT_DIRECT_DIR/docs/agent-configs/seats.json" >/dev/null ||
     fail "generated seats JSON is invalid"
@@ -2401,7 +2241,7 @@ while IFS= read -r runtime_snapshot; do
     fail "discovered runtime snapshot $base was not generated into the target"
   fi
   need_same_file "$runtime_snapshot" "$TMP_DIR/scripts/$base" "generated runtime snapshot $base"
-done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BOOTSTRAP_BUNDLE"/*.sh "$BOOTSTRAP_BUNDLE"/rtk 2>/dev/null | sort)
+done < <(grep -lE '^# AGENT_BOOTSTRAP_GENERATED' "$BOOTSTRAP_BUNDLE"/*.sh 2>/dev/null | sort)
 need_same_file "$BOOTSTRAP_BUNDLE/githooks/pre-push" "$TMP_DIR/scripts/githooks/pre-push" "generated pre-push hook"
 [[ -x "$TMP_DIR/scripts/githooks/pre-push" ]] || fail "pre-push hook is not executable"
 need_same_file "$BOOTSTRAP_BUNDLE/install-git-hooks.sh" "$TMP_DIR/scripts/install-git-hooks.sh" "generated git hook installer"
@@ -2411,8 +2251,6 @@ need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "pre-final --run-ver
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "preflight" "pre-push runs preflight before pre-final"
 need_contains "$(cat "$TMP_DIR/scripts/githooks/pre-push")" "agent-local-only-check.sh" "pre-push runs local-only harness check"
 [[ -f "$TMP_DIR/docs/agent-configs/RECOVERY.md" ]] || fail "RECOVERY.md not generated into target"
-need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "partial upgrade" "RECOVERY covers partial upgrade"
-need_contains "$(cat "$TMP_DIR/docs/agent-configs/RECOVERY.md")" "git restore" "RECOVERY gives a concrete restore command"
 (
   cd "$TMP_DIR"
   git init -q
@@ -2471,8 +2309,6 @@ chmod +x "$LOCAL_ONLY_DIR/scripts/agent-local-only-check.sh"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"Stop"' "Claude settings registers Stop hook"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" 'agent-hook.sh close-out' "Claude Stop hook calls close-out subcommand"
 	python3 -m json.tool "$TMP_DIR/.claude/settings.json" >/dev/null || fail "generated settings.json is not valid JSON after Stop hook"
-	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "agentmemory-mcp" "full bootstrap AGENTS agentmemory routing"
-	need_contains "$(cat "$TMP_DIR/AGENTS.md")" "advisory" "AGENTS notes non-Claude close-out surfaces stay advisory"
 EXCLUDE_DEFAULT_DIR="$FIXTURE_DIR/exclude-default"
 mkdir -p "$EXCLUDE_DEFAULT_DIR"
 git -C "$EXCLUDE_DEFAULT_DIR" init -q
@@ -2487,89 +2323,55 @@ need_not_contains "$(cat "$EXCLUDE_DEFAULT_DIR/.git/info/exclude")" "*.generated
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "/Users/admin/" "generated agentmemory skill must not contain author machine path"
 need_not_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "codex-cliproxy-provider" "generated agentmemory skill must not name author-only repo"
 need_not_contains "$(sed -n '1,20p' "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Android/iOS" "generated agentmemory skill description must be stack agnostic"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "AGENTMEMORY_VERIFY_CMD" "generated agentmemory operational check"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Actions tab" "generated agentmemory actions-tab routing"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "memory_action_create" "generated agentmemory action-create guidance"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "memory_action_update" "generated agentmemory action-update guidance"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "memory_frontier" "generated agentmemory frontier guidance"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "falls back to 7 tools" "generated agentmemory limited MCP fallback warning"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "agentmemory connect codex --with-hooks" "generated agentmemory Codex plugin hook setup"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "npx skills add rohitg00/agentmemory" "generated agentmemory upstream native skills install"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Memory Brief" "generated agentmemory memory brief discipline"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Use a type-first shape" "generated agentmemory type-first storage discipline"
-need_contains "$(cat "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md")" "Handoff Format" "generated agentmemory handoff protocol"
 [[ -f "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md" ]] || fail "full bootstrap did not generate doubt-driven skill"
 need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "CLAIM" "doubt-driven procedure"
 need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "addyosmani/agent-skills (MIT)" "doubt-driven attribution"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/llm-council-agent-workflow.md")" "doubt-driven" "council references doubt-driven"
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "## Startup Context Budget" "AGENTS token budget section"
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Always read at startup" "AGENTS core startup context"
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "Read on demand" "AGENTS lazy context disclosure"
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "excludes tool-specific wrappers" "AGENTS names where the core estimate is reported and what it excludes"
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
-need_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read on demand" "CLAUDE lazy context disclosure"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "## First run" "CLAUDE must not repeat AGENTS startup text"
 agents_text="$(cat "$TMP_DIR/AGENTS.md")"
-need_contains "$agents_text" "## Working Economy" "AGENTS working economy rules"
-need_contains "$agents_text" "trust the summary" "AGENTS resume rule"
-need_contains "$agents_text" "record each decision once" "AGENTS decision-once rule"
-need_contains "$agents_text" "only new evidence" "AGENTS report evidence rule"
-need_contains "$agents_text" "report progress only when state changes" "AGENTS coordination rule"
 need_not_contains "$agents_text" "Workspace–Repository Guard contract in" "AGENTS must not require the full guard contract at startup"
 
-# Task 6: shared tool-entrypoint contract rendered identically into every surface.
+# Task 6: CLAUDE.md is the only tool wrapper; it imports AGENTS.md and carries the
+# managed tool contract once.
 extract_tool_contract() {
   local file="$1"
   sed -n '/BEGIN MANAGED: multi-agent-bootstrap:tool-contract/,/END MANAGED: multi-agent-bootstrap:tool-contract/p' "$file"
 }
 
 claude_contract="$(extract_tool_contract "$TMP_DIR/CLAUDE.md")"
-gemini_contract="$(extract_tool_contract "$TMP_DIR/GEMINI.md")"
-windsurf_contract="$(extract_tool_contract "$TMP_DIR/.windsurfrules")"
-cursor_contract="$(extract_tool_contract "$TMP_DIR/.cursor/rules/agent-conventions.mdc")"
 [[ -n "$claude_contract" ]] || fail "CLAUDE.md missing managed tool contract"
-[[ "$claude_contract" == "$gemini_contract" ]] || fail "GEMINI.md tool contract drifted from CLAUDE.md"
-[[ "$claude_contract" == "$windsurf_contract" ]] || fail "Windsurf tool contract drifted from CLAUDE.md"
-[[ "$claude_contract" == "$cursor_contract" ]] || fail "Cursor tool contract drifted from CLAUDE.md"
+for wrapper in GEMINI.md .windsurfrules .cursor/rules/agent-conventions.mdc; do
+  [[ ! -e "$TMP_DIR/$wrapper" && ! -e "$ROOT_DIRECT_DIR/$wrapper" ]] || fail "bootstrap still generates $wrapper"
+done
 need_contains "$claude_contract" "scripts/agent-guard.sh pre-final --run-verify" "tool contract close-out command"
-need_contains "$claude_contract" "templates/base/README.md" "tool contract points to the full guard contract"
 need_not_contains "$claude_contract" "Required fields:" "tool contract keeps the full guard contract out of host files"
 for refresh_doc in "$TMP_DIR/AGENTS.md" "$ROOT_DIRECT_DIR/AGENTS.md"; do
   need_contains "$(cat "$refresh_doc")" "agent-refresh" "AGENTS names the installed refresh command"
   need_not_contains "$(cat "$refresh_doc")" "bash scripts/bootstrap-multi-agent-project.sh --refresh-lock" "AGENTS must not point to a script absent from targets"
 done
 need_not_contains "$(cat "$TMP_DIR/.claude/README.md")" '\`' "Claude README has no escaped backticks"
-need_contains "$(cat "$TMP_DIR/.codex/README.md")" "only if the roster assigns @spec to Codex" "Codex README qualifies Claude-default seats"
 
 infra_claude_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/CLAUDE.md")"
-infra_gemini_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/GEMINI.md")"
-infra_windsurf_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/.windsurfrules")"
-infra_cursor_contract="$(extract_tool_contract "$ROOT_DIRECT_DIR/.cursor/rules/agent-conventions.mdc")"
 [[ -n "$infra_claude_contract" ]] || fail "root-direct CLAUDE.md missing managed tool contract"
-[[ "$infra_claude_contract" == "$infra_gemini_contract" ]] || fail "root-direct GEMINI.md tool contract drifted from CLAUDE.md"
-[[ "$infra_claude_contract" == "$infra_windsurf_contract" ]] || fail "root-direct Windsurf tool contract drifted from CLAUDE.md"
-[[ "$infra_claude_contract" == "$infra_cursor_contract" ]] || fail "root-direct Cursor tool contract drifted from CLAUDE.md"
 need_contains "$infra_claude_contract" "scripts/agent-guard.sh pre-final --run-verify" "root-direct tool contract close-out command"
 
 # Task 8: generated guidance and READMEs document the closed-loop close-out path.
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "scripts/agent-guard.sh pre-final --run-verify" "AGENTS close-out verify command"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "verification report" "task journal verification evidence guidance"
 need_contains "$(cat "$ROOT_DIR/README.md")" "pre-final --run-verify" "root README closed-loop guidance"
-need_contains "$(cat "$ROOT_DIR/agent-bootstrap/README.md")" "pre-final --run-verify" "bundle README closed-loop guidance"
 need_contains "$(cat "$ROOT_DIR/README.md")" "not a security boundary for arbitrary Bash" "root README shell boundary"
-for operator_readme in "$ROOT_DIR/README.md" "$ROOT_DIR/agent-bootstrap/README.md"; do
-  need_contains "$(cat "$operator_readme")" "Open the generated target in Cowork" "operator README Cowork open step"
-  need_contains "$(cat "$operator_readme")" "copy the Folder Instructions from \`.claude/README.md\` once" "operator README Cowork Folder Instructions step"
-  need_contains "$(cat "$operator_readme")" "creates or resumes the task packet" "operator README Claude packet step"
-  need_contains "$(cat "$operator_readme")" "routed Codex" "operator README Codex routing step"
-  need_contains "$(cat "$operator_readme")" "Return to Claude for independent cross-review" "operator README Claude cross-review step"
-  need_contains "$(cat "$operator_readme")" "packet ownership and append-only history are conventions" "operator README convention limitation"
-  need_contains "$(cat "$operator_readme")" "host, model, and session independence are declarations rather than proof" "operator README independence limitation"
-  need_contains "$(cat "$operator_readme")" "@gate authorization entries are audit declarations" "operator README Sol authorization limitation"
-  need_contains "$(cat "$operator_readme")" "not security controls" "operator README security-control limitation"
-  need_contains "$(cat "$operator_readme")" "Do not assume Claude Code hooks run in Cowork." "operator README Cowork hook limitation"
-done
+operator_readme="$(cat "$ROOT_DIR/README.md")"
+need_contains "$operator_readme" "Open the generated target in Cowork" "operator README Cowork open step"
+need_contains "$operator_readme" "copy the Folder Instructions from \`.claude/README.md\` once" "operator README Cowork Folder Instructions step"
+need_contains "$operator_readme" "creates or resumes the task packet" "operator README Claude packet step"
+need_contains "$operator_readme" "routed Codex" "operator README Codex routing step"
+need_contains "$operator_readme" "Return to Claude for independent cross-review" "operator README Claude cross-review step"
+need_contains "$operator_readme" "packet ownership and append-only history are conventions" "operator README convention limitation"
+need_contains "$operator_readme" "host, model, and session independence are declarations rather than proof" "operator README independence limitation"
+need_contains "$operator_readme" "@gate authorization entries are audit declarations" "operator README Sol authorization limitation"
+need_contains "$operator_readme" "not security controls" "operator README security-control limitation"
+need_contains "$operator_readme" "Do not assume Claude Code hooks run in Cowork." "operator README Cowork hook limitation"
 # The generated verifier owns the budget: kit text above a gate fails, project
 # content only warns. Ratchet: the kit's own text stays out of amber here.
 budget_json="$(cd "$TMP_DIR" && scripts/verify-ai-deps.sh --json --context-budget)" ||
@@ -2727,38 +2529,12 @@ need_contains "$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")" "recall_ver
 handoff_contract="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" "$TMP_DIR/docs/agent-configs/agent-handoff-reference.md")"
 mode_contracts="$(cat "$TMP_DIR/docs/agent-configs/agent-mode-contracts.md")"
 
-need_contains "$handoff_contract" '"source_task": null' "handoff optional source task"
-need_contains "$handoff_contract" '"blocks": []' "handoff blocks default"
-need_contains "$handoff_contract" '`source_task` (missing: `null`) is `null`, a task id or `<task-id>#<finding-id>`' "handoff missing source task default"
-need_contains "$handoff_contract" '`blocks` (missing: `[]`) lists unique ids of tasks that cannot continue while this packet is active.' "handoff missing blocks default"
-need_contains "$handoff_contract" "with an existing packet's id when available" "handoff source task packet reference"
-need_contains "$handoff_contract" 'Existing `claude-codex-collaboration/v1` packets remain valid' "handoff existing protocol compatibility"
-need_contains "$handoff_contract" "A closed packet's edges are inactive; nothing is written in reverse or to the blocked packet." "handoff closed blocks edges"
-need_contains "$handoff_contract" 'A missing referenced packet invalidates nothing: record the uncertainty and continue.' "handoff missing referenced packets"
-need_contains "$handoff_contract" 'continue the current task while the root cause and implementation scope are unchanged, keeping review retries in it' "handoff continue current task"
-need_contains "$handoff_contract" 'open a child task only for a distinct finding with independently closable scope' "handoff child task scope"
-need_contains "$handoff_contract" 'recording the split rationale in `task.md`' "handoff split rationale"
-need_contains "$handoff_contract" 'per exact `source_task` value, at most one active child may block a target' "handoff duplicate active child rule"
-need_contains "$handoff_contract" 'no task sources from or blocks itself' "handoff self relation rule"
-need_contains "$handoff_contract" 'active blocking edges are acyclic' "handoff acyclic blocking rule"
-need_contains "$handoff_contract" 'Conventions the writer keeps and the reviewer checks' "handoff relations authoring convention"
-need_contains "$handoff_contract" 'no guard, hook or runtime reads these fields' "handoff relations runtime boundary"
-need_contains "$handoff_contract" 'Other evidence is allowed when linked from `task.md`' "handoff allows supporting artifacts"
 task_journal="$(cat "$TMP_DIR/docs/agent-configs/task-journal.md")"
-need_contains "$handoff_contract" '## Outcome' "handoff closure outcome heading"
-need_contains "$handoff_contract" '- Summary: <change or finding>' "handoff closure outcome summary field"
-need_contains "$handoff_contract" '- Evidence: <test/report/review path>' "handoff closure outcome evidence field"
-need_contains "$handoff_contract" '- Effect on source: <source task decision/action>' "handoff closure outcome effect field"
-need_contains "$handoff_contract" 'The fields are prose, not enums, and do not drive an automatic transition.' "handoff closure outcome prose rule"
-need_contains "$handoff_contract" 'journal entry (`docs/agent-configs/task-journal.md`) mirrors its Summary,' "handoff closure outcome journal mirror guidance"
 need_contains "$task_journal" 'Manually mirror `task.md` Summary, Evidence, and Effect on source' "task journal closure outcome copy guidance"
 need_contains "$task_journal" 'with each commit that changes tracked files' "task journal entry with each tracked commit"
 handoff_core="$(cat "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md")"
-need_contains "$handoff_core" "docs/agent-configs/agent-handoff-reference.md" "handoff core points to the per-seat reference"
 need_not_contains "$handoff_core" "Packet mapping examples" "handoff core keeps per-seat examples out"
 need_not_contains "$handoff_core" "### \`gate-review.md\`" "handoff core keeps review formats out"
-need_contains "$mode_contracts" "Every acceptance criterion names its test" "gate requires named acceptance tests"
-need_contains "$mode_contracts" "a real HTTP 401" "gate requires production-boundary fixtures"
 
 python3 - "$TMP_DIR/docs/agent-configs/agent-handoff-schema.md" "$TMP_DIR/docs/agent-configs/agent-handoff-reference.md" <<'PY_HANDOFF_ARTIFACTS'
 import pathlib
@@ -2801,96 +2577,10 @@ for name, heading in (("gate-review.md", "Pre-coding technical review"), ("verif
         raise SystemExit("final technical review missing fresh_session_attestation")
 PY_HANDOFF_ARTIFACTS
 
-for state_field in \
-  protocol_version \
-  task_id \
-  status \
-  phase \
-  owner \
-  requested_action \
-  base_commit \
-  revision_rounds \
-  spec_sufficiency \
-  escalation_reason \
-  verification \
-  updated_at; do
-  need_contains "$handoff_contract" "\"$state_field\"" "handoff state field $state_field"
-done
-need_contains "$handoff_contract" '"protocol_version": "claude-codex-collaboration/v1"' "handoff protocol version"
-need_contains "$handoff_contract" '"task_id": "checkout-timeout-fix"' "handoff concrete task example"
-need_contains "$handoff_contract" '`status`: `open | awaiting_user | closed`' "handoff status enum"
-need_contains "$handoff_contract" '`phase`: `analysis | technical_review | implementation | verification | cross_review | resolution | closed`' "handoff phase enum"
-need_contains "$handoff_contract" '`owner`: `claude | codex | user | agent`' "handoff owner enum"
-need_contains "$handoff_contract" '`spec_sufficiency.verdict`: `not_reviewed | sufficient | partially_sufficient | insufficient`' "handoff sufficiency verdict enum"
-need_contains "$handoff_contract" '`spec_sufficiency.sufficient_for_coding_model`: `not_reviewed | yes | no`' "handoff coding gate enum"
-need_contains "$handoff_contract" '`verification.runner`: `none | claude | codex | agent`' "handoff verification runner enum"
-need_contains "$handoff_contract" '`verification.status`: `not_run | pass | fail | blocked`' "handoff verification status enum"
-need_contains "$handoff_contract" "## Request (verbatim)" "task artifact verbatim request heading"
-need_contains "$handoff_contract" "## Pre-coding technical review" "Codex pre-coding review heading"
-need_contains "$handoff_contract" "## Final technical review" "Codex final review heading"
-need_contains "$handoff_contract" "sufficient_for_coding_model" "handoff blocking coding field"
-need_contains "$handoff_contract" "fresh_session_attestation" "handoff fresh-session declaration"
-need_contains "$handoff_contract" "policy_exception=gate_coding" "handoff gate-coding policy exception"
-
-need_contains "$handoff_contract" 'Only `state.json` and `task.md` are created initially' "handoff lazy artifact creation"
-need_contains "$handoff_contract" 'ACTIVE` is a cache' "handoff ACTIVE cache rule"
-need_contains "$handoff_contract" 'state.json` is authoritative' "handoff authoritative state rule"
-need_contains "$handoff_contract" 'select the only task that is not `closed`' "handoff single-open-task selection"
-need_contains "$handoff_contract" 'stale `ACTIVE`' "handoff stale ACTIVE repair rule"
-need_contains "$handoff_contract" "require the user to choose" "handoff multiple-open-task stop"
-need_contains "$handoff_contract" "Never select the newest task automatically" "handoff no-newest selection rule"
-need_contains "$handoff_contract" "ignored, ephemeral" "handoff packet durability limitation"
-need_contains "$handoff_contract" "ownership and append-only behavior are conventions" "handoff convention limitation"
-need_contains "$handoff_contract" 'Capture `base_commit` on first entry into implementation' "handoff base commit timing"
-need_contains "$handoff_contract" "Prior attempts remain" "handoff prior attempt preservation"
-need_contains "$handoff_contract" "next numbered attempt" "handoff numbered remediation attempts"
-need_contains "$handoff_contract" "Review history is append-only and immutable; each round appends the next numbered" "handoff sectioned review history"
-need_contains "$handoff_contract" "State sufficiency matches the latest attempt." "handoff state sufficiency follows the latest gate attempt"
-need_contains "$handoff_contract" 'When `@gate` returns `task.md` to analysis, append `## Specification revision <n>`' "handoff numbered specification revisions"
-need_contains "$handoff_contract" 'preserve `## Request (verbatim)` and prior history' "handoff specification history preservation"
-need_contains "$handoff_contract" '`fresh_session_attestation` is procedural-only' "handoff fresh-session declaration limitation"
-need_contains "$handoff_contract" "not proof of session, model, account, or host independence" "handoff fresh-session non-proof"
-need_contains "$handoff_contract" "checklist and procedural declarations live in" "handoff cross-review points to canonical checklist"
-need_contains "$handoff_contract" "policy meaning is in" "handoff gate-coding points to canonical policy"
 need_not_contains "$handoff_contract" "audit-only procedural declaration" "handoff carries no duplicate Sol-coding policy"
 need_not_contains "$handoff_contract" "declarations to be present" "handoff carries no duplicate cross-review checklist"
-need_contains "$handoff_contract" "Seat, transition, and gate policy lives only in" "handoff defers collaboration policy"
 
-need_contains "$mode_contracts" '- `analysis` · `@spec` -> `technical_review`' "analysis transition"
-need_contains "$mode_contracts" '- `technical_review` · `@gate` -> `analysis` | `implementation` | `resolution`' "technical review transitions"
-need_contains "$mode_contracts" '- `implementation` · `@build` -> `verification` | `resolution`' "implementation transitions"
-need_contains "$mode_contracts" '- `verification` · `@verify` -> `implementation` | `cross_review` | `resolution`' "verification transitions"
-need_contains "$mode_contracts" '- `cross_review` · `@audit` -> `implementation` | `resolution`' "cross-review transitions"
-need_contains "$mode_contracts" '- `resolution` · `@owner` -> `closed` | user-selected prior phase' "resolution transitions"
-need_contains "$mode_contracts" "awaiting_user" "mode contracts awaiting-user invariant"
-need_contains "$mode_contracts" 'only with `resolution` · `@owner`' "mode contracts awaiting-user owner restriction"
-need_contains "$mode_contracts" 'closed` is valid only with phase `closed`' "mode contracts closed invariant"
-need_contains "$mode_contracts" '`@gate` owns the blocking adequacy verdict' "mode contracts Sol adequacy ownership"
-need_contains "$mode_contracts" '`@build` may downgrade `yes`' "mode contracts Luna downgrade"
-need_contains "$mode_contracts" 'never upgrade `no`' "mode contracts Luna no-upgrade"
-need_contains "$mode_contracts" '`revision_rounds` counts returns to `implementation` only' "mode remediation checkpoint"
-need_contains "$mode_contracts" 'asks whether another bounded pass is worth its cost.' "mode remediation bounded cost"
 need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
-# Another pass stays in the same task (handoff "continue the current task" above).
-need_contains "$handoff_contract" 'An entry allowing another pass records `revision_rounds` reset to 0' "handoff same-task pass resets the count"
-need_contains "$handoff_contract" '"verification": {"runner": "none", "status": "not_run", "reason": null, "report": null}' "handoff verification evidence fields"
-need_contains "$mode_contracts" "Only the executing host may declare a pass for what it ran." "mode contracts executing-host pass rule"
-need_contains "$mode_contracts" "re-runs only a check whose" "mode contracts verify re-runs only on missing or doubtful evidence"
-need_contains "$mode_contracts" "Seats do not spawn reviewers beyond the doubt-driven skill" "mode contracts no helper reviewers"
-need_contains "$mode_contracts" "replaced with identity" "mode contracts anti-tautology guard obligation"
-need_contains "$mode_contracts" "state/review consistency" "mode contracts Claude consistency check"
-need_contains "$mode_contracts" "base_commit" "mode contracts Claude base commit check"
-need_contains "$mode_contracts" "verification" "mode contracts Claude verification check"
-need_contains "$mode_contracts" "declarations" "mode contracts Claude declarations check"
-need_contains "$mode_contracts" "gate-coding decision and reason" "mode contracts Claude escalation check"
-need_contains "$mode_contracts" "approved scope" "mode contracts Claude scope check"
-need_contains "$mode_contracts" "Check author/reviewer model and session declarations for contradictions." "mode contracts Claude declaration contradiction check"
-need_contains "$mode_contracts" 'Required procedural declarations: `fresh_session_attestation`, actual author model, actual reviewer model, and model source for each.' "mode contracts Claude provenance declarations"
-need_contains "$mode_contracts" 'user must open a new session for the `@gate` occupant to code' "mode contracts new-session escalation"
-need_contains "$mode_contracts" "audit-only procedural declaration" "mode contracts Sol-coding audit limitation"
-need_contains "$mode_contracts" "cannot provide file-based authorization" "mode contracts no file authorization"
-need_contains "$mode_contracts" 'records each user decision, the close included, in `user-decision.md`' "mode contracts record user decisions in user-decision.md"
-need_contains "$mode_contracts" "not an authorization or security boundary" "mode contracts security-boundary limitation"
 need_not_contains "$mode_contracts" "Three rounds:" "ordinary review three-round mandate"
 need_not_contains "$handoff_contract$mode_contracts$(cat "$TMP_DIR/.codex/codex-mode.sh")" "--escalated" "obsolete escalated route"
 need_not_contains "$handoff_contract$mode_contracts" "cross_review_model" "obsolete cross-review route field"
@@ -2964,7 +2654,6 @@ capture_task3_codex_launch "reviewing route" reviewing gpt-6-astra default ultra
 reviewing_seed="$(cat "$TASK3_CAPTURE")"
 severity_rule="Severity names its trigger condition and frequency, or is marked as an estimate."
 need_contains "$reviewing_seed" "mode contracts' severity rule" "reviewing seed points to the contract severity rule"
-need_contains "$mode_contracts" "$severity_rule" "mode contract severity rule"
 need_not_contains "$reviewing_seed" "$severity_rule" "reviewing seed restates the severity rule"
 for withdrawn_rule in \
   "at most three blockers" \
@@ -3100,7 +2789,6 @@ for nested_diagnostic_cmd in help status doctor; do
 done
 
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/project-agent-context.md")" "project-brief.md" "context references brief"
-need_contains "$(cat "$TMP_DIR/AGENTS.md")" "project-brief.md" "AGENTS startup references onboarding"
 
 summary="$(cd "$TMP_DIR" && scripts/detect-agent-tech-stack.sh --summary)"
 need_contains "$summary" "tech_stacks=android_kotlin wear_os" "tech stack summary"
@@ -3279,7 +2967,6 @@ need_not_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "budget 6500" "ge
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "seats.json is valid" "generated verifier seats schema check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "agent context policy schema is agent-context-policy/v1" "generated verifier context policy schema check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "agent guard check passes" "generated verifier agent guard check"
-need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "rtk provenance manifest exists" "generated verifier rtk provenance check"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "bootstrap JSON contracts validate" "generated verifier JSON contract validation"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "project tech-stack contract validates" "generated verifier project tech-stack contract validation"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-verify.json")" '"schema":"agent-bootstrap-verify-report/v1"' "generated verifier json schema"
@@ -3366,7 +3053,7 @@ codex_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh
 need_contains "$codex_guard_out" "protected_path=true" "pre-edit protects Codex adapter"
 claude_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit .claude/settings.json) 2>&1 || true)"
 need_contains "$claude_guard_out" "protected_path=true" "pre-edit protects Claude adapter"
-gemini_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit GEMINI.md) 2>&1 || true)"
+gemini_guard_out="$( (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit .gemini/settings.json) 2>&1 || true)"
 need_contains "$gemini_guard_out" "protected_path=true" "pre-edit protects Gemini adapter"
 
 if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit --strict AGENTS.md >"$TMP_DIR"/out/bootstrap-guard-strict.out 2>"$TMP_DIR"/out/bootstrap-guard-strict.err); then
@@ -4495,10 +4182,6 @@ EOF_INFRA_MANIFEST
 (
   cd "$INFRA_DIR"
   bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$INFRA_DIR" >"$TMP_DIR"/out/bootstrap-infra.out
-  mkdir -p .tools/rtk/v0.37.2 .tools/bin
-  cp "$TMP_DIR/.tools/rtk/v0.37.2/rtk" .tools/rtk/v0.37.2/rtk
-  chmod +x .tools/rtk/v0.37.2/rtk
-  ln -sfn ../rtk/v0.37.2/rtk .tools/bin/rtk
   bash -n scripts/agent-hook.sh
   bash -n scripts/agent-guard.sh
   bash -n scripts/verify-ai-deps.sh
@@ -4508,6 +4191,30 @@ EOF_INFRA_MANIFEST
 )
 
 [[ ! -e "$INFRA_DIR/docs/agent-configs/karpathy-llm-coding-agent-config.md" ]] || fail "infra-only bootstrap installed Karpathy workflow"
+
+# The kit no longer ships, writes or names rtk; one AGENTS.md line tells agents
+# that still remember ./scripts/rtk to run git directly.
+# Fresh targets: the shared ones also hold other checks' scratch copies.
+for no_rtk_preset in full infra; do
+  no_rtk_dir="$FIXTURE_DIR/plain-$no_rtk_preset" # the folder name becomes the project name
+  mkdir -p "$no_rtk_dir"
+  git -C "$no_rtk_dir" init -q
+  bash "$BOOTSTRAP" --target "$no_rtk_dir" --workflow "$no_rtk_preset" >"$TMP_DIR/out/plain-$no_rtk_preset.out" ||
+    fail "plain $no_rtk_preset generation failed"
+  leftovers="$(cd "$no_rtk_dir" && find . \( -path ./.git -o -path ./out \) -prune -o -iname '*rtk*' -print)"
+  [[ -z "$leftovers" ]] || fail "rtk files generated in $no_rtk_dir: $leftovers"
+  mentions="$(cd "$no_rtk_dir" && { grep -rIlw --exclude-dir=.git --exclude-dir=out --exclude-dir=.tools rtk . || true; })"
+  [[ "$mentions" == "./AGENTS.md" ]] || fail "rtk named outside AGENTS.md in $no_rtk_dir: $mentions"
+  [[ "$(grep -cw rtk "$no_rtk_dir/AGENTS.md")" == 1 ]] || fail "AGENTS.md in $no_rtk_dir must name rtk once"
+done
+[[ -z "$(cd "$BOOTSTRAP_BUNDLE" && find . -iname '*rtk*' ! -name 'next-remove-rtk.sh' ! -name '*-remove-rtk.sh')" ]] ||
+  fail "bundle still ships rtk files"
+need_not_contains "$(cat "$TMP_DIR/out/bootstrap-verify.out")" "rtk" "verifier names no rtk check"
+python3 -I - "$BOOTSTRAP_BUNDLE/schemas/agent-bootstrap-lock-v1.schema.json" <<'PY' || fail "lock schema must accept locks with and without rtk"
+import json, sys
+schema = json.load(open(sys.argv[1]))
+assert "rtk" not in schema["required"] and schema.get("additionalProperties", True) is True
+PY
 [[ ! -e "$INFRA_DIR/docs/agent-configs/llm-council-agent-workflow.md" ]] || fail "infra-only bootstrap installed council workflow"
 [[ ! -e "$INFRA_DIR/.codex/codex-mode.sh" ]] || fail "infra-only bootstrap installed Codex three-mode helper"
 [[ ! -e "$INFRA_DIR/scripts/agent-seats.sh" ]] || fail "infra-only bootstrap installed workflow seats runtime"

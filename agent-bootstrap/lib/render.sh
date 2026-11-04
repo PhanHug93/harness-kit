@@ -190,11 +190,6 @@ write_agent_bootstrap_lock() {
   "project_name": "$(json_escape "$PROJECT_NAME")",
   "generated_at": "$lock_generated_at",
   "apply_state": "$apply_state",
-  "rtk": {
-    "required": true,
-    "version": "$RTK_VERSION",
-    "install_command": "bash scripts/install-rtk.sh"
-  },
   "templates": {
     "base": "docs/agent-configs/bootstrap-multi-agent-project/templates/base",
     "overlays": [$overlay_json],
@@ -296,8 +291,6 @@ scripts/agent-onboarding.sh
 scripts/agent-local-only-check.sh
 scripts/verify-ai-deps.sh
 scripts/install-git-hooks.sh
-scripts/install-rtk.sh
-scripts/rtk
 scripts/harness-kit.sh
 scripts/githooks/
 .gitignore.generated.*

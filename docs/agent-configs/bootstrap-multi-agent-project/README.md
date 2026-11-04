@@ -1,492 +1,431 @@
-# Solo Multi-Agent Harness Kit Workflow
+# Harness Kit Reference
 
-Goal: one-shot setup of Codex/Claude multi-agent harness infrastructure when
-switching to any project, without maintaining a source template repo, build
-step, base64 payload, or generated dist artifact.
+The details behind [README.md](../../../README.md): file layout, commands,
+upgrade rules, budgets and contracts. Changing the kit itself is in
+[CONTRIBUTING.md](../../../CONTRIBUTING.md).
 
-## Agent seats and upgrades
+## Bundle and home layout
 
-Work follows `@spec` → `@gate` → `@build` → `@verify` → `@audit` → `@owner`.
-Default occupants are Claude (spec/audit), Codex `gpt-6-astra` at `ultra`
-(gate/verify), Codex `gpt-5.6-luna` at `xhigh` (build), and human (owner).
-Codex fallbacks use `gpt-5.6-terra` at `xhigh`.
-
-`scripts/agent-seats.sh show|wizard|validate` inspects, edits or validates
-`docs/agent-configs/seats.json`; `set gate --effort high` changes one seat and
-updates the roster. The model catalog controls supported efforts. The launcher
-accepts Codex seats and the legacy planning/coding/reviewing aliases.
-
-Upgrading an older project migrates the selected customized legacy profile's
-models, efforts and fallbacks only when seats are missing. The original legacy
-file remains untouched; existing seats always win and are never candidates.
-An exact old bundle default adopts the new defaults with a note. Invalid active
-configuration is preserved and reported for repair, not reset automatically.
-Filled briefs and USER overlays survive every install, reinstall and update.
-Inspect `show`, `validate` and `.codex/codex-mode.sh status` after upgrading.
-`CODEX_MODEL_PROFILE` is a warning no-op during this compatibility release.
-@gate authorization entries are audit declarations.
-
-## Decision
-
-Use a repo-local source bundle plus one canonical home folder and shell
-functions. The source bundle is copyable as one directory:
+`agent-bootstrap/` is the whole kit as one copyable folder; `MANIFEST.md`
+lists every file and its drift rule.
 
 ```text
 agent-bootstrap/
-├── README.md
-├── VERSION
-├── MANIFEST.md
-├── bootstrap-multi-agent-project.sh
-├── agent-bootstrap-update.sh
-├── install-agent-bootstrap-home.sh
-├── lib/
-│   ├── core.sh
-│   ├── detect.sh
-│   ├── render.sh
-│   ├── writers-runtime.sh
-│   ├── writers-docs.sh
-│   ├── onboarding.sh
-│   └── retirement.py
-├── model-profiles/
-│   └── codex-model-profiles.json
-├── policies/
-│   ├── agent-context-policy.json
-│   └── retired-artifacts-v1.json
-├── provenance/
-│   └── rtk-v0.37.2.sha256
-├── schemas/
-│   ├── agent-context-policy-v1.schema.json
-│   ├── agent-bootstrap-lock-v1.schema.json
-│   ├── agent-bootstrap-status-v1.schema.json
-│   ├── agent-bootstrap-status-v2.schema.json
-│   ├── agent-bootstrap-retirement-v1.schema.json
-│   ├── agent-bootstrap-verify-report-v1.schema.json
-│   ├── agent-model-profiles-v1.schema.json
-│   ├── agent-seats-v1.schema.json
-│   └── agent-project-tech-stack-v1.schema.json
-├── templates/
-│   ├── base/
-│   ├── overlays/
-│   └── workflows/
-├── agent-tech-stack-lib.sh
-├── agent-hook.sh
-├── agent-guard.sh
-├── agent-tier.py
-├── agent-seats.sh
-├── agent-onboarding.sh
-├── detect-agent-tech-stack.sh
-├── install-rtk.sh
-├── verify-ai-deps.sh
-└── rtk
+├── VERSION, MANIFEST.md, README.md
+├── harness-kit-one-shot.sh        # entry: fetch a release, run it
+├── harness-kit-run.sh             # install, reinstall or update one project
+├── bootstrap-multi-agent-project.sh  # the generator
+├── agent-bootstrap-update.sh, install-agent-bootstrap-home.sh
+├── lib/                           # generator libraries; keep beside the entry
+├── migrations/                    # one-time update steps
+├── model-profiles/                # legacy defaults, read only during migration
+├── policies/                      # context policy, retired-file inventory
+├── schemas/                       # JSON schemas for the kit's files
+├── templates/                     # base, overlays, workflows, tool contract
+└── agent-*.sh, agent-tier.py, detect-agent-tech-stack.sh, verify-ai-deps.sh,
+    install-git-hooks.sh, githooks/   # runtime snapshots
 ```
 
-The canonical home folder receives the same files:
+The runtime scripts at the bottom are snapshots of what the generator writes
+into a project's `scripts/`; run them from a generated project, not from the
+bundle. The home install (`$HOME/dev/agent-bootstrap` by default) holds the
+same files.
 
-```text
-$HOME/dev/agent-bootstrap/
-├── README.md
-├── VERSION
-├── MANIFEST.md
-├── bootstrap-multi-agent-project.sh
-├── agent-bootstrap-update.sh
-├── lib/
-│   ├── core.sh
-│   ├── detect.sh
-│   ├── render.sh
-│   ├── writers-runtime.sh
-│   ├── writers-docs.sh
-│   ├── onboarding.sh
-│   └── retirement.py
-├── model-profiles/
-├── policies/
-├── provenance/
-├── schemas/
-├── templates/
-├── agent-tech-stack-lib.sh
-├── agent-hook.sh
-├── agent-guard.sh
-├── agent-tier.py
-├── agent-seats.sh
-├── agent-onboarding.sh
-├── detect-agent-tech-stack.sh
-├── install-rtk.sh
-├── verify-ai-deps.sh
-└── rtk
-```
-
-Only `bootstrap-multi-agent-project.sh` is required for daily use. `VERSION`
-and `MANIFEST.md` identify the copied bundle. The runtime scripts are kept as
-full-workflow snapshots of what the bootstrap script generates into each target
-project; `scripts/test-bootstrap-multi-agent-project.sh` guards that drift.
-Run those runtime scripts from generated target projects, not from the
-canonical home folder.
-
-## One-Time Setup
-
-From this repository:
+## Home install and shell helpers
 
 ```bash
-agent-bootstrap/install-agent-bootstrap-home.sh --write-zshrc
+agent-bootstrap/install-agent-bootstrap-home.sh --write-zshrc   # from a checkout
 source ~/.zshrc
 ```
 
-Default target:
+- `--home DIR` picks another folder; `--dry-run` previews; `--no-git` skips
+  the local history.
+- The installer copies the bundle, backs up each changed file before replacing
+  it, and adds a managed block to `~/.zshrc` only with `--write-zshrc`.
 
-```text
-$HOME/dev/agent-bootstrap
-```
+The block exports `AGENT_BOOTSTRAP_HOME` and defines:
 
-Override target if needed:
-
-```bash
-agent-bootstrap/install-agent-bootstrap-home.sh --home "$HOME/dev/agent-bootstrap" --write-zshrc
-```
-
-The installer:
-
-- copies the portable bootstrap files into the canonical folder,
-- backs up changed canonical files before replacing them,
-- initializes local history through the repo-pinned `./scripts/rtk git` when rtk
-  is available,
-- installs an idempotent managed block in `~/.zshrc` only when `--write-zshrc`
-  is provided.
-
-Preview without writing:
-
-```bash
-agent-bootstrap/install-agent-bootstrap-home.sh --dry-run
-```
-
-Compatibility wrappers remain at:
-
-```bash
-scripts/install-agent-bootstrap-home.sh
-scripts/bootstrap-multi-agent-project.sh
-```
-
-They delegate to the `agent-bootstrap/` bundle so existing commands keep
-working.
-
-## Installed Shell Functions
-
-The managed shell block exports `AGENT_BOOTSTRAP_HOME` and defines:
-
-- `agent-init`: the generator from the project's `.harness-kit/v<lock version>/`
+- `agent-upgrade`: `scripts/harness-kit.sh --to latest`, or the home's
+  `harness-kit-one-shot.sh --to latest` when the project has none;
+- `agent-init`: the generator from the project's `.harness-kit/v<version>/`
   copy, or from the home when there is none;
 - `agent-next`: `agent-init --first-10`;
-- `agent-doctor`: `./scripts/agent-hook.sh doctor`;
-- `agent-refresh`: `agent-init --refresh-lock`;
-- `agent-update`: the home's Git-backed updater (`--check`, `--self-update`);
-- `agent-upgrade`: `scripts/harness-kit.sh --to latest`, or the home's
-  `harness-kit-one-shot.sh --to latest` when the project has none.
+- `agent-doctor`: `scripts/agent-hook.sh doctor`;
+- `agent-refresh`: `agent-init --refresh-lock` after stack or module changes;
+- `agent-update`: the home's Git-backed updater (`--check` compares the home
+  with the latest `vYYYY.MM.DD.N` tag, `--self-update` refreshes it).
 
-## Daily Workflow
+`scripts/install-agent-bootstrap-home.sh` and
+`scripts/bootstrap-multi-agent-project.sh` in the repository are compatibility
+wrappers. A project may also link `scripts/bootstrap-multi-agent-project.sh`
+to the home's generator; a generated project does not need it.
 
-```bash
-cd /path/to/new-project
-agent-init --workflow full
-agent-doctor
-```
+## Generator commands
 
-For infra-only projects:
-
-```bash
-agent-init
-agent-doctor
-```
-
-Refresh lock after intentional stack/module changes:
+`scripts/harness-kit.sh` is the normal entry. The generator
+(`agent-init`, or `bash bootstrap-multi-agent-project.sh --target "$PWD"`)
+follows the same file rules and adds lifecycle commands:
 
 ```bash
-agent-refresh
+agent-init --workflow full          # generate (default preset: infra)
+agent-init --status --json          # versions, drift, pending candidates
+agent-init --first-10               # the first-run path
+agent-init --diff                   # preview generated-file diffs
+agent-init --upgrade-plan --json    # the action per file; writes nothing
+agent-init --apply-candidates       # promote reviewed candidates
+agent-init --retirement-plan        # read-only retired-file plan
 ```
 
-Install, reinstall or update with one command. The first time, from the
-project root:
+- `--apply-candidates` promotes the latest candidate for each generated path
+  (from the generated-file allowlist only) and removes older ones; files with
+  local edits stay unless named with `--only <path>` (repeatable).
+- `--keep <path>` (repeatable) leaves a file untouched: no write, no
+  candidate.
+- Every run prints an upgrade id; `--rollback <id>` restores what that run
+  changed and removes what it created, keeping (and listing, exit 3) any file
+  edited since.
+- `--skip-existing` leaves existing files alone and creates missing ones;
+  `--force` overwrites on purpose, with backups unless `--no-backup`.
+- Old one-shot options still work and print a note: `--no-branch` and
+  `--allow-dirty` are defaults, `--dry-run` means `--plan`,
+  `--apply-retirements` accepts the retire-files decision, `--apply-candidates`
+  points to `--take-kit` and `--resolved`. `harness-kit-one-shot-upgrade.sh`
+  is an identical copy of the entry under its old name.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.10.24.1/agent-bootstrap/harness-kit-one-shot.sh | bash
-```
+## How upgrades treat your files
 
-Then `scripts/harness-kit.sh` reinstalls the installed version,
-`scripts/harness-kit.sh --to latest` updates and `--plan` previews. The entry
-fetches the release into `.harness-kit/v<version>/` and runs its
-`harness-kit-run.sh`; it creates no branch without `--branch`, never
-overwrites local edits, and prints the exact next command for each open item
-(`--resolved`, `--take-kit`, `--keep-local`, `--accept`, `--decline`).
+A local-only baseline (`.tools/agent-state/harness-baseline/`) keeps the last
+kit output of every generated file, and each run puts every file in one class:
 
-Generator lifecycle commands:
+| Class | When | Action |
+|---|---|---|
+| create | the file is missing | write it |
+| unchanged | the file equals the new kit output | none |
+| update | you have not edited the file | write the new kit output |
+| kept | the kit did not change the file, you did | keep yours |
+| merge | both changed and the merge is clean | write the merged file |
+| conflict | both changed and the merge fails, or the file is JSON | keep yours; the kit's goes to `<path>.generated.<STAMP>` |
+| unsafe | a link or a path outside the project | skip and report |
+| pinned | pinned with `--keep-local` (or the generator's `--keep`) | leave it alone; a pin edited since is reported as stale |
 
-```bash
-agent-init --status --json
-agent-init --first-10
-agent-init --diff
-agent-init --upgrade-plan
-agent-init --apply-candidates
-agent-init --retirement-plan
-```
+Filled briefs, tech-stack evidence, `seats.json` and USER sections survive
+every run, including `--reset`. Projects generated before 2026.10.13.1 have no
+baseline, so their first update reports every changed kit file as a conflict;
+`scripts/harness-kit.sh --take-kit all` takes the kit's files and backs yours
+up.
 
-`--diff` regenerates harness files into a staging directory seeded with only
-the kit outputs and their configuration (detection reads the real target in
-place), normalizes volatile timestamps and temp paths, and prints
-generated-file diffs without mutating the real target.
-`--apply-candidates` promotes the latest reviewed `*.generated.*` candidate for
-each generated path and removes older candidates for that same path; files with
-local edits are kept unless named with `--only PATH`. `--keep PATH` leaves a
-file untouched.
+`--diff`, `--upgrade-plan` and `--status` generate into a temporary staging
+folder holding only the kit's outputs, the configuration it reads back (lock,
+brief, tech-stack contract, `seats.json`, candidates) and, for the plan, the
+baseline. Detection reads the project in place, so large checkouts take
+seconds. Personal and secret files never reach staging: `*.local.*`, signing
+certificates, provisioning profiles, `*.xcconfig`, Firebase config files,
+`.netrc`, `.npmrc` and `.pypirc`.
 
-Retired generated files (the `v2026.08.10.1` `.github/workflows/agent-guard.yml`
-and its template mirror) are never removed by generation, `--force`, `--diff`,
+## Retired harness files
+
+Older releases generated a remote CI workflow,
+`.github/workflows/agent-guard.yml`, and its template mirror (`v2026.08.10.1`).
+The closed inventory matches each only by its exact 605-byte SHA-256; there is
+no path or digest override. Generation, `--force`, `--diff`,
 `--upgrade-plan`, `--status`, `--apply-candidates`, `--cleanup-backups`,
-`agent-update --apply` or a plain `scripts/harness-kit.sh` run; those append a
-read-only retirement plan. The `retire-files` decision of
-`scripts/harness-kit.sh` or `agent-init --apply-retirements` removes only byte-exact
-local-only copies (add `--retirement-scope all-matching` for tracked or non-Git
-copies) after a verified adjacent `<path>.bak.retirement.<run-id>` backup.
-Edited files, links, special files and stale `*.generated.*` candidates are
-preserved for manual review, and exit 3 says so. `--status --json` stays v1;
-`--status --json --status-version 2` adds the retirement report. Restore with
-the recipe in `docs/agent-configs/RECOVERY.md`.
+`agent-update --apply` and a plain `scripts/harness-kit.sh` run only show a
+read-only plan. Removal is explicit: accept the `retire-files` decision, or run
+`agent-init --apply-retirements`.
 
-## Optional Symlink
+- Each removal rechecks the file, writes a verified backup
+  `<path>.bak.retirement.<run-id>` (mode and mtime kept), then removes only the
+  checked file. `--apply-retirements --dry-run` reports the plan only.
+- `--retirement-scope local-only` (default) covers untracked, Git-ignored
+  copies; `all-matching` adds tracked and non-Git copies.
+- Edited bytes, links (leaf or parent), special and multi-link files and every
+  `*.generated.*` candidate of a retired path are preserved and reported.
+- Exits: 0 done, 1 inspection/backup/delete error (completed backups kept), 2
+  invalid arguments before any write (including `--force`, `--skip-existing`,
+  `--no-backup` or another action alongside), 3 a file was preserved for
+  review, 130/143 interrupted.
+- `--status --json` stays `agent-bootstrap-status/v1`; `--status-version 2`
+  adds the retirement report. Restore with the recipe in the generated
+  `docs/agent-configs/RECOVERY.md`; it never overwrites a file.
 
-If you want a target project to always execute the canonical bootstrap script
-instead of copying it:
+Newer leftovers (rtk, the old host wrappers) are removed by `auto` migrations
+during `update`: only byte-exact kit copies, each backed up first.
 
-```bash
-mkdir -p scripts
-ln -sf "$AGENT_BOOTSTRAP_HOME/bootstrap-multi-agent-project.sh" scripts/bootstrap-multi-agent-project.sh
-```
+## What the kit generates
 
-This is optional. Normal generated projects are self-contained after
-`agent-init` runs.
+Both presets (`infra` is the generator default; the one-shot entry installs
+`full` unless told otherwise):
 
-## What Bootstrap Generates
+- `AGENTS.md`, and `CLAUDE.md` that imports it.
+- `docs/agent-configs/project-agent-context.md`, `agent-bootstrap.lock.json`,
+  `context-policy.json` and `RECOVERY.md`.
+- `docs/agent-configs/bootstrap-multi-agent-project/`: the templates and
+  `schemas/*.schema.json`.
+- `.claude/settings.json` (hooks) and `.claude/README.md`.
+- `.agents/skills/agentmemory-mcp/`.
+- `scripts/`: `agent-guard.sh`, `agent-tier.py`, `agent-hook.sh`,
+  `agent-tech-stack-lib.sh`, `detect-agent-tech-stack.sh`,
+  `verify-ai-deps.sh`, `agent-local-only-check.sh`, `install-git-hooks.sh`,
+  `githooks/pre-push`, `harness-kit.sh`.
+- The local-only ignore block, in `.git/info/exclude` by default.
 
-Core infra, installed by default:
+`full` adds:
 
-- `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.windsurfrules`, Cursor pointer rules.
-- `docs/agent-configs/project-agent-context.md`.
-- `docs/agent-configs/agent-bootstrap.lock.json`.
-- `docs/agent-configs/seats.json`, initialized once; existing legacy
-  `model-profiles.json` is retained as migration input when seats are missing.
-- `docs/agent-configs/context-policy.json`.
-- `docs/agent-configs/bootstrap-multi-agent-project/schemas/*.schema.json`.
-- `docs/agent-configs/bootstrap-multi-agent-project/provenance/rtk-v0.37.2.sha256`.
-- `scripts/verify-ai-deps.sh`, which performs manual contract validation for the
-  bootstrap lock, active seats configuration, context policy, schema catalog metadata,
-  Agent Guard Lite, and rtk provenance manifest.
-- `.claude/settings.json` and `.claude/README.md`.
-- `scripts/detect-agent-tech-stack.sh`.
-- `scripts/agent-tech-stack-lib.sh`.
-- `scripts/agent-hook.sh`.
-- `scripts/agent-guard.sh`.
-- `scripts/agent-seats.sh`.
-- `scripts/agent-local-only-check.sh`, which blocks tracked harness files during
-  pre-push.
-- `scripts/install-rtk.sh` and `scripts/rtk`.
-- local-only ignore block for generated harness files and agent/runtime
-  state, in `.git/info/exclude` by default (`--ignore-target gitignore` for
-  `.gitignore`).
+- `docs/agent-configs/`: `seats.json`, `agent-mode-contracts.md`,
+  `agent-handoff-schema.md`, `agent-handoff-reference.md`, `tier-medium.md`,
+  `task-journal.md`, `karpathy-llm-coding-agent-config.md`,
+  `llm-council-agent-workflow.md`, `first-10-minutes.md`,
+  `project-onboarding.md` and the empty `project-brief.md`.
+- `.codex/config.toml`, `.codex/codex-mode.sh` (seat launcher and `doctor`),
+  `.codex/README.md`.
+- `.claude/commands/`: `/planning`, `/coding`, `/reviewing` (and their
+  `-full-flow` aliases), `/council`, `/karpathy`, `/doctor`,
+  `/project-onboarding`, `/codex:setup`, `/codex:rescue`, `/codex:status`.
+- `.agents/skills/doubt-driven/`.
+- `docs/superpowers/specs/README.md`, `project-tech-stack.{md,json}` and
+  `docs/superpowers/plans/README.md`.
+- `scripts/agent-seats.sh` and `scripts/agent-onboarding.sh`.
 
-With `--workflow full`, it also installs:
+`--add-skill mobile-optimization` (Android Kotlin or iOS Swift projects) adds
+the skill under `.agents/skills/` and its pointers: a Claude `/optimize-code`
+command, a Cursor rule (`.cursor/rules/`) and a Windsurf rule
+(`.windsurf/rules/`).
 
-- `docs/agent-configs/agent-mode-contracts.md`.
-- `docs/agent-configs/agent-handoff-schema.md`.
-- `docs/agent-configs/karpathy-llm-coding-agent-config.md`.
-- `docs/agent-configs/llm-council-agent-workflow.md`.
-- `docs/agent-configs/tier-medium.md`.
-- `.codex/config.toml`, `.codex/codex-mode.sh`, `.codex/README.md`.
-- `.claude/commands/*.md` for planning/coding/reviewing modes, plus
-  `/codex:setup`, `/codex:rescue`, and `/codex:status` bridge commands.
-- `.agents/skills/doubt-driven/SKILL.md` (generic adversarial-review skill).
-- `docs/agent-configs/first-10-minutes.md` (operator path from generation to
-  onboarding readiness).
-- `docs/agent-configs/project-onboarding.md` + `.claude/commands/project-onboarding.md`
-  (onboarding procedure and command).
-- `docs/agent-configs/project-brief.md` (empty deep-context brief, filled by
-  onboarding).
-- `docs/superpowers/specs/project-tech-stack.md` and
-  `docs/superpowers/specs/project-tech-stack.json` (empty project-specific
-  tech-stack spec plus lightweight machine contract, filled by onboarding).
-- `docs/superpowers/specs/README.md` + `docs/superpowers/plans/README.md`
-  (specs/plans skeleton).
-- `scripts/agent-onboarding.sh` (read-only readiness helper with
-  `status`, `next`, and strict `check`).
-
-## Runtime Detection
-
-Bootstrap detects the target stack during generation and installs a runtime
-detector:
+## Stack detection and the lock
 
 ```bash
 scripts/detect-agent-tech-stack.sh --summary
 scripts/detect-agent-tech-stack.sh --markdown
 ```
 
-Agents should run the detector at the start of substantive work. The generated
-hook compares detector output against `docs/agent-configs/agent-bootstrap.lock.json`
-so stack/module drift becomes explicit.
+Agents run the detector at the start of substantive work.
+`scripts/agent-tech-stack-lib.sh` owns detection, and
+`docs/agent-configs/agent-bootstrap.lock.json` records its output; the hook
+compares the two so stack or module drift is visible. Refresh the lock after
+an intended change with `agent-refresh`.
 
-## Project Onboarding Output
+## Onboarding outputs
 
-`--workflow full` intentionally generates empty, source-backed context files
-instead of guessing project-specific rules. After bootstrap, an agent should run
-project onboarding to scan the target project and fill:
+`full` writes empty, source-backed context files instead of guessing. The
+`/project-onboarding` command scans the project and fills:
 
-- `docs/agent-configs/project-brief.md` for durable architecture/domain context,
-- `docs/agent-configs/project-agent-context.md` for project-specific tech-stack
-  overrides, protected paths, generated files, commands, and release constraints,
-- `docs/superpowers/specs/project-tech-stack.md` and
-  `docs/superpowers/specs/project-tech-stack.json` for the verified
-  stack/module map, conventions, source evidence, ownership, and verification
-  matrix,
-- additional `docs/superpowers/specs/<topic>/` files when the scan discovers
-  durable domain, architecture, or workflow decisions.
+- `docs/agent-configs/project-brief.md`: architecture and domain context;
+- `docs/agent-configs/project-agent-context.md`: protected paths, generated
+  files, commands, release constraints;
+- `docs/superpowers/specs/project-tech-stack.md` and `.json`: the verified
+  stack and module map, conventions, evidence and verification commands;
+- more `docs/superpowers/specs/<topic>/` files for durable decisions it finds.
 
-The readiness contract is computed, not duplicated. `scripts/agent-onboarding.sh
-status` and `next` read the brief plus `project-tech-stack.json` and report what
-is missing; `scripts/agent-onboarding.sh check` exits non-zero until the brief
-has no `UNFILLED` marker, the tech-stack Markdown spec is filled, evidence paths
-point to existing project files, and verification entries have non-empty
-command/purpose/source fields. This gives agents a gate without adding a stale
-status file.
+Readiness is computed each time, not stored: `scripts/agent-onboarding.sh
+status` and `next` report what is missing; `check` exits non-zero until the
+brief has no `UNFILLED` marker, the Markdown spec is filled, evidence paths
+exist, and every verification entry has a command, purpose and source. The
+kit's onboarding fixtures (`scripts/test-onboarding-fixtures.sh`) show filled
+examples.
 
-## Token-Economy Contract
+## Verification details
 
-Generated full-workflow projects use progressive disclosure:
+- `pre-final --run-verify` takes its commands from `verification[]` in
+  `docs/superpowers/specs/project-tech-stack.json` (each entry may set
+  `scope: fast|full`); detector commands are used only when that list is
+  empty. Placeholders (`xcodebuild ... <scheme>`) never run, and discovery
+  commands such as `--version` or `--help` are not evidence.
+- The report (`agent-guard-verification/v2`) goes to
+  `.agents/state/last-verify-report.json`; an `agent-guard-event/v2` event
+  with separate `gate_status` and `verification.status` goes to
+  `.agents/state/session-events.jsonl`.
+- `unverified` is never a pass: strict mode (default) exits 4, advisory mode
+  warns.
+- `scripts/agent-guard.sh baseline` runs the fast commands on the current
+  commit before the first `@gate` round. It caches by commit,
+  `verification[]`, toolchain fingerprint and scope, so a repeat runs nothing;
+  a red baseline is reported before review starts.
+- The Claude Code Stop hook verifies only when the session changed files; the
+  Codex `@build` seat runs pre-final once when its session ends. A later
+  `@gate` round reads its previous verdict and the spec sections changed
+  since, not a git diff.
 
-- Startup context is limited to `AGENTS.md`,
-  `docs/agent-configs/project-agent-context.md`, a filled
-  `docs/agent-configs/project-brief.md` when available, and detector output.
-- Workflow docs such as mode contracts, handoff schema, Karpathy workflow, and
-  council workflow are read on demand for the task or mode that needs them.
-- Skills under `.agents/skills/` are loaded only when their descriptions match
-  the current task.
+## Tier measurement
 
-`scripts/verify-ai-deps.sh` measures estimated core startup tokens and
-on-demand full-workflow tokens (core plus mode contracts, handoff schema, the
-handoff reference's `State values` section and its largest other section, and
-the Karpathy and council workflows); `.codex/codex-mode.sh doctor` reports its
-numbers. The core startup gate is 4000 estimated tokens with an amber band
-above 3800; the full-workflow on-demand gate is 6200 with an amber band above
-5900. Kit text above a gate fails the verifier; project content (the brief,
-the project agent context, USER regions and detector-filled managed blocks)
-above a gate only warns, naming the
-largest project files. Estimates use a portable heuristic: max(bytes/4,
-words*1.3).
+- On a feature branch, the change is everything since it left the default
+  branch. A branch cut from another branch (`develop`, a parent PR) needs
+  `--base <branch>` on any `tier set`; a stacked branch then counts only its
+  own work once the parent is merged. Pre-final reminds you only when the
+  task started on commits the default branch does not have.
+- A task started on the default branch moves to a new branch made from its
+  work when you run `tier set` there. On the default branch the change is
+  everything since `tier set`, minus commits pulled from teammates and
+  commits already pushed, so each push is checked on its own.
+- The pre-push hook (`pre-final --committed`) counts only committed work on
+  the checked-out branch. A linked worktree has no kit files, so it has no
+  push check.
+- When git cannot tell the task's work apart (a rebase of a commit made
+  before the task), pre-final names the cause and does not fail.
+- Thresholds live in `docs/agent-configs/context-policy.json`. Edit them
+  there; when a kit update also changes that file, the update stops with a
+  conflict (`--resolved` keeps yours, `--take-kit` takes the kit's). Binary
+  types that should count like images go in `binary_asset_extensions` in
+  `project-tech-stack.json`, for example `["psd", "sketch"]`.
+- A lower tier than suggested needs a reason, which covers only that
+  suggestion. Lowering while a review is negative also needs one, and the PR
+  line says "lowered despite a negative @gate review". Once coding has
+  started, a raise needs the new tier's reviews. With no tier, pre-final only
+  warns.
 
-## Closed-loop pre-final
+`tier stats` (`--since YYYY-MM-DD`, `--json`) shows how tiers worked out on
+this machine:
 
-The detector emits verification candidates as structured JSON. The standard local close-out path is:
-
-```bash
-scripts/agent-guard.sh preflight
-scripts/agent-guard.sh pre-final --run-verify
+```text
+Tasks: 18 (15 closed, 3 open) since 2026-10-23
+Tier: small 9 · medium 6 · large 3 · handoff 4 · raised after coding 1
+Suggestion: kept 14 · lowered with a reason 2 · raised 2
+Warnings: pre-final 5 on 4 tasks · push 3 on 3 tasks
+Time to close (median): small 36 min · medium 3.1 h · large 1.8 d
 ```
 
-`pre-final --run-verify` runs concrete fast detector commands and skips placeholders such as `xcodebuild ... <scheme>` with a warning. Review the detected commands before using `--verify-scope full` to include build/full commands. Results are written to `.agents/state/last-verify-report.json` and a compact event is appended to `.agents/state/session-events.jsonl`.
+## Context budgets
 
-The kit does not install or enforce remote checks. Every harness gate is local and opt-in: run `scripts/agent-guard.sh` directly or install the provided pre-push hook with `scripts/install-git-hooks.sh`.
+`scripts/verify-ai-deps.sh` estimates two budgets (`--context-budget` runs
+only this check; `--json` adds `context_budget`; `.codex/codex-mode.sh doctor`
+prints the numbers):
+
+- core startup: gate `4000`, amber above `3800`;
+- full on-demand workflow: gate `6200`, amber above `5900`.
+
+The core estimate covers `AGENTS.md`, the project agent context and the
+project brief; it excludes tool-specific wrappers such as `CLAUDE.md`. The
+on-demand estimate adds what a working seat reads: mode contracts, handoff
+schema, the handoff reference's `State values` section and its largest other
+section, and the Karpathy and council workflows. Each estimate is split into
+kit text and project content (the brief, the project agent context,
+`<!-- BEGIN USER -->` regions and the detector-filled managed blocks). Kit
+text above a gate fails; project content above a gate only warns and names the
+largest project files. Amber means it still passes but should be measured
+again before adding guidance. Estimates use max(bytes/4, words × 1.3).
 
 ## Agent Guard Lite
 
-The harness includes a file-based guardrail instead of a daemon, database, or
-MCP broker:
+A file-based guardrail, not a daemon or broker:
 
-- `docs/agent-configs/context-policy.json` tracks required context,
-  recommended context, protected path patterns, and the change protocol.
-- `scripts/agent-guard.sh preflight` validates required context and writes
-  `.agents/state/context-pack.json`.
-- `scripts/agent-guard.sh check` validates the same contracts without writing
-  local state; verifier and doctor use this read-only path.
+- `docs/agent-configs/context-policy.json` lists required and recommended
+  context, protected path patterns and the change protocol.
+- `scripts/agent-guard.sh preflight` checks required context and writes
+  `.agents/state/context-pack.json`; `check` does the same without writing
+  (the verifier and doctor use it).
 - `scripts/agent-guard.sh pre-edit <path>` classifies protected context,
-  harness, CI, release, and generated-runtime paths before edits. Protected
-  paths exit non-zero unless the agent reruns with `--ack <reason>`; acknowledged
-  protected edits are logged under `.agents/state/guard-ack.log`.
-- `scripts/agent-guard.sh pre-final` checks that the context pack still matches
-  the current policy and required-context file hashes before an agent claims
-  completion.
-- Generated Claude `Edit`, `Write`, and `MultiEdit` hooks route file paths
-  through the same strict `pre-edit` guard.
+  harness, CI, release and generated paths; a protected path fails unless
+  rerun with `--ack <reason>`, logged in `.agents/state/guard-ack.log`. Claude
+  Code's `Edit`, `Write` and `MultiEdit` hooks route through it.
+- `scripts/agent-guard.sh pre-final` checks the context pack still matches the
+  policy and required files before completion.
 
-The layer does not prevent all agent drift. It creates a small, trackable
-context rail so drift is easier to detect, review, and roll back. It is not a
-security boundary for arbitrary Bash commands.
+It makes drift easy to see and undo; it does not prevent all of it, and it is
+not a security boundary for arbitrary Bash commands.
 
-## Safety
+## Workspace–Repository Guard
 
-Default behavior is non-destructive:
+Generated instructions, launchers and execution preflight require the original
+host workspace metadata, captured at session entry before changing cwd. Host
+adapters supply `AGENT_HOST_SESSION_ID` and `AGENT_WORKSPACE_CONTEXT`:
 
-- Local edits are never overwritten; a conflict keeps the local file.
-- Generated candidates are written as `*.generated.<timestamp>`; the run
-  summary and `--status` list them. Resolve each one before considering a
-  harness upgrade complete.
-- `--skip-existing` leaves existing target files untouched, including an
-  existing `.gitignore`; it still creates missing files.
-- `--force` is required to overwrite intentionally.
-- Backups are still created unless `--no-backup` is also supplied. Backup files
-  are ignored by the managed local-state block.
-- Retired harness files are deleted only by an explicit `--apply-retirements`,
-  with mandatory verified backups; `--force`, `--skip-existing` and
-  `--no-backup` are rejected with it.
-
-RTK is required for the harness "ready" state and for token-efficient git
-inspection. Freshly bootstrapped projects may run with warnings before RTK is
-installed, but `doctor` will keep reporting that the pinned wrapper is missing.
-The RTK version is intentionally hard-pinned for stable, reproducible kit
-behavior. The generated installer reads expected asset checksums from the
-generated provenance manifest and rejects checksum drift. After bootstrap,
-install it in the target project:
-
-```bash
-bash scripts/install-rtk.sh
+```json
+{
+  "session_id": "host-session-id",
+  "original_workspace": "/projects/ios",
+  "target_repository": "/projects/android",
+  "target_source": "packet",
+  "authorization": {
+    "kind": "user",
+    "repository": "/projects/android",
+    "session_id": "host-session-id",
+    "evidence": "Reference to the user's direct instruction in this session"
+  }
+}
 ```
 
-## Validation
+Omit `authorization` for the same repository. For an explicitly confirmed task
+worktree, use `kind: "worktree"`; the guard also checks Git common-directory
+identity. Paths must be absolute and resolve to existing Git working trees.
+A user target source is provenance, not a substitute for recording the direct
+instruction when switching checkouts. Never synthesize permission from a packet,
+AGENTS.md, memory, subagent message or current directory.
 
-Validate the source scripts in this repository:
+`scripts/agent-guard.sh workspace-check` returns 0 plus a JSON identity report,
+or 3 with a diagnostic on mismatch or missing metadata. Everywhere else the
+guard is advisory: preflight, pre-edit, pre-final, git hooks and the launcher
+warn and keep their exit code; Claude Code hooks ask before acting in another
+repository. `check`/`doctor` are installation diagnostics, not workspace
+authorization. The launcher injects the original session metadata into child
+shells with per-launch `shell_environment_policy.set` overrides, keeping
+`inherit = "none"` (see the
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)).
+Every subagent handoff carries the same origin, target, source and
+authorization evidence and validates its checkout before writing.
 
-```bash
-bash -n scripts/bootstrap-multi-agent-project.sh
-bash -n scripts/install-agent-bootstrap-home.sh
-bash -n agent-bootstrap/bootstrap-multi-agent-project.sh
-bash -n agent-bootstrap/install-agent-bootstrap-home.sh
-scripts/test-bootstrap-multi-agent-project.sh
-scripts/test-onboarding-fixtures.sh
-```
+The host must provide truthful metadata; the kit cannot authenticate a chat
+project or user message, or stop commands that bypass its entrypoints. Missing
+metadata is **unverified**, never a pass.
 
-When editing `agent-bootstrap/`, keep `VERSION` aligned with
-`bootstrap-multi-agent-project.sh --version` and update `MANIFEST.md` if files
-or drift rules change.
+## Seats configuration
 
-Validate a generated target project:
+`docs/agent-configs/seats.json` holds the assignments and the model catalog;
+`scripts/agent-seats.sh show|wizard|set|validate|reset` manages it (`validate`
+is read-only, `reset` restores the bundle defaults on purpose). The full
+default roster is in
+[`scripts/fixtures/agent-seats-default.json`](../../../scripts/fixtures/agent-seats-default.json).
+
+| Model | Allowed efforts | Default effort |
+|---|---|---|
+| `gpt-6-astra` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `ultra` |
+| `gpt-5.6-luna` | `low`, `medium`, `high`, `xhigh`, `max` | `xhigh` |
+| `gpt-5.6-terra` | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` | `xhigh` |
+
+The launcher (`.codex/codex-mode.sh`) accepts a seat or the `planning`,
+`coding` and `reviewing` aliases and launches only occupants with host
+`codex`. `CODEX_MODEL_OVERRIDE`, the mode overrides, `CODEX_USE_FALLBACK` and
+`CODEX_REASONING_EFFORT` still work; an explicit effort must be one the model
+supports. `CODEX_MODEL_PROFILE` is a warning no-op; configure seats instead.
+
+Upgrades from older releases:
+
+- `seats.json` is created only when missing; an existing one always wins and
+  stays byte-identical, and it never becomes a candidate.
+- A customized legacy `model-profiles.json` moves its default profile's
+  models, efforts and fallbacks to `@gate`, `@build` and `@verify`; unknown ids
+  are kept with a note. The legacy file stays untouched for recovery. A legacy
+  profile equal to the old defaults adopts the new occupants with a note.
+- Invalid active configuration is reported for repair; the launcher refuses to
+  start and nothing resets it to defaults.
+- Release 2026.09.10.1 changed the catalog only for fresh installs and
+  `reset`. To adopt it in an existing project, edit only the three
+  `catalog.models.<model>.efforts` arrays (pick a supported value first for
+  any setting that uses `none`), then run `scripts/agent-seats.sh validate`.
+- After upgrading, check `scripts/agent-seats.sh show`, `validate` and
+  `.codex/codex-mode.sh status`.
+
+## Contracts and schemas
+
+The verifier performs manual contract validation for the bootstrap lock, the
+active seats configuration, the context policy, the project tech-stack
+contract and the schema catalog metadata. The JSON schemas copied into
+`docs/agent-configs/bootstrap-multi-agent-project/schemas/` are references for
+people and external tools; the kit runs no generic schema engine.
+
+## Validate a generated project
 
 ```bash
 scripts/detect-agent-tech-stack.sh --summary
 scripts/agent-guard.sh preflight
 scripts/agent-onboarding.sh status
 scripts/agent-onboarding.sh check
-scripts/verify-ai-deps.sh
-scripts/verify-ai-deps.sh --json
+scripts/verify-ai-deps.sh            # add --json for machine output
 scripts/agent-hook.sh doctor
+.codex/codex-mode.sh doctor          # full preset
 ```
 
-For `--workflow full` projects:
+## Out of scope
 
-```bash
-.codex/codex-mode.sh doctor
-```
-
-## Explicitly Not In Scope
-
-For the solo workflow, these are intentionally skipped:
-
-- build step and base64 self-extract payload,
-- `dist/` artifact management,
-- manifest YAML or per-template manifest generation,
-- lock v2 and per-template versioning,
-- load-bearing template extraction beyond the copyable shell bundle.
-
-Those are valid for a public reusable framework. They are unnecessary overhead
-for this solo workflow.
+The kit deliberately skips a build step or self-extracting payload, `dist/`
+artifacts, manifest YAML or per-template manifests, lock v2 and per-template
+versioning, and template extraction beyond the copyable shell bundle. They
+suit a public reusable framework, not this one-maintainer workflow.

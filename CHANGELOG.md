@@ -1,5 +1,66 @@
 # Changelog
 
+## 2026.11.04.1 — No rtk, lean agent docs and the agentmemory flow
+
+- rtk is gone from the kit; agents run `git` directly, and one line in
+  AGENTS.md says so. A 30-day log study and a 32-run trial with rtk on and off
+  found:
+  - about 311K tokens saved in a month across all projects, once output is
+    capped at Claude Code's own 30,000-character limit (rtk reported 3.35M);
+  - no accuracy gain, and 6% more cost with rtk in the trial;
+  - output kept in a file was wrong: `rtk git diff > x.patch` is not an
+    applicable patch, and `rtk git show REV:<binary>` corrupts the bytes. The
+    Claude hook rewrote `git diff > file` to rtk without saying so.
+- The kit no longer writes `scripts/rtk`, `scripts/install-rtk.sh` or the rtk
+  checksum file, and the Claude hook passes commands through unchanged. The
+  verifier, the Codex doctor, onboarding and `--first-10` drop their rtk
+  checks and steps. The lock no longer records `rtk`; older locks still
+  validate.
+- Migration `2026.11.04.1-remove-rtk` (auto) removes, on update, the rtk files an older
+  kit wrote and the pinned binary in `.tools/rtk/`, when they are exactly what
+  a kit wrote (or the project's harness baseline holds), untracked, and not
+  called by a tracked file other than Markdown or `.gitignore`. Backups go to
+  the run journal. Edited, tracked or called copies stay and are named in the
+  report; while `scripts/rtk` stays, so does the binary it runs.
+- The home install moves its unedited rtk copies aside as `<file>.bak.<STAMP>`.
+- Documentation is split by reader, each paragraph in one place: README.md
+  is the user guide (about a third of its old length), the new
+  CONTRIBUTING.md holds tests, releases, migrations and campaign rules, and
+  `docs/agent-configs/bootstrap-multi-agent-project/README.md` is the
+  reference (layout, commands, upgrade rules, budgets, schemas). The bundle
+  README lists its contents and links to the three.
+- `CLAUDE.md` is the only tool wrapper left. It starts with `@AGENTS.md`, so
+  Claude Code loads the shared rules itself, and keeps only Claude's seats,
+  commands and close-out note. `GEMINI.md`, `.windsurfrules` and
+  `.cursor/rules/agent-conventions.mdc` are no longer written: Cursor,
+  Windsurf and Antigravity read `AGENTS.md`, and Gemini CLI can with its
+  `context.fileName` setting.
+- Migration `2026.11.04.1-remove-legacy-entrypoints` (auto) removes those three files
+  on update when they are exactly what a kit release wrote (or what the
+  harness baseline holds) and untracked, with backups. Edited, tracked,
+  linked, outside or behind-a-link copies stay and are named in the report.
+  The `.cursor/` folders it empties go too; a mobile-optimization pointer
+  keeps them.
+- The agent docs a fresh `full` project gets drop from 10,353 to 7,899 words
+  (-24%): a shorter agentmemory skill, Codex and Claude READMEs, RECOVERY
+  (each case: what you see, then what to run), mode contracts and onboarding.
+  In an `infra` project, AGENTS.md now says itself to read the project context
+  first and to run `no-scan-paths` before broad search (only the removed
+  wrappers said so). `scripts/rule-inventory.tsv` lists 222 mandatory rules
+  with their owner file; `scripts/test-rule-inventory.sh` (seconds) checks each
+  one, the wrapper rules and a 7,900-word ceiling. It replaces about 130
+  wording checks in the 50-minute drift test.
+- Agentmemory use covers all four parts: the `agentmemory-mcp` skill (1,340 →
+  507 words) gives each seat its moments for memories, lessons, actions and
+  the profile, always with `project`, and `agentId` only on saves. The mode
+  contracts add one line: `@verify` and `@audit` save lessons; the closing
+  seat files follow-ups as actions. Supported hosts: Claude Code and Codex.
+- Each release names the agentmemory version it was tested with (now
+  `0.9.31`). `scripts/verify-ai-deps.sh --agentmemory` reads the installed
+  version from `package.json` without running agentmemory and prints the
+  upgrade steps when it is older (a prerelease counts as older); the update
+  summary and the Codex doctor show that line. Exit codes do not change.
+
 ## 2026.10.24.1 — Quieter tier warnings and tier stats
 
 - Quieter tier warnings. A 20-task trial of 2026.10.20.1 found three kinds of

@@ -9,7 +9,6 @@
     "channel",
     "project_name",
     "generated_at",
-    "rtk",
     "templates",
     "detector_summary_sha256",
     "detector_summary"
@@ -39,15 +38,6 @@
     },
     "project_name": { "type": "string" },
     "generated_at": { "type": "string" },
-    "rtk": {
-      "type": "object",
-      "required": ["required", "version", "install_command"],
-      "properties": {
-        "required": { "type": "boolean" },
-        "version": { "type": "string" },
-        "install_command": { "type": "string" }
-      }
-    },
     "templates": {
       "type": "object",
       "required": ["base", "overlays", "workflow_preset"],

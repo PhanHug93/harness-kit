@@ -482,8 +482,6 @@ default_protected_paths() {
   printf '%s\t%s\n' \
     "AGENTS.md" "agent entrypoint" \
     "CLAUDE.md" "claude entrypoint" \
-    "GEMINI.md" "gemini entrypoint" \
-    ".windsurfrules" "windsurf entrypoint" \
     ".github/**" "ci-release" \
     ".claude/settings.json" "claude hook config" \
     ".claude/commands/**" "claude commands" \
@@ -498,9 +496,7 @@ default_protected_paths() {
     "docs/superpowers/specs/**" "durable specs" \
     "scripts/agent-*.sh" "agent runtime" \
     "scripts/agent-tier.py" "agent runtime" \
-    "scripts/verify-ai-deps.sh" "verifier" \
-    "scripts/install-rtk.sh" "tool install" \
-    "scripts/rtk" "git wrapper"
+    "scripts/verify-ai-deps.sh" "verifier"
 }
 
 policy_schema_value() {
@@ -705,10 +701,7 @@ changed_protected_paths() {
 is_bootstrap_generated_base() {
   local relpath="$1"
   case "$relpath" in
-    AGENTS.md|CLAUDE.md|GEMINI.md|.windsurfrules|.gitignore)
-      return 0
-      ;;
-    .cursor/rules/agent-conventions.mdc)
+    AGENTS.md|CLAUDE.md|.gitignore)
       return 0
       ;;
     .claude/README.md|.claude/settings.json|.claude/commands/*)
@@ -726,7 +719,7 @@ is_bootstrap_generated_base() {
     docs/superpowers/specs/*|docs/superpowers/plans/*)
       return 0
       ;;
-    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/install-rtk.sh|scripts/rtk|scripts/verify-ai-deps.sh)
+    scripts/agent-*.sh|scripts/agent-tier.py|scripts/detect-agent-tech-stack.sh|scripts/verify-ai-deps.sh)
       return 0
       ;;
     *)
