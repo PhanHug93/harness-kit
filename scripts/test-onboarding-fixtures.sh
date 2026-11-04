@@ -30,7 +30,7 @@ need_not_contains() {
   local haystack="$1"
   local needle="$2"
   local label="$3"
-  if printf '%s' "$haystack" | grep -Fq -- "$needle"; then
+  if grep -Fq -- "$needle" <<<"$haystack"; then
     fail "$label unexpectedly contained '$needle'"
   fi
 }
@@ -615,8 +615,10 @@ evaluate_fixture() {
     need_not_contains "$summary" "$unexpected" "$name detector excluded signal"
   fi
   if command -v python3 >/dev/null 2>&1; then
-    (cd "$dir" && scripts/verify-ai-deps.sh --json | python3 -m json.tool >/dev/null) ||
-      fail "$name verifier JSON is invalid or failing"
+    if ! (cd "$dir" && scripts/verify-ai-deps.sh --json >"$TMP_ROOT/$name.verify.json" 2>"$TMP_ROOT/$name.verify.err"); then
+      fail "$name verifier failing: $(python3 -I -c 'import json, sys; doc = json.load(open(sys.argv[1])); print("; ".join(c.get("label", "") for c in doc.get("checks", []) if c.get("status") == "fail"))' "$TMP_ROOT/$name.verify.json" 2>/dev/null || tail -3 "$TMP_ROOT/$name.verify.err")"
+    fi
+    python3 -m json.tool "$TMP_ROOT/$name.verify.json" >/dev/null || fail "$name verifier JSON is invalid"
   fi
   write_filled_project_tech_stack_contract "$dir" "$name"
   write_filled_project_brief "$dir" "$name"

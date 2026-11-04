@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026.11.04.2 — Faster tests and CI, a lighter hook
+
+- **Faster tests and CI.**
+  - One runner, `scripts/test.sh`, runs every suite in parallel: the fast tier
+    went from 23 to about 8 minutes, the full tier from about 73 to 13
+    minutes on an idle Mac.
+  - The drift test has six groups that can run side by side (`--group`). It no
+    longer writes into the source tree and no longer reruns other suites at
+    its end.
+  - CI runs a tree gate, a Linux lint job, four test groups per OS in parallel
+    and a record job. A push to `main` or a tag whose tree already passed
+    skips the heavy jobs.
+- **Lighter Claude hook.** A Bash call now starts 2 `python3` and 2 `git`
+  processes (was 75 and 16, about 4 s), and an Edit call 3 and 2 (was 89
+  and 24, about 3 s). The changes:
+  - one python run loads the policy and refreshes the context pack, only when
+    its content changed;
+  - `json_escape` is pure bash;
+  - Bash calls make one workspace check;
+  - session start refreshes the pack.
+- **Kit python in the guard and the hook runs with `-I -S`**, so a `json.py`
+  in a project is never imported by kit code.
+- **`guard-local-state`** asks git once instead of about 52 times; it runs at
+  every Codex launch.
+- **One source for runtime scripts.** The writers copy
+  `agent-bootstrap/agent-hook.sh`, `verify-ai-deps.sh`,
+  `detect-agent-tech-stack.sh` and `agent-tech-stack-lib.sh`. About 2,900
+  heredoc lines and `scripts/sync-runtime-snapshots.sh` are gone; generated
+  projects are byte-identical.
+- **Fixed: a false check failure on a busy machine.** Under `pipefail`,
+  `printf … | grep -q` could report a match as a miss (SIGPIPE). The
+  verifier's "no-scan guard paths are incomplete", the Codex doctor, the
+  pre-push local-only check and three migrations could be affected. All such
+  sites now use here-strings; `scripts/test-pipe-safety.sh` keeps it so.
+- **Fixed in tests:** the Ctrl-C checks no longer hang when a suite is started
+  with `&` (SIGINT ignored), and the dormant guard/hook focus regression runs
+  again.
+
 ## 2026.11.04.1 — No rtk, lean agent docs and the agentmemory flow
 
 - rtk is gone from the kit; agents run `git` directly, and one line in

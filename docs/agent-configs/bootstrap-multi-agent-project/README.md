@@ -23,11 +23,11 @@ agent-bootstrap/
 ├── schemas/                       # JSON schemas for the kit's files
 ├── templates/                     # base, overlays, workflows, tool contract
 └── agent-*.sh, agent-tier.py, detect-agent-tech-stack.sh, verify-ai-deps.sh,
-    install-git-hooks.sh, githooks/   # runtime snapshots
+    install-git-hooks.sh, githooks/   # runtime scripts
 ```
 
-The runtime scripts at the bottom are snapshots of what the generator writes
-into a project's `scripts/`; run them from a generated project, not from the
+The runtime scripts at the bottom are what the generator copies into a
+project's `scripts/`; run them from a generated project, not from the
 bundle. The home install (`$HOME/dev/agent-bootstrap` by default) holds the
 same files.
 

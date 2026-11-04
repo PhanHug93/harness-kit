@@ -196,7 +196,6 @@ check() {
     echo "drift: template mirror differs; run scripts/sync-template-catalog.sh" >&2
     status=1
   }
-  bash "$ROOT_DIR/scripts/sync-runtime-snapshots.sh" --check || status=1
   [[ "$status" == 0 ]] && echo "release check: ok ($(sed -n '1p' "$ROOT_DIR/agent-bootstrap/VERSION"))"
   return "$status"
 }
@@ -240,7 +239,6 @@ case "${1:-}" in
     done
     pins bump "$new_version" "$title"
     bash "$ROOT_DIR/scripts/sync-template-catalog.sh"
-    bash "$ROOT_DIR/scripts/sync-runtime-snapshots.sh"
     check
     printf '%s\n' \
       "Next: review the diff, commit on the release branch and open a PR to the" \

@@ -1214,7 +1214,7 @@ gate_check() {
   fi
   if [ "${#tracked[@]}" -gt 0 ]; then
     status_out="$(gitp status --porcelain --untracked-files=no -- "${tracked[@]}" 2>/dev/null || true)"
-    [ -z "$status_out" ] || dirty="$(printf '%s\n' "$status_out" | head -n 5 | cut -c4- | paste -sd, - | sed 's/,/, /g')"
+    [ -z "$status_out" ] || dirty="$(head -n 5 <<<"$status_out" | cut -c4- | paste -sd, - | sed 's/,/, /g')"
   fi
   branch="$(write_branch)"
   if [ -n "$dirty" ]; then
@@ -1550,14 +1550,14 @@ migrate_phase() {
     : >"$RUN_DIR/migrations.tsv"
   fi
   for id in ${ACCEPT[@]+"${ACCEPT[@]}"} ${DECLINE[@]+"${DECLINE[@]}"}; do
-    cut -f1 "$RUN_DIR/migrations.tsv" | grep -Fxq -- "$id" ||
+    grep -Fxq -- "$id" < <(cut -f1 "$RUN_DIR/migrations.tsv") ||
       printf '%s: not needed in this project; nothing to do\n' "$id" >>"$RUN_DIR/notes.txt"
   done
   if [ "$rc" -ne 0 ]; then
     fail_phase migrate "a migration failed (see ${RUN_DIR#"$TARGET"/}/migrate.log)"
   fi
   test_hook migrate
-  if cut -f2 "$RUN_DIR/migrations.tsv" | grep -Fxq pending; then
+  if grep -Fxq pending < <(cut -f2 "$RUN_DIR/migrations.tsv"); then
     phase_set migrate "needs review" "$((SECONDS - PHASE_T0))"
   else
     phase_set migrate ok "$((SECONDS - PHASE_T0))"

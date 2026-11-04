@@ -6,7 +6,7 @@ This folder is the whole Harness Kit as one copyable bundle. The version is in
 Install, reinstall or update a project from its root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.04.1/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.04.2/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Offline, from a copy of this folder (`--source-dir` is the folder that holds
@@ -34,9 +34,9 @@ run `bash install-agent-bootstrap-home.sh --write-zshrc` from this folder.
 - `agent-bootstrap-update.sh` and `install-agent-bootstrap-home.sh`: the home
   install and its Git-backed updater.
 - `agent-*.sh`, `agent-tier.py`, `detect-agent-tech-stack.sh`,
-  `verify-ai-deps.sh`, `install-git-hooks.sh`, `githooks/`: snapshots of the
-  runtime scripts a project receives under `scripts/`. Run them from a
-  generated project.
+  `verify-ai-deps.sh`, `install-git-hooks.sh`, `githooks/`: the runtime
+  scripts a project receives under `scripts/` (the writers copy them). Run
+  them from a generated project.
 - `policies/`, `schemas/`, `templates/`, `model-profiles/`: the context policy
   and retired-file inventory, the JSON schemas, the templates, and legacy
   model defaults read only during migration.

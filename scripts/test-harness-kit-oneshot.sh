@@ -88,7 +88,7 @@ generations="$(grep -c '^generate' "$trace" || true)"
 # on macOS), which must not leak the staging path into the output.
 diff_out="$(TMPDIR="$TMPDIR/" bash "$BOOTSTRAP" --target "$proj" --diff 2>/dev/null)" || fail "diff failed"
 [[ "$diff_out" == *"No generated-file differences."* ]] || fail "fresh target diff must be empty: $diff_out"
-if printf '%s\n' "$diff_out" | grep -q '^--- '; then
+if grep -q '^--- ' <<<"$diff_out"; then
   fail "fresh target diff lists files: $diff_out"
 fi
 

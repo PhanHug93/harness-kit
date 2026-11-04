@@ -365,8 +365,8 @@ budget_status() {  # <estimate> <amber> <gate>
 # Prints the largest project parts as "path N, path N" (at most three).
 largest_project_parts() {
   [[ $# -gt 0 ]] || return 0
-  printf '%s\n' "$@" | sort -t "$(printf '\t')" -k1,1nr | head -3 |
-    awk -F '\t' '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $2, $1 }'
+  printf '%s\n' "$@" | sort -t "$(printf '\t')" -k1,1nr |
+    awk -F '\t' 'NR <= 3 { printf "%s%s %s", (NR > 1 ? ", " : ""), $2, $1 }'
 }
 
 # The total (kit + project) only warns: project content is the user's to shorten.
@@ -1091,14 +1091,14 @@ else
 fi
 
 no_scan_paths="$("$ROOT_DIR/scripts/agent-hook.sh" no-scan-paths 2>/dev/null || true)"
-if printf '%s\n' "$no_scan_paths" | grep -Fq '.claude/worktrees/' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq '.tools/' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq '.gemini/' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq '.windsurf/' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq '.openclaude/' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq 'AGENTS.local.md' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq 'local.properties' &&
-   printf '%s\n' "$no_scan_paths" | grep -Fq '*.jks'; then
+# Here-strings, not `printf | grep -q`: under pipefail, grep exiting on the first
+# match can SIGPIPE printf and turn a hit into a miss on a busy machine.
+no_scan_complete=true
+for no_scan_needle in '.claude/worktrees/' '.tools/' '.gemini/' '.windsurf/' '.openclaude/' \
+  'AGENTS.local.md' 'local.properties' '*.jks'; do
+  grep -Fq -- "$no_scan_needle" <<<"$no_scan_paths" || no_scan_complete=false
+done
+if [[ "$no_scan_complete" == "true" ]]; then
   ok "no-scan guard exposes local/sensitive paths"
 else
   bad "no-scan guard paths are incomplete"

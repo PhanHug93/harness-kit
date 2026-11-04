@@ -107,7 +107,7 @@ PY
 migration_needed() {
   local plan
   plan="$(_legacy_plan)" || return 2
-  printf '%s\n' "$plan" | grep -q '^remove	'
+  grep -q '^remove	' <<<"$plan"
 }
 
 migration_describe() {

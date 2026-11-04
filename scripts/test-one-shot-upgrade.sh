@@ -437,8 +437,17 @@ PY
   run_migration_negative "$archive_case" "$archive_source" "$archive_needle" --legacy-ref v2026.08.10.1
 done
 
-HARNESS_MIGRATION_HISTORICAL_SOURCE="${HARNESS_MIGRATION_HISTORICAL_SOURCE-auto}" \
-  python3 "$ROOT_DIR/scripts/test-agent-seats-migration.py"
+# CI runs the full historical campaign once per OS: from tags on Linux (here),
+# from the tagless fixtures on macOS (scripts/test-historical-fixtures.sh),
+# where ONE_SHOT_HISTORICAL_CAMPAIGN=skip leaves it out here. A separate
+# variable: the retirement and migration tests reject unknown
+# HARNESS_MIGRATION_HISTORICAL_SOURCE values.
+if [[ "${ONE_SHOT_HISTORICAL_CAMPAIGN:-run}" == "skip" ]]; then
+  echo "one-shot-upgrade-test: historical campaign skipped (ONE_SHOT_HISTORICAL_CAMPAIGN=skip)"
+else
+  HARNESS_MIGRATION_HISTORICAL_SOURCE="${HARNESS_MIGRATION_HISTORICAL_SOURCE-auto}" \
+    python3 "$ROOT_DIR/scripts/test-agent-seats-migration.py"
+fi
 
 # HK-07 one-shot retirement boundaries: default/explicit flags and exit propagation.
 python3 "$ROOT_DIR/scripts/test-agent-retirement.py" --tier one-shot

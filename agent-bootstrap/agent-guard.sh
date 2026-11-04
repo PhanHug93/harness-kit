@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # record the start directory. The result is advisory: verified, unattested (no
 # metadata, e.g. a human without AI) or mismatch (exit 3 from workspace-check).
 workspace_check() {
-  python3 - "$PROJECT_ROOT" "${1:-}" <<'PY'
+  python3 -I -S - "$PROJECT_ROOT" "${1:-}" <<'PY'
 import base64
 import binascii
 import json
@@ -48,13 +48,18 @@ def git(path, option):
         raise Unverified('cannot establish Git repository identity for ' + str(path))
     return result.stdout.strip()
 
+# The checks below ask about the same few paths (usually all the project
+# root): two git calls per distinct path, not per question.
+_identities = {}
 def identity(value):
     path = directory(value)
-    root = Path(git(path, '--show-toplevel')).resolve(strict=True)
-    common = Path(git(path, '--git-common-dir'))
-    if not common.is_absolute():
-        common = path / common
-    return root, common.resolve(strict=True)
+    if path not in _identities:
+        root = Path(git(path, '--show-toplevel')).resolve(strict=True)
+        common = Path(git(path, '--git-common-dir'))
+        if not common.is_absolute():
+            common = path / common
+        _identities[path] = (root, common.resolve(strict=True))
+    return _identities[path]
 
 def decode(raw):
     if raw.startswith('base64:'):
@@ -157,7 +162,12 @@ PY
 case "${1:-}" in
   workspace-check) workspace_check; exit $? ;;
   preflight) workspace_check entry >/dev/null || true ;;
-  pre-edit|pre-final|baseline|skill-note|tier) workspace_check quiet >/dev/null || true ;;
+  pre-edit)
+    # The Claude hook runs workspace-check itself and passes --workspace-checked;
+    # this nested check is advisory, so skipping it changes no decision.
+    [[ " $* " == *" --workspace-checked "* ]] || workspace_check quiet >/dev/null || true
+    ;;
+  pre-final|baseline|skill-note|tier) workspace_check quiet >/dev/null || true ;;
 esac
 
 POLICY_FILE="$PROJECT_ROOT/docs/agent-configs/context-policy.json"
@@ -255,6 +265,12 @@ RECOMMENDED_CONTEXT=()
 PROTECTED_PATTERNS=()
 PROTECTED_REASONS=()
 AGENT_INSTRUCTIONS=()
+REQUIRED_CANONICAL=()
+REQUIRED_STATUS=()
+POLICY_FROM_SNAPSHOT=false
+EDIT_RELPATH=""
+EDIT_OUTSIDE=false
+PACK_RESULT=""
 
 usage() {
   printf '%s\n' \
@@ -291,24 +307,36 @@ tsv_escape() {
 }
 
 json_escape() {
-  if command -v python3 >/dev/null 2>&1; then
-    JSON_ESCAPE_VALUE="$1" python3 - <<'PY'
-import json
-import os
-
-print(json.dumps(os.environ.get("JSON_ESCAPE_VALUE", ""), ensure_ascii=False)[1:-1], end="")
-PY
+  # Same output as json.dumps(value, ensure_ascii=False)[1:-1] for valid UTF-8:
+  # quotes, backslashes and C0 controls escaped, everything else kept. Pure
+  # bash: the hook path called this dozens of times per tool call.
+  local value="$1" out="" char code hex i
+  if [[ "$value" != *[[:cntrl:]\"\\]* ]]; then
+    printf '%s' "$value"
     return
   fi
-  local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  value="${value//$'\b'/\\b}"
-  value="${value//$'\f'/\\f}"
-  value="${value//$'\n'/\\n}"
-  value="${value//$'\r'/\\r}"
-  value="${value//$'\t'/\\t}"
-  printf '%s' "$value"
+  for ((i = 0; i < ${#value}; i++)); do
+    char="${value:i:1}"
+    case "$char" in
+      '"') out+='\"' ;;
+      \\) out+="\\\\" ;;
+      $'\b') out+='\b' ;;
+      $'\f') out+='\f' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *)
+        printf -v code '%d' "'$char"
+        if [[ "$code" -ge 1 && "$code" -lt 32 ]]; then
+          printf -v hex '\\u%04x' "$code"
+          out+="$hex"
+        else
+          out+="$char"
+        fi
+        ;;
+    esac
+  done
+  printf '%s' "$out"
 }
 
 hash_file() {
@@ -318,7 +346,7 @@ hash_file() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$path" | awk '{print $1}'
   elif command -v python3 >/dev/null 2>&1; then
-    python3 - "$path" <<'PY'
+    python3 -I -S - "$path" <<'PY'
 import hashlib
 import pathlib
 import sys
@@ -336,7 +364,7 @@ hash_text() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
   elif command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+    python3 -I -S -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
     echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
     return 1
@@ -405,7 +433,7 @@ collapse_relative_path() {
 canonical_project_abspath() {
   local raw_path="$1"
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$PROJECT_ROOT" "$raw_path" <<'PY'
+    python3 -I -S - "$PROJECT_ROOT" "$raw_path" <<'PY'
 import pathlib
 import sys
 
@@ -501,7 +529,7 @@ default_protected_paths() {
 
 policy_schema_value() {
   if command -v python3 >/dev/null 2>&1 && [[ -f "$POLICY_FILE" ]]; then
-    python3 - "$POLICY_FILE" <<'PY'
+    python3 -I -S - "$POLICY_FILE" <<'PY'
 import json
 import pathlib
 import sys
@@ -520,7 +548,7 @@ PY
 policy_values() {
   local key="$1"
   if command -v python3 >/dev/null 2>&1 && [[ -f "$POLICY_FILE" ]]; then
-    python3 - "$POLICY_FILE" "$key" <<'PY'
+    python3 -I -S - "$POLICY_FILE" "$key" <<'PY'
 import json
 import pathlib
 import sys
@@ -557,7 +585,7 @@ project_contract_values() {
   local key="$1"
   [[ -f "$PROJECT_TECH_STACK_FILE" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  python3 - "$PROJECT_TECH_STACK_FILE" "$key" <<'PY'
+  python3 -I -S - "$PROJECT_TECH_STACK_FILE" "$key" <<'PY'
 import json
 import pathlib
 import sys
@@ -585,7 +613,230 @@ add_protected_pattern() {
   PROTECTED_REASONS+=("$reason")
 }
 
+# One python3 run (-I -S: stdlib only, never the project's own modules) loads
+# the context policy and the tech-stack contract, canonicalises required
+# context (and one edit path), and in pack mode rewrites the context pack only
+# when its content changed. Records: kind, a, b, each NUL-terminated.
+read -r -d '' POLICY_SNAPSHOT_PY <<'PY' || true
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(os.environ["PS_ROOT"]).resolve()
+policy_file = pathlib.Path(os.environ["PS_POLICY"])
+stack_file = pathlib.Path(os.environ["PS_STACK"])
+mode = os.environ["PS_MODE"]
+edit_path = os.environ.get("PS_EDIT_PATH", "")
+out = sys.stdout.buffer
+
+
+def emit(kind, a="", b=""):
+    out.write(f"{kind}\0{a}\0{b}\0".encode("utf-8", "surrogateescape"))
+
+
+def stop(message):
+    emit("error", message)
+    sys.exit(0)
+
+
+def safe_relative(value):
+    # Same rules as is_safe_relative_path in this script.
+    if not value or value.startswith("/") or any(ch in value for ch in "\n\r\t"):
+        return False
+    if "//" in value or value.endswith("/"):
+        return False
+    return not any(part in (".", "..") for part in value.split("/"))
+
+
+def canonical(raw):
+    # Same rule as canonical_project_abspath: resolve links, stay in the root.
+    candidate = pathlib.Path(raw)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve(strict=False)
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return None
+
+
+def read_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def items(doc, key):
+    try:
+        return list(doc.get(key, []))
+    except Exception:
+        return []
+
+
+def lines(text):
+    # The bash loader this replaces read one line at a time and skipped empty ones.
+    return [line for line in text.split("\n") if line]
+
+
+def str_lines(doc, key):
+    return lines("\n".join(item for item in items(doc, key) if isinstance(item, str)))
+
+
+def sha256_file(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+policy = read_json(policy_file)
+if not isinstance(policy, dict) or policy.get("schema") != "agent-context-policy/v1":
+    stop("context policy schema must be agent-context-policy/v1")
+required = str_lines(policy, "required_context")
+for value in required:
+    if not safe_relative(value):
+        stop(f"unsafe context policy required_context path: {value}")
+recommended = str_lines(policy, "recommended_context")
+for value in recommended:
+    if not safe_relative(value):
+        stop(f"unsafe context policy recommended_context path: {value}")
+protected = []
+policy_lines = [f"{item['pattern']}\t{item.get('reason', '')}" for item in items(policy, "protected_paths")
+                if isinstance(item, dict) and isinstance(item.get("pattern"), str)]
+for line in lines("\n".join(policy_lines)):
+    pattern, _, reason = line.partition("\t")
+    if not safe_relative(pattern):
+        stop(f"unsafe context policy protected_paths path: {pattern}")
+    protected.append((pattern, reason))
+stack = read_json(stack_file) if stack_file.is_file() else None
+for key, reason, source in (("protected_paths", "project protected path", "project tech-stack protected_paths"),
+                            ("generated_files", "project generated file", "project tech-stack generated_files")):
+    values = items(stack, key) if isinstance(stack, dict) else []
+    for line in lines("\n".join(f"{item}\t{reason}" for item in values if isinstance(item, str) and item)):
+        pattern, tab, tail = line.partition("\t")
+        if not tab:
+            tail = line
+        if not safe_relative(pattern):
+            stop(f"unsafe {source} path: {pattern}")
+        protected.append((pattern, tail))
+instructions = str_lines(policy, "agent_instructions")
+if not required:
+    stop("context policy required_context is empty")
+if not protected:
+    stop("context policy protected_paths is empty")
+
+statuses = []
+for value in required:
+    rel = canonical(value)
+    if rel is None:
+        status = "outside"
+    elif (root / rel).is_file():
+        status = "present"
+    else:
+        status = "missing"
+    statuses.append((rel, status))
+    emit("required", value, rel or "")
+    emit("required_status", status)
+for value in recommended:
+    emit("recommended", value)
+for pattern, reason in protected:
+    emit("protected", pattern, reason)
+for text in instructions:
+    emit("instruction", text)
+if edit_path:
+    rel = canonical(edit_path)
+    if rel is None:
+        emit("relpath_outside", edit_path)
+    else:
+        emit("relpath", rel)
+
+if mode == "pack":
+    if any(status != "present" for _, status in statuses):
+        emit("pack", "skipped")
+        sys.exit(0)
+    content = {
+        "schema": "agent-context-pack/v1",
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "policy_path": "docs/agent-configs/context-policy.json",
+        "policy_sha256": sha256_file(policy_file),
+        "agent_instructions_sha256": hashlib.sha256(
+            "".join(text + "\n" for text in instructions).encode("utf-8", "surrogateescape")).hexdigest(),
+        "required_context": [{"path": rel, "status": "present", "sha256": sha256_file(root / rel)}
+                             for rel, _ in statuses],
+        "protected_paths": [{"pattern": pattern, "reason": reason} for pattern, reason in protected],
+        "detector_summary": os.environ.get("PS_DETECTOR_SUMMARY", ""),
+    }
+    pack_path = pathlib.Path(os.environ["PS_PACK"])
+    current = read_json(pack_path)
+    if (isinstance(current, dict) and list(current) == list(content)
+            and all(current[key] == content[key] for key in content if key != "generated_at")):
+        emit("pack", "unchanged")
+        sys.exit(0)
+    data = (json.dumps(content, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8", "surrogateescape")
+    try:
+        pack_path.parent.mkdir(parents=True, exist_ok=True)
+        # Readers may open the pack at any time: write aside, then rename.
+        fd, tmp = tempfile.mkstemp(prefix=pack_path.name + ".", dir=str(pack_path.parent))
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp, pack_path)
+    except OSError as exc:
+        stop(f"cannot write context pack: {exc}")
+    emit("pack", "written")
+PY
+
 load_policy() {
+  load_policy_snapshot load
+}
+
+# Usage: load_policy_snapshot load|pack [EDIT_PATH]. Pack mode refreshes the
+# context pack (only when the state dir is writable and required context is
+# complete); EDIT_PATH is canonicalised into EDIT_RELPATH / EDIT_OUTSIDE.
+load_policy_snapshot() {
+  local mode="$1" edit_path="${2:-}" kind a b status="" summary=""
+  REQUIRED_CONTEXT=()
+  REQUIRED_CANONICAL=()
+  REQUIRED_STATUS=()
+  RECOMMENDED_CONTEXT=()
+  PROTECTED_PATTERNS=()
+  PROTECTED_REASONS=()
+  AGENT_INSTRUCTIONS=()
+  EDIT_RELPATH=""
+  EDIT_OUTSIDE=false
+  PACK_RESULT=""
+  POLICY_FROM_SNAPSHOT=false
+  [[ -f "$POLICY_FILE" ]] || fail "missing context policy: docs/agent-configs/context-policy.json"
+  if ! command -v python3 >/dev/null 2>&1; then
+    load_policy_without_python
+    return
+  fi
+  [[ "$mode" != "pack" || "$STATE_WRITABLE" == "true" ]] || mode=load
+  if [[ "$mode" == "pack" && -x "$DETECTOR" ]]; then
+    summary="$("$DETECTOR" --summary 2>/dev/null || true)"
+  fi
+  while IFS= read -r -d '' kind && IFS= read -r -d '' a && IFS= read -r -d '' b; do
+    case "$kind" in
+      required) REQUIRED_CONTEXT+=("$a"); REQUIRED_CANONICAL+=("$b") ;;
+      required_status) REQUIRED_STATUS+=("$a") ;;
+      recommended) RECOMMENDED_CONTEXT+=("$a") ;;
+      protected) PROTECTED_PATTERNS+=("$a"); PROTECTED_REASONS+=("$b") ;;
+      instruction) AGENT_INSTRUCTIONS+=("$a") ;;
+      relpath) EDIT_RELPATH="$a" ;;
+      relpath_outside) EDIT_OUTSIDE=true ;;
+      pack) PACK_RESULT="$a" ;;
+      error) fail "$a" ;;
+      exit) status="$a" ;;
+    esac
+  done < <(PS_ROOT="$PROJECT_ROOT" PS_POLICY="$POLICY_FILE" PS_STACK="$PROJECT_TECH_STACK_FILE" PS_MODE="$mode" \
+    PS_PACK="$CONTEXT_PACK" PS_EDIT_PATH="$edit_path" PS_DETECTOR_SUMMARY="$summary" \
+    python3 -I -S -c "$POLICY_SNAPSHOT_PY"; printf 'exit\0%s\0\0' "$?")
+  [[ "$status" == "0" ]] || fail "could not load the context policy (python3 exited ${status:-unknown})"
+  POLICY_FROM_SNAPSHOT=true
+}
+
+load_policy_without_python() {
   REQUIRED_CONTEXT=()
   RECOMMENDED_CONTEXT=()
   PROTECTED_PATTERNS=()
@@ -777,7 +1028,7 @@ ack_log_usable() {
   [[ "$ttl" =~ ^-?[0-9]+$ ]] ||
     fail "invalid AGENT_GUARD_ACK_TTL_SECONDS: $ttl"
   [[ -r "$ACK_LOG" ]] || return 1
-  python3 - "$ACK_LOG" "$relpath" "$ttl" <<'PY'
+  python3 -I -S - "$ACK_LOG" "$relpath" "$ttl" <<'PY'
 import calendar
 import datetime
 import pathlib
@@ -892,6 +1143,22 @@ detector_summary_json() {
 }
 
 ensure_required_context() {
+  [[ "$POLICY_FROM_SNAPSHOT" == "true" ]] || { ensure_required_context_without_python; return; }
+  local missing=0 index=0
+  while [[ "$index" -lt "${#REQUIRED_CONTEXT[@]}" ]]; do
+    case "${REQUIRED_STATUS[$index]}" in
+      outside) fail "path outside project root: ${REQUIRED_CONTEXT[$index]}" ;;
+      missing)
+        warn "missing required context: ${REQUIRED_CANONICAL[$index]}"
+        missing=$((missing + 1))
+        ;;
+    esac
+    index=$((index + 1))
+  done
+  [[ "$missing" -eq 0 ]] || fail "required context is incomplete"
+}
+
+ensure_required_context_without_python() {
   local missing=0
   local relpath rel_canonical path
   for relpath in "${REQUIRED_CONTEXT[@]}"; do
@@ -945,7 +1212,7 @@ check_context_pack_freshness() {
     fail "python3 is required to verify context-pack freshness"
   local current_policy_hash
   current_policy_hash="$(hash_file "$POLICY_FILE")"
-  python3 - "$PROJECT_ROOT" "$CONTEXT_PACK" "$current_policy_hash" <<'PY'
+  python3 -I -S - "$PROJECT_ROOT" "$CONTEXT_PACK" "$current_policy_hash" <<'PY'
 import hashlib
 import json
 import pathlib
@@ -1017,9 +1284,13 @@ PY
 }
 
 preflight() {
-  load_policy
+  load_policy_snapshot pack
   ensure_required_context
-  write_context_pack
+  if [[ "$POLICY_FROM_SNAPSHOT" != "true" ]]; then
+    write_context_pack
+  elif [[ "$STATE_WRITABLE" != "true" ]]; then
+    warn "state dir not writable ($STATE_DIR); guard advisory-only, skipping context pack"
+  fi
   printf 'agent-guard: preflight ok (context_pack=%s)\n' "$(context_pack_display)"
 }
 
@@ -1056,6 +1327,9 @@ pre_edit() {
         use_ack_log=true
         shift
         ;;
+      --workspace-checked)
+        shift
+        ;;
       --)
         shift
         raw_path="${1:-}"
@@ -1074,11 +1348,17 @@ pre_edit() {
     esac
   done
   [[ -n "$raw_path" ]] || fail "pre-edit requires a path"
-  load_policy
+  # pre-edit also refreshes the context pack, so an Edit call needs no preflight.
+  load_policy_snapshot pack "$raw_path"
   ensure_required_context
   local relpath="" canonical_path match pattern reason ack_source
-  IFS= read -r -d '' relpath < <(canonical_project_relpath "$raw_path" && printf '\0') ||
-    fail "path outside project root: $raw_path"
+  [[ "$EDIT_OUTSIDE" != "true" ]] || fail "path outside project root: $raw_path"
+  if [[ "$POLICY_FROM_SNAPSHOT" == "true" ]]; then
+    relpath="$EDIT_RELPATH"
+  else
+    IFS= read -r -d '' relpath < <(canonical_project_relpath "$raw_path" && printf '\0') ||
+      fail "path outside project root: $raw_path"
+  fi
   canonical_path="$PROJECT_ROOT/$relpath"
   [[ "$relpath" == "." ]] && canonical_path="$PROJECT_ROOT"
   if match="$(protected_reason_for_path "$relpath")"; then
@@ -1116,7 +1396,7 @@ pre_edit() {
 
 context_pack_policy_hash() {
   if command -v python3 >/dev/null 2>&1 && [[ -f "$CONTEXT_PACK" ]]; then
-    python3 - "$CONTEXT_PACK" <<'PY'
+    python3 -I -S - "$CONTEXT_PACK" <<'PY'
 import json
 import pathlib
 import sys
@@ -1133,7 +1413,7 @@ lock_value() {
   local file="$PROJECT_ROOT/docs/agent-configs/agent-bootstrap.lock.json"
   [[ -f "$file" ]] || return 0
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to read bootstrap lock"
-  python3 - "$file" "$key" <<'PY' 2>/dev/null || true
+  python3 -I -S - "$file" "$key" <<'PY' 2>/dev/null || true
 import json
 import sys
 
@@ -1193,7 +1473,7 @@ append_pre_final_event() {
   local verification_ran="${2:-false}"
   [[ "$STATE_WRITABLE" == "true" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" PROJECT_ROOT="$PROJECT_ROOT" TIER_BLOCK="$TIER_BLOCK" python3 - <<'PY'
+  SESSION_EVENTS="$SESSION_EVENTS" VERIFY_REPORT="$VERIFY_REPORT" GATE_STATUS_VALUE="$gate_status" VERIFICATION_RAN="$verification_ran" PROJECT_ROOT="$PROJECT_ROOT" TIER_BLOCK="$TIER_BLOCK" python3 -I -S - <<'PY'
 import json
 import os
 import pathlib
@@ -1321,7 +1601,7 @@ append_skill_note_event() {
   local skill="$1"
   [[ "$STATE_WRITABLE" == "true" ]] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
-  SESSION_EVENTS="$SESSION_EVENTS" SKILL_NAME="$skill" python3 - <<'PY'
+  SESSION_EVENTS="$SESSION_EVENTS" SKILL_NAME="$skill" python3 -I -S - <<'PY'
 import json
 import os
 import pathlib
@@ -1395,7 +1675,7 @@ select_verify_report() {
 # read (no Git, timeout) is unknown, so it counts as dirty, never clean.
 read_tree_state() {
   local state=""
-  state="$(PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
+  state="$(PROJECT_ROOT="$PROJECT_ROOT" python3 -I -S - <<'PY'
 import os
 import subprocess
 
@@ -1461,7 +1741,7 @@ no_verification_ran() {
 # is unreadable JSON, otherwise no.
 contract_verification_state() {
   [[ -f "$PROJECT_TECH_STACK_FILE" ]] || { printf 'no\n'; return 0; }
-  python3 - "$PROJECT_TECH_STACK_FILE" <<'PY'
+  python3 -I -S - "$PROJECT_TECH_STACK_FILE" <<'PY'
 import json
 import sys
 
@@ -1525,7 +1805,7 @@ run_detected_verification() {
   VERIFY_SCOPE="$verify_scope" \
   REPORT_TIER="$report_tier" \
   PROJECT_ROOT="$PROJECT_ROOT" \
-  python3 - <<'PY' || code=$?
+  python3 -I -S - <<'PY' || code=$?
 import contextlib
 import json
 import math
@@ -1876,7 +2156,7 @@ PY
 # below_suggested. A measure that cannot run (or takes over 30 s) warns once
 # ("tier check skipped") and prints status none only.
 tier_evaluate() {
-  TIER_PROGRAM="$TIER_PROGRAM" TIER_TASK="$1" TIER_COMMITTED="${2:-false}" PROJECT_ROOT="$PROJECT_ROOT" python3 - <<'PY'
+  TIER_PROGRAM="$TIER_PROGRAM" TIER_TASK="$1" TIER_COMMITTED="${2:-false}" PROJECT_ROOT="$PROJECT_ROOT" python3 -I -S - <<'PY'
 import json
 import os
 import subprocess
@@ -2213,7 +2493,7 @@ baseline_probe() {
   REFRESH="$1" VERIFY_SCOPE="$2" TOOLCHAIN_TIMEOUT="$3" BASELINE_REPORT="$VERIFY_REPORT" \
   TREE_COMMIT="$TREE_COMMIT" TREE_DIRTY="$TREE_DIRTY" \
   CONTRACT_PATH="$PROJECT_TECH_STACK_FILE" PROJECT_ROOT="$PROJECT_ROOT" \
-  python3 - <<'PY'
+  python3 -I -S - <<'PY'
 import hashlib
 import json
 import os
@@ -2411,7 +2691,7 @@ baseline() {
 # Rewrites VERIFY_REPORT with dirty:true (atomically) so it is never reused.
 mark_report_dirty() {
   [[ -f "$VERIFY_REPORT" ]] || return 0
-  VERIFY_REPORT="$VERIFY_REPORT" python3 - <<'PY' || warn "could not mark the baseline report dirty"
+  VERIFY_REPORT="$VERIFY_REPORT" python3 -I -S - <<'PY' || warn "could not mark the baseline report dirty"
 import json
 import os
 import pathlib
@@ -2466,7 +2746,7 @@ stats() {
   local as_json=false
   [[ "${1:-}" == "--json" ]] && as_json=true
   command -v python3 >/dev/null 2>&1 || fail "python3 is required for stats"
-  SESSION_EVENTS="$SESSION_EVENTS" AS_JSON="$as_json" python3 - <<'PY'
+  SESSION_EVENTS="$SESSION_EVENTS" AS_JSON="$as_json" python3 -I -S - <<'PY'
 import json
 import os
 

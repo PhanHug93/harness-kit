@@ -189,17 +189,17 @@ expect_tier() {
   shift
   run_tier suggest "$@"
   [[ "$TIER_RC" -eq 0 ]] || fail "tier suggest $* exited $TIER_RC: $(cat "$TMP_ROOT/tier.err")"
-  first="$(printf '%s\n' "$TIER_OUT" | head -n1)"
+  first="$(head -n1 <<<"$TIER_OUT")"
   [[ "$first" == "Suggested: $want" ]] || fail "tier suggest $*: want $want, got: $TIER_OUT"
   for reason in ${reasons[@]+"${reasons[@]}"}; do
-    printf '%s\n' "$TIER_OUT" | sed -n 's/^- //p' | grep -qF -- "$reason" \
+    grep -qF -- "$reason" < <(sed -n 's/^- //p' <<<"$TIER_OUT") \
       || fail "tier suggest $*: no reason with '$reason' in: $TIER_OUT"
   done
 }
 
 # expect_only_tier_line: the last output is the tier line and nothing else.
 expect_only_tier_line() {
-  [[ "$TIER_OUT" == "$(printf '%s\n' "$TIER_OUT" | head -n1)" ]] \
+  [[ "$TIER_OUT" == "$(head -n1 <<<"$TIER_OUT")" ]] \
     || fail "expected no reason lines, got: $TIER_OUT"
 }
 
@@ -691,7 +691,7 @@ active_is t3
 
 # 4. A tier below the last suggestion needs --reason; the reason is verbatim.
 expect_rc 0 suggest --task t2 --by @spec --paths a.ts b.ts c.ts d.ts
-[[ "$(printf '%s\n' "$TIER_OUT" | head -n1)" == "Suggested: medium" ]] || fail "suggest output changed: $TIER_OUT"
+[[ "$(head -n1 <<<"$TIER_OUT")" == "Suggested: medium" ]] || fail "suggest output changed: $TIER_OUT"
 tier_assert t2 \
   "d['suggested'] == 'medium' and d['declared'] is None" \
   "d['suggestion_inputs'] == {'paths': ['a.ts', 'b.ts', 'c.ts', 'd.ts'], 'lines': None, 'flags': []}" \
@@ -771,7 +771,7 @@ if [[ "$(id -u)" != 0 ]]; then
   chmod a-w "$packets/t4"
   expect_rc 0 suggest --task t4 --paths a.ts b.ts c.ts d.ts
   chmod u+w "$packets/t4"
-  [[ "$(printf '%s\n' "$TIER_OUT" | head -n1)" == "Suggested: medium" ]] || fail "read-only suggest output: $TIER_OUT"
+  [[ "$(head -n1 <<<"$TIER_OUT")" == "Suggested: medium" ]] || fail "read-only suggest output: $TIER_OUT"
   grep -q 'not recorded (packet is read-only)' "$TMP_ROOT/tier.err" \
     || fail "read-only packet message: $(cat "$TMP_ROOT/tier.err")"
   cmp -s "$TMP_ROOT/t4-before.json" "$packets/t4/tier.json" || fail "read-only packet: tier.json changed"
@@ -996,7 +996,7 @@ expect_measured() {
     || fail "$task: want $want_tier with files=$want_files: $TIER_OUT"
   [[ "$want_lines" == - || "${BASH_REMATCH[4]}" == "$want_lines" ]] || fail "$task: want $want_lines lines: $TIER_OUT"
   for reason in "$@"; do
-    sed -n 's/^- //p' <<<"$TIER_OUT" | grep -qF -- "$reason" || fail "$task: no reason with '$reason': $TIER_OUT"
+    grep -qF -- "$reason" < <(sed -n 's/^- //p' <<<"$TIER_OUT") || fail "$task: no reason with '$reason': $TIER_OUT"
   done
 }
 # measure_assert <task> <python expr>...: the hidden measure op's JSON (m)
@@ -1248,7 +1248,7 @@ measure_assert mv-pure "sorted((f['path'], f['old_path'], f['lines'], f['binary'
 # and a risky-path reason naming that path.
 mv_row() {
   expect_measured "$1" "$2" "$3" -
-  if [[ "$4" != - ]] && ! sed -n 's/^- //p' <<<"$TIER_OUT" | grep -qF "risky path: $4 "; then
+  if [[ "$4" != - ]] && ! grep -qF "risky path: $4 " < <(sed -n 's/^- //p' <<<"$TIER_OUT"); then
     fail "$1: no risky path $4: $TIER_OUT"
   fi
 }

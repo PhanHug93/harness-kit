@@ -26,7 +26,7 @@ migration_describe() {
   local list count first
   list="$(_tracked_local_only)" || return 1
   count="$(printf '%s\n' "$list" | grep -c . || true)"
-  first="$(printf '%s\n' "$list" | head -n 10 | paste -sd, - | sed 's/,/, /g')"
+  first="$(head -n 10 <<<"$list" | paste -sd, - | sed 's/,/, /g')"
   printf '%s tracked local-only files: %s\n' "$count" "$first"
 }
 
