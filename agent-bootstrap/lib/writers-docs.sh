@@ -2298,12 +2298,12 @@ run_doctor() {
     doctor_bad "agent guard check failed"
   fi
   no_scan_paths="$("$AGENT_HOOK" no-scan-paths 2>/dev/null || true)"
-  if [[ -x "$AGENT_HOOK" ]] &&
-    printf '%s\n' "$no_scan_paths" | grep -Fq '.claude/worktrees/' &&
-    printf '%s\n' "$no_scan_paths" | grep -Fq '.gemini/' &&
-    printf '%s\n' "$no_scan_paths" | grep -Fq '.openclaude/' &&
-    printf '%s\n' "$no_scan_paths" | grep -Fq 'AGENTS.local.md' &&
-    printf '%s\n' "$no_scan_paths" | grep -Fq '*.jks'; then
+  # Here-strings, not `printf | grep -q`, which can SIGPIPE under pipefail.
+  no_scan_complete=true
+  for no_scan_needle in '.claude/worktrees/' '.gemini/' '.openclaude/' 'AGENTS.local.md' '*.jks'; do
+    grep -Fq -- "$no_scan_needle" <<<"$no_scan_paths" || no_scan_complete=false
+  done
+  if [[ -x "$AGENT_HOOK" && "$no_scan_complete" == "true" ]]; then
     doctor_ok "no-scan guard lists local/vendor/sensitive paths"
   else
     doctor_bad "no-scan guard missing local/vendor/sensitive paths"

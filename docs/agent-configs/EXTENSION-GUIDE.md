@@ -6,11 +6,10 @@ the generated target still matches the canonical bundle.
 
 ## Add a detected stack
 
-- Edit the detector source of truth in `agent-bootstrap/lib/detect.sh`.
-- Update the emitted runtime snapshot `agent-bootstrap/agent-tech-stack-lib.sh`.
-  The emitted heredoc in `lib/detect.sh` and this snapshot must stay
-  byte-identical; `scripts/test-bootstrap-multi-agent-project.sh` guards this
-  with `need_same_file`.
+- Edit the detector source of truth, `agent-bootstrap/agent-tech-stack-lib.sh`.
+  `lib/detect.sh` loads it for detection and the writers copy it into every
+  target; `scripts/test-bootstrap-multi-agent-project.sh` checks the copy with
+  `need_same_file`.
 - If the detector JSON contract changes, update the relevant schema under
   `agent-bootstrap/schemas/`, the generated schema catalog in
   `agent-bootstrap/lib/writers-runtime.sh`, and the validation copy in
@@ -36,8 +35,8 @@ the generated target still matches the canonical bundle.
 
 - Put runtime policy checks in `agent-bootstrap/agent-guard.sh`; that file is
   copied wholesale to target projects.
-- If a hook must call the guard, update both `agent-bootstrap/agent-hook.sh` and
-  the `agent-hook.sh` heredoc in `agent-bootstrap/lib/writers-runtime.sh`.
+- If a hook must call the guard, update `agent-bootstrap/agent-hook.sh` (the
+  writers copy it into targets).
 - If generated docs or Claude settings change, update both infra and full
   branches in `agent-bootstrap/lib/writers-docs.sh`.
 - If the check emits machine-readable state, add or update a schema under

@@ -150,7 +150,10 @@ def pty_run(cmd_args, answers, timeout=20, reap_timeout=5.0, name="pty", signal_
     global _last_pty
     master, slave = pty.openpty()
     try:
-        proc = subprocess.Popen([BASH, SCRIPT, *cmd_args], cwd=TARGET, stdin=slave, stdout=slave, stderr=slave, close_fds=True, start_new_session=True)
+        # A shell job started with `&` ignores SIGINT and its children inherit
+        # that, so the Ctrl-C check (W10) would hang: start with the default.
+        proc = subprocess.Popen([BASH, SCRIPT, *cmd_args], cwd=TARGET, stdin=slave, stdout=slave, stderr=slave, close_fds=True,
+                                start_new_session=True, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
     finally:
         os.close(slave)
     transcript = bytearray()
@@ -159,7 +162,9 @@ def pty_run(cmd_args, answers, timeout=20, reap_timeout=5.0, name="pty", signal_
     idx = 0
     eof = False
     killed = False
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    first_prompt_at = None
+    deadline = started + timeout
     try:
         while time.monotonic() < deadline:
             r, _, _ = select.select([master], [], [], min(0.2, max(0.0, deadline - time.monotonic())))
@@ -172,6 +177,8 @@ def pty_run(cmd_args, answers, timeout=20, reap_timeout=5.0, name="pty", signal_
                 pending += chunk
                 if pending.rstrip().endswith(b">"):
                     prompts += 1
+                    if first_prompt_at is None:
+                        first_prompt_at = time.monotonic() - started
                     if signal_at_prompt is not None and prompts == signal_at_prompt:
                         # Let the child reach its blocking read: a SIGINT that lands
                         # between the prompt write and read() is only flagged, and
@@ -212,7 +219,9 @@ def pty_run(cmd_args, answers, timeout=20, reap_timeout=5.0, name="pty", signal_
     _last_pty = (name, rc, prompts, text)
     if killed:
         path = save_transcript("child killed")
-        print(f"      pty run {name}: child killed (eof={eof}); transcript saved: {path}")
+        first = "none" if first_prompt_at is None else f"{first_prompt_at:.1f}s"
+        print(f"      pty run {name}: child killed (eof={eof}, after {time.monotonic() - started:.1f}s of {timeout}s,"
+              f" first prompt at {first}, prompts={prompts}); transcript saved: {path}")
     return rc, text, prompts
 
 

@@ -503,6 +503,24 @@ copy_bundle_file() {
   write_file "$target_path" < "$source_path"
 }
 
+# Runtime scripts that carry the workflow preset (agent-hook.sh and
+# verify-ai-deps.sh): the bundle copy is the source and says full; the line
+# becomes the placeholder that write_file fills for this target's preset.
+copy_bundle_preset_file() {
+  local source_rel="$1"
+  local target_path="$2"
+  local source_path="$BUNDLE_DIR/$source_rel"
+  [[ -f "$source_path" ]] || {
+    echo "ERROR: missing bundle file: $source_rel" >&2
+    exit 1
+  }
+  grep -qx 'WORKFLOW_PRESET="full"' "$source_path" || {
+    echo "ERROR: bundle file has no WORKFLOW_PRESET=\"full\" line: $source_rel" >&2
+    exit 1
+  }
+  write_file "$target_path" < <(sed 's/^WORKFLOW_PRESET="full"$/WORKFLOW_PRESET="__WORKFLOW_PRESET__"/' "$source_path")
+}
+
 make_executable() {
   local path="$1"
   [[ -n "$path" ]] || return 0
@@ -710,7 +728,7 @@ harness_journal_add() {
   local action="$1" relpath="$2" pre="${3:-}" dir
   [[ "$DRY_RUN" == "true" ]] && return 0
   dir="$(harness_journal_dir)"
-  if [[ -f "$dir/entries.tsv" ]] && cut -f2 "$dir/entries.tsv" | grep -Fxq -- "$relpath"; then
+  if [[ -f "$dir/entries.tsv" ]] && grep -Fxq -- "$relpath" < <(cut -f2 "$dir/entries.tsv"); then
     return 0
   fi
   # Calls sharing one stamp share this journal: the first pre-image of a file

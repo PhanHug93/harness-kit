@@ -10,21 +10,46 @@ UPDATE_SCRIPT="$ROOT_DIR/agent-bootstrap/agent-bootstrap-update.sh"
 ONBOARDING_EVAL="$ROOT_DIR/scripts/test-onboarding-fixtures.sh"
 BOOTSTRAP_BUNDLE="$ROOT_DIR/agent-bootstrap"
 SHARED_LIB="$ROOT_DIR/agent-bootstrap/agent-tech-stack-lib.sh"
+# Groups run alone (CI shards, `scripts/test.sh` rows) or all in order (no
+# --group). Each group prepares what it needs through the setup_* helpers.
+DRIFT_GROUPS=(focus install inventory contracts prefinal lifecycle)
+SELECTED_GROUPS=()
+drift_usage() {
+  printf '%s\n' \
+    "Usage: scripts/test-bootstrap-multi-agent-project.sh [--group NAME]... | --list-groups" \
+    "" \
+    "Groups: ${DRIFT_GROUPS[*]} (default: all, in this order)"
+}
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --group)
+      [[ -n "${2:-}" && " ${DRIFT_GROUPS[*]} " == *" ${2:-} "* ]] || {
+        echo "bootstrap-test: unknown group: ${2:-}" >&2
+        drift_usage >&2
+        exit 2
+      }
+      SELECTED_GROUPS+=("$2")
+      shift 2
+      ;;
+    --list-groups) printf '%s\n' "${DRIFT_GROUPS[@]}"; exit 0 ;;
+    -h|--help) drift_usage; exit 0 ;;
+    *) echo "bootstrap-test: unknown option: $1" >&2; drift_usage >&2; exit 2 ;;
+  esac
+done
+[[ ${#SELECTED_GROUPS[@]} -gt 0 ]] || SELECTED_GROUPS=("${DRIFT_GROUPS[@]}")
 CAMPAIGN_DIR="$(mktemp -d)"
 # Match the generator canonical-root contract, including macOS /var aliases.
 CAMPAIGN_DIR="$(cd "$CAMPAIGN_DIR" && pwd -P)"
 TMP_DIR="$CAMPAIGN_DIR/target"
 FIXTURE_DIR="$CAMPAIGN_DIR/fixtures"
 mkdir -p "$TMP_DIR" "$FIXTURE_DIR"
-EXTRA_CLEANUP_FILES=()
 
 cleanup() {
-  if [[ ${#EXTRA_CLEANUP_FILES[@]} -gt 0 ]]; then
-    rm -f "${EXTRA_CLEANUP_FILES[@]}"
-  fi
   rm -rf "$CAMPAIGN_DIR"
 }
 trap cleanup EXIT
+# A top-level command that fails without calling fail() still names itself.
+trap 'echo "bootstrap-test: FAIL: line $LINENO exited $?: $BASH_COMMAND" >&2' ERR
 mkdir -p "$TMP_DIR/out"
 
 fail() {
@@ -34,6 +59,19 @@ fail() {
 
 note() {
   printf 'bootstrap-test: --- %s\n' "$*" >&2
+}
+
+GROUP_NAME=""
+GROUP_START=0
+# Usage: if group_begin NAME; then …; group_end; fi
+group_begin() {
+  [[ " ${SELECTED_GROUPS[*]} " == *" $1 "* ]] || return 1
+  GROUP_NAME="$1"
+  GROUP_START=$SECONDS
+  note "group $1"
+}
+group_end() {
+  printf 'bootstrap-test: group %s ok (%ss)\n' "$GROUP_NAME" "$((SECONDS - GROUP_START))" >&2
 }
 
 # This test harness is the host of each disposable fixture invocation. Production
@@ -78,7 +116,7 @@ need_not_contains() {
   local haystack="$1"
   local needle="$2"
   local label="$3"
-  if printf '%s' "$haystack" | grep -Fq -- "$needle"; then
+  if grep -Fq -- "$needle" <<<"$haystack"; then
     fail "$label unexpectedly contained '$needle' in: $haystack"
   fi
 }
@@ -88,6 +126,32 @@ need_same_file() {
   local actual="$2"
   local label="$3"
   cmp -s "$expected" "$actual" || fail "$label drifted from ${expected#"$ROOT_DIR"/}"
+}
+
+# Template files the mirror checks compare. Editor backups (*.bak.*) and
+# generated candidates (*.generated.*) are skipped.
+list_docs_templates() {
+  find "$1" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort
+}
+list_bundle_templates() {
+  find "$1" -type f -not -name '*.bak.*' -not -name '*.generated.*' -not -path '*/skills/mobile-optimization/*' | sort
+}
+
+# The test must leave the source tree as it found it, so groups can run side
+# by side. --no-optional-locks: parallel groups must not fight over index.lock.
+SOURCE_STATUS_TRACKED=false
+SOURCE_STATUS_BEFORE=""
+if git -C "$ROOT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  SOURCE_STATUS_TRACKED=true
+  SOURCE_STATUS_BEFORE="$(git -C "$ROOT_DIR" --no-optional-locks status --porcelain=v1 --untracked-files=all)"
+fi
+assert_source_tree_unchanged() {
+  [[ "$SOURCE_STATUS_TRACKED" == "true" ]] || return 0
+  local after
+  after="$(git -C "$ROOT_DIR" --no-optional-locks status --porcelain=v1 --untracked-files=all)"
+  [[ "$after" == "$SOURCE_STATUS_BEFORE" ]] ||
+    fail "the test changed the source tree (git status before/after):
+$(diff <(printf '%s\n' "$SOURCE_STATUS_BEFORE") <(printf '%s\n' "$after") || true)"
 }
 
 focus_assert_rc() {
@@ -303,7 +367,9 @@ PY
   focus_run_hook ttl-negative AGENT_GUARD_ACK_TTL_SECONDS=-1
   focus_assert_rc "$TMP_DIR/out/focus-ttl-negative.rc" 2 "negative TTL disables ACK reuse"
   focus_run_hook ttl-invalid AGENT_GUARD_ACK_TTL_SECONDS=3600x
-  focus_assert_rc "$TMP_DIR/out/focus-ttl-invalid.rc" 1 "invalid TTL guard error"
+  focus_assert_rc "$TMP_DIR/out/focus-ttl-invalid.rc" 2 "invalid TTL guard error"
+  need_contains "$(cat "$TMP_DIR/out/focus-ttl-invalid.err")" "agent-guard: ERROR: invalid AGENT_GUARD_ACK_TTL_SECONDS: 3600x" "invalid TTL reason"
+  need_contains "$(cat "$TMP_DIR/out/focus-ttl-invalid.err")" "agent-hook: ERROR: edit blocked" "invalid TTL blocks the edit"
   focus_write_ack_rows future
   focus_run_hook ttl-future AGENT_GUARD_ACK_TTL_SECONDS=60
   focus_assert_rc "$TMP_DIR/out/focus-ttl-future.rc" 0 "future timestamp ACK"
@@ -367,19 +433,25 @@ PY
   rm "$focus_dir/AGENTS.md"
   focus_write_hook_input Edit "$protected_path"
   focus_run_hook missing-context
-  focus_assert_rc "$TMP_DIR/out/focus-missing-context.rc" 1 "missing required context error"
+  focus_assert_rc "$TMP_DIR/out/focus-missing-context.rc" 2 "missing required context error"
+  need_contains "$(cat "$TMP_DIR/out/focus-missing-context.err")" "agent-guard: ERROR: required context is incomplete" "missing context reason"
+  need_contains "$(cat "$TMP_DIR/out/focus-missing-context.err")" "agent-hook: ERROR: edit blocked" "missing context blocks the edit"
   cp "$saved_file" "$focus_dir/AGENTS.md"
 
   saved_file="$TMP_DIR/out/focus-context-policy.json"
   cp "$focus_dir/docs/agent-configs/context-policy.json" "$saved_file"
   printf '%s\n' '{ malformed policy' >"$focus_dir/docs/agent-configs/context-policy.json"
   focus_run_hook malformed-policy
-  focus_assert_rc "$TMP_DIR/out/focus-malformed-policy.rc" 1 "malformed policy error"
+  focus_assert_rc "$TMP_DIR/out/focus-malformed-policy.rc" 2 "malformed policy error"
+  need_contains "$(cat "$TMP_DIR/out/focus-malformed-policy.err")" "agent-guard: ERROR: context policy schema must be agent-context-policy/v1" "malformed policy reason"
+  need_contains "$(cat "$TMP_DIR/out/focus-malformed-policy.err")" "agent-hook: ERROR: edit blocked" "malformed policy blocks the edit"
   cp "$saved_file" "$focus_dir/docs/agent-configs/context-policy.json"
 
   focus_write_hook_input Edit "$FIXTURE_DIR/outside-focus-path.txt"
   focus_run_hook outside-root
-  focus_assert_rc "$TMP_DIR/out/focus-outside-root.rc" 1 "outside-root path error"
+  focus_assert_rc "$TMP_DIR/out/focus-outside-root.rc" 2 "outside-root path error"
+  need_contains "$(cat "$TMP_DIR/out/focus-outside-root.err")" "agent-guard: ERROR: path outside project root" "outside-root reason"
+  need_contains "$(cat "$TMP_DIR/out/focus-outside-root.err")" "agent-hook: ERROR: edit blocked" "outside-root blocks the edit"
 
   locked_parent="$focus_dir/locked-state-parent"
   locked_tmp="$focus_dir/locked-tmp"
@@ -397,11 +469,6 @@ PY
 
   printf 'guard-hook-focus: ok (%s)\n' "$focus_dir"
 }
-
-if [[ "${BOOTSTRAP_GUARD_FOCUS_ONLY:-false}" == "true" ]]; then
-  run_guard_hook_focus
-  exit 0
-fi
 
 need_contains $'alpha\t beta\n  gamma' 'alpha beta gamma' 'need_contains wrapped haystack'
 need_contains 'alpha beta gamma' $'alpha\n beta\tgamma' 'need_contains wrapped needle'
@@ -1701,85 +1768,128 @@ bash -n "$ONBOARDING_EVAL"
 bash -n "$BOOTSTRAP_BUNDLE/bootstrap-multi-agent-project.sh"
 bash -n "$BOOTSTRAP_BUNDLE/install-agent-bootstrap-home.sh"
 bash -n "$BOOTSTRAP_BUNDLE/agent-bootstrap-update.sh"
-need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Run generated target verifier" "CI generated target verifier gate"
-need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Install shellcheck on Ubuntu" "CI deterministic Ubuntu shellcheck install"
-need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Run shellcheck if available" "CI shellcheck gate"
-need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "agent-bootstrap/bootstrap-multi-agent-project.sh" "CI shellcheck bundle entrypoint coverage"
-need_contains "$(cat "$ROOT_DIR/.github/workflows/test.yml")" "Run shellcheck on generated target if available" "CI shellcheck generated target coverage"
-design_doc="$(cat "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/README.md")"
-need_contains "$design_doc" "model-profiles/" "design doc bundle model profile directory"
-need_contains "$design_doc" "schemas/" "design doc bundle schema directory"
-need_contains "$design_doc" "templates/" "design doc bundle template directory"
-need_not_contains "$design_doc" "provenance/" "design doc lists no provenance bundle folder"
-need_contains "$design_doc" "agent-init --apply-candidates" "design doc candidate apply lifecycle"
-need_contains "$design_doc" "scripts/test-onboarding-fixtures.sh" "design doc onboarding fixture validation"
-need_contains "$design_doc" "agent-guard.sh" "design doc agent guard runtime"
-need_contains "$design_doc" "context-policy.json" "design doc context policy contract"
-extension_guide="$(cat "$ROOT_DIR/docs/agent-configs/EXTENSION-GUIDE.md")"
-need_contains "$extension_guide" "Add a detected stack" "extension guide covers adding a stack"
-need_contains "$extension_guide" "agent-tech-stack-lib.sh" "extension guide names the detector snapshot"
-need_contains "$extension_guide" "lib/detect.sh" "extension guide names the detector heredoc mirror"
-need_contains "$extension_guide" "need_same_file" "extension guide names the mirror guard"
-need_contains "$extension_guide" "available advisory" "extension guide records optional skill advisory decision"
-root_readme="$(cat "$ROOT_DIR/README.md")"
-need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
-need_contains "$root_readme" "not a security boundary" "root README Agent Guard boundary"
-need_contains "$design_doc" "manual contract validation" "reference schema enforcement wording"
-need_contains "$design_doc" "excludes tool-specific wrappers" "reference token budget boundary"
-contributing="$(cat "$ROOT_DIR/CONTRIBUTING.md")"
-for sp_needle in \
-  "https://github.com/obra/superpowers" \
-  "does not install, update, or synchronize it and adds no updater" \
-  "Pin a tested upstream release tag; never auto-track" \
-  "Review quarterly, or when a relevant release is published." \
-  "Inspect the release diff and run two or three representative brainstorming" \
-  "Freeze on the last validated release when a new one gives no relevant benefit" \
-  "reverify it before any update" \
-  "Kit guidance is written for v7.0.0"; do
-  need_contains "$contributing" "$sp_needle" "CONTRIBUTING Superpowers policy"
-done
-if grep -rqE "sync-to-codex-plugin|npm install[^\n]*superpowers|superpowers[^\n]*--update" "$BOOTSTRAP_BUNDLE" 2>/dev/null; then
-  fail "bundle references a Superpowers installation or update path"
+bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
+
+CANONICAL_READY=false
+MAIN_TARGET_READY=false
+GUARD_TARGET_READY=false
+ROOT_DIRECT_READY=false
+
+# The home install every generator call below goes through.
+setup_canonical_home() {
+  [[ "$CANONICAL_READY" == "true" ]] && return 0
+  CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
+  AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
+  CANONICAL_READY=true
+}
+
+# The guard-regression target (inventory and lifecycle groups).
+setup_guard_target() {
+  [[ "$GUARD_TARGET_READY" == "true" ]] && return 0
+  setup_canonical_home
+  GUARD_DIR="$FIXTURE_DIR/guard-regressions"
+  mkdir -p "$GUARD_DIR"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$GUARD_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-guard-regressions.out
+  GUARD_TARGET_READY=true
+}
+
+# The target generated through the scripts/ wrapper (inventory and contracts groups).
+setup_root_direct_target() {
+  [[ "$ROOT_DIRECT_READY" == "true" ]] && return 0
+  ROOT_DIRECT_DIR="$FIXTURE_DIR/root-direct"
+  mkdir -p "$ROOT_DIRECT_DIR"
+  bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-root-direct.out
+  ROOT_DIRECT_READY=true
+}
+
+# The Android smoke target in $TMP_DIR (inventory and contracts groups).
+setup_main_target() {
+  [[ "$MAIN_TARGET_READY" == "true" ]] && return 0
+  setup_canonical_home
+mkdir -p "$TMP_DIR/app/src/main/AndroidManifest" "$TMP_DIR/wear/src/main/AndroidManifest" "$TMP_DIR/wear-api/src/main/kotlin" "$TMP_DIR/feature/app/src/main/AndroidManifest"
+cat > "$TMP_DIR/settings.gradle.kts" <<'EOF_SETTINGS'
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+rootProject.name = "bootstrap-smoke"
+include(":app", ":wear", ":wear-api", ":feature:app")
+EOF_SETTINGS
+cat > "$TMP_DIR/build.gradle.kts" <<'EOF_BUILD'
+plugins {
+    id("com.android.application") version "8.5.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+    id("org.jetbrains.kotlin.jvm") version "1.9.24" apply false
+}
+EOF_BUILD
+cat > "$TMP_DIR/app/build.gradle.kts" <<'EOF_APP_BUILD'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "example.bootstrap"
+    compileSdk = 35
+    flavorDimensions += "env"
+    productFlavors {
+        create("prod") {
+            dimension = "env"
+        }
+    }
+}
+EOF_APP_BUILD
+cat > "$TMP_DIR/wear-api/build.gradle.kts" <<'EOF_WEAR_API_BUILD'
+plugins {
+    id("org.jetbrains.kotlin.jvm")
+}
+EOF_WEAR_API_BUILD
+cat > "$TMP_DIR/feature/app/build.gradle.kts" <<'EOF_FEATURE_APP_BUILD'
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "example.bootstrap.feature"
+    compileSdk = 35
+}
+EOF_FEATURE_APP_BUILD
+cat > "$TMP_DIR/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_MANIFEST
+cat > "$TMP_DIR/feature/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_FEATURE_MANIFEST'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+EOF_FEATURE_MANIFEST
+
+(
+  cd "$TMP_DIR"
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-smoke.out
+  if ! fixture_workspace scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
+    fail "fresh checkout Claude hook failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
+  fi
+  need_not_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "rtk" "fresh checkout Claude hook"
+  if ! .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.out 2>"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err; then
+    fail "fresh checkout Codex doctor failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err)"
+  fi
+  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --refresh-lock >"$TMP_DIR"/out/bootstrap-refresh-lock.out
+  need_contains "$(cat docs/agent-configs/agent-bootstrap.lock.json)" '"workflow_preset": "full"' "refresh-lock preserved workflow preset"
+  bash -n scripts/agent-tech-stack-lib.sh
+  bash -n scripts/detect-agent-tech-stack.sh
+  bash -n scripts/agent-hook.sh
+  bash -n scripts/agent-guard.sh
+  bash -n scripts/agent-onboarding.sh
+  bash -n scripts/verify-ai-deps.sh
+  bash -n .codex/codex-mode.sh
+)
+  MAIN_TARGET_READY=true
+}
+
+if group_begin focus; then
+run_guard_hook_focus
+group_end
 fi
 
-for root_runtime_snapshot in \
-  agent-hook.sh \
-  agent-guard.sh \
-  agent-tier.py \
-  agent-seats.sh \
-  agent-onboarding.sh \
-  agent-tech-stack-lib.sh \
-  detect-agent-tech-stack.sh \
-  verify-ai-deps.sh; do
-  [[ ! -e "$ROOT_DIR/scripts/$root_runtime_snapshot" ]] ||
-    fail "root scripts must not carry generated runtime snapshots: scripts/$root_runtime_snapshot"
-done
-
-bash "$ONBOARDING_EVAL" >"$TMP_DIR"/out/onboarding-fixtures.out
-need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "onboarding-fixtures: ok" "onboarding fixture eval"
-need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "filled golden contracts: 3" "onboarding fixture filled contract eval"
-
-need_not_contains \
-  "$(cat "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/three-mode/README.md")" \
-  "--workflow three-mode" \
-  "source three-mode template"
-
-bootstrap_version="$("$BOOTSTRAP" --version)"
-bundle_version="$(sed -n '1p' "$BOOTSTRAP_BUNDLE/VERSION")"
-need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
-need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
-need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
-bash "$ROOT_DIR/scripts/release.sh" --check >/dev/null || fail "release pins drift from VERSION; see scripts/release.sh --check"
-need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
-need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
-need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
-need_contains "$(cat "$BOOTSTRAP_BUNDLE/MANIFEST.md")" "$bundle_version" "manifest version"
-grep -Fq 'agent-guard-event/v2' "$BOOTSTRAP_BUNDLE/agent-guard.sh" || fail "event schema not bumped to v2"
-assert_json_escape_handles_control_chars
-assert_hash_text_uses_sha256_without_crc32_fallback
-
-CANONICAL_DIR="$FIXTURE_DIR/agent-bootstrap"
-AGENT_BOOTSTRAP_HOME="$CANONICAL_DIR" "$HOME_INSTALLER" --no-git >"$TMP_DIR"/out/bootstrap-home-install.out
+if group_begin install; then
+setup_canonical_home
 for rtk_file in rtk install-rtk.sh provenance/rtk-v0.37.2.sha256; do
   mkdir -p "$(dirname "$CANONICAL_DIR/$rtk_file")"
   tar -xOf "$ROOT_DIR/scripts/fixtures/historical-bundles/v2026.09.07.1.tar" "agent-bootstrap/$rtk_file" >"$CANONICAL_DIR/$rtk_file"
@@ -1893,9 +2003,87 @@ test_git_driven_harness_update_lifecycle
 run_native_verification_fixture_suite
 run_linked_ancestor_snapshot_focus
 run_core_boundary_focus
-if [[ "${P2_NATIVE_ONLY:-false}" == "true" ]]; then
-  exit 0
+group_end
 fi
+
+if group_begin inventory; then
+setup_canonical_home
+ci_workflow="$(cat "$ROOT_DIR/.github/workflows/test.yml")"
+need_contains "$ci_workflow" "scripts/ci-gate.sh" "CI tree gate"
+need_contains "$ci_workflow" "scripts/test.sh --group lint" "CI lint job"
+need_contains "$ci_workflow" 'scripts/test.sh --group "$GROUP"' "CI matrix runs the runner groups"
+need_contains "$ci_workflow" "tested-tree-" "CI records the tested tree"
+need_contains "$(cat "$ROOT_DIR/scripts/test-shellcheck.sh")" "agent-bootstrap/bootstrap-multi-agent-project.sh" "shellcheck covers the bundle entrypoint"
+design_doc="$(cat "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/README.md")"
+need_contains "$design_doc" "model-profiles/" "design doc bundle model profile directory"
+need_contains "$design_doc" "schemas/" "design doc bundle schema directory"
+need_contains "$design_doc" "templates/" "design doc bundle template directory"
+need_not_contains "$design_doc" "provenance/" "design doc lists no provenance bundle folder"
+need_contains "$design_doc" "agent-init --apply-candidates" "design doc candidate apply lifecycle"
+need_contains "$design_doc" "scripts/test-onboarding-fixtures.sh" "design doc onboarding fixture validation"
+need_contains "$design_doc" "agent-guard.sh" "design doc agent guard runtime"
+need_contains "$design_doc" "context-policy.json" "design doc context policy contract"
+extension_guide="$(cat "$ROOT_DIR/docs/agent-configs/EXTENSION-GUIDE.md")"
+need_contains "$extension_guide" "Add a detected stack" "extension guide covers adding a stack"
+need_contains "$extension_guide" "agent-tech-stack-lib.sh" "extension guide names the detector source"
+need_contains "$extension_guide" "lib/detect.sh" "extension guide names the detector loader"
+need_contains "$extension_guide" "need_same_file" "extension guide names the mirror guard"
+need_contains "$extension_guide" "available advisory" "extension guide records optional skill advisory decision"
+root_readme="$(cat "$ROOT_DIR/README.md")"
+need_contains "$root_readme" "multi-agent harness kit" "root README harness kit positioning"
+need_contains "$root_readme" "not a security boundary" "root README Agent Guard boundary"
+need_contains "$design_doc" "manual contract validation" "reference schema enforcement wording"
+need_contains "$design_doc" "excludes tool-specific wrappers" "reference token budget boundary"
+contributing="$(cat "$ROOT_DIR/CONTRIBUTING.md")"
+for sp_needle in \
+  "https://github.com/obra/superpowers" \
+  "does not install, update, or synchronize it and adds no updater" \
+  "Pin a tested upstream release tag; never auto-track" \
+  "Review quarterly, or when a relevant release is published." \
+  "Inspect the release diff and run two or three representative brainstorming" \
+  "Freeze on the last validated release when a new one gives no relevant benefit" \
+  "reverify it before any update" \
+  "Kit guidance is written for v7.0.0"; do
+  need_contains "$contributing" "$sp_needle" "CONTRIBUTING Superpowers policy"
+done
+if grep -rqE "sync-to-codex-plugin|npm install[^\n]*superpowers|superpowers[^\n]*--update" "$BOOTSTRAP_BUNDLE" 2>/dev/null; then
+  fail "bundle references a Superpowers installation or update path"
+fi
+
+for root_runtime_snapshot in \
+  agent-hook.sh \
+  agent-guard.sh \
+  agent-tier.py \
+  agent-seats.sh \
+  agent-onboarding.sh \
+  agent-tech-stack-lib.sh \
+  detect-agent-tech-stack.sh \
+  verify-ai-deps.sh; do
+  [[ ! -e "$ROOT_DIR/scripts/$root_runtime_snapshot" ]] ||
+    fail "root scripts must not carry generated runtime snapshots: scripts/$root_runtime_snapshot"
+done
+
+bash "$ONBOARDING_EVAL" >"$TMP_DIR"/out/onboarding-fixtures.out
+need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "onboarding-fixtures: ok" "onboarding fixture eval"
+need_contains "$(cat "$TMP_DIR/out/onboarding-fixtures.out")" "filled golden contracts: 3" "onboarding fixture filled contract eval"
+
+need_not_contains \
+  "$(cat "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/workflows/three-mode/README.md")" \
+  "--workflow three-mode" \
+  "source three-mode template"
+
+bootstrap_version="$("$BOOTSTRAP" --version)"
+need_contains "$bootstrap_version" "bootstrap-multi-agent-project" "bootstrap version"
+need_contains "$bootstrap_version" "$bundle_version" "bootstrap version file"
+need_not_contains "$bootstrap_version" "payload-sha256=" "solo bootstrap version"
+bash "$ROOT_DIR/scripts/release.sh" --check >/dev/null || fail "release pins drift from VERSION; see scripts/release.sh --check"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "$bundle_version" "changelog has current bundle version"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "stats" "changelog mentions observability"
+need_contains "$(cat "$ROOT_DIR/CHANGELOG.md")" "pre-push" "changelog mentions portable enforcement"
+need_contains "$(cat "$BOOTSTRAP_BUNDLE/MANIFEST.md")" "$bundle_version" "manifest version"
+grep -Fq 'agent-guard-event/v2' "$BOOTSTRAP_BUNDLE/agent-guard.sh" || fail "event schema not bumped to v2"
+assert_json_escape_handles_control_chars
+assert_hash_text_uses_sha256_without_crc32_fallback
 
 # --- Bundle inventory cross-check (guard the three independent file enumerations) ---
 # installer copy_file dest names MUST equal the canonical_file loop list; the MANIFEST
@@ -1925,80 +2113,7 @@ inv_diff_am="$(diff <(printf '%s\n' "$inv_actual") <(printf '%s\n' "$inv_manifes
 [[ -z "$inv_diff_am" ]] || fail "bundle inventory drift: actual bundle files (<) != MANIFEST Source Roles set (>):
 $inv_diff_am"
 
-mkdir -p "$TMP_DIR/app/src/main/AndroidManifest" "$TMP_DIR/wear/src/main/AndroidManifest" "$TMP_DIR/wear-api/src/main/kotlin" "$TMP_DIR/feature/app/src/main/AndroidManifest"
-cat > "$TMP_DIR/settings.gradle.kts" <<'EOF_SETTINGS'
-pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
-rootProject.name = "bootstrap-smoke"
-include(":app", ":wear", ":wear-api", ":feature:app")
-EOF_SETTINGS
-cat > "$TMP_DIR/build.gradle.kts" <<'EOF_BUILD'
-plugins {
-    id("com.android.application") version "8.5.0" apply false
-    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-    id("org.jetbrains.kotlin.jvm") version "1.9.24" apply false
-}
-EOF_BUILD
-cat > "$TMP_DIR/app/build.gradle.kts" <<'EOF_APP_BUILD'
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
-
-android {
-    namespace = "example.bootstrap"
-    compileSdk = 35
-    flavorDimensions += "env"
-    productFlavors {
-        create("prod") {
-            dimension = "env"
-        }
-    }
-}
-EOF_APP_BUILD
-cat > "$TMP_DIR/wear-api/build.gradle.kts" <<'EOF_WEAR_API_BUILD'
-plugins {
-    id("org.jetbrains.kotlin.jvm")
-}
-EOF_WEAR_API_BUILD
-cat > "$TMP_DIR/feature/app/build.gradle.kts" <<'EOF_FEATURE_APP_BUILD'
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
-
-android {
-    namespace = "example.bootstrap.feature"
-    compileSdk = 35
-}
-EOF_FEATURE_APP_BUILD
-cat > "$TMP_DIR/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_MANIFEST'
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
-EOF_MANIFEST
-cat > "$TMP_DIR/feature/app/src/main/AndroidManifest/AndroidManifest.xml" <<'EOF_FEATURE_MANIFEST'
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
-EOF_FEATURE_MANIFEST
-
-(
-  cd "$TMP_DIR"
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-smoke.out
-  if ! fixture_workspace scripts/agent-hook.sh claude-pretool >"$TMP_DIR"/out/bootstrap-fresh-claude-hook.out 2>"$TMP_DIR"/out/bootstrap-fresh-claude-hook.err; then
-    fail "fresh checkout Claude hook failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)"
-  fi
-  need_not_contains "$(cat "$TMP_DIR"/out/bootstrap-fresh-claude-hook.err)" "rtk" "fresh checkout Claude hook"
-  if ! .codex/codex-mode.sh doctor >"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.out 2>"$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err; then
-    fail "fresh checkout Codex doctor failed: $(cat "$TMP_DIR"/out/bootstrap-fresh-codex-doctor.err)"
-  fi
-  bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$TMP_DIR" --refresh-lock >"$TMP_DIR"/out/bootstrap-refresh-lock.out
-  need_contains "$(cat docs/agent-configs/agent-bootstrap.lock.json)" '"workflow_preset": "full"' "refresh-lock preserved workflow preset"
-  bash -n scripts/agent-tech-stack-lib.sh
-  bash -n scripts/detect-agent-tech-stack.sh
-  bash -n scripts/agent-hook.sh
-  bash -n scripts/agent-guard.sh
-  bash -n scripts/agent-onboarding.sh
-  bash -n scripts/verify-ai-deps.sh
-  bash -n .codex/codex-mode.sh
-)
+setup_main_target
 
 COWORK_DIR="$FIXTURE_DIR/cowork"
 mkdir -p "$COWORK_DIR"
@@ -2040,9 +2155,7 @@ need_contains "$cowork_claude_instructions" ".agents/tasks/" "CLAUDE task packet
 need_not_contains "$cowork_claude_instructions" "## Claude–Codex Collaboration Protocol" "CLAUDE canonical protocol duplication"
 need_not_contains "$cowork_claude_instructions" 'analysis` · Claude -> `technical_review' "CLAUDE owner table duplication"
 
-ROOT_DIRECT_DIR="$FIXTURE_DIR/root-direct"
-mkdir -p "$ROOT_DIRECT_DIR"
-bash "$BOOTSTRAP" --target "$ROOT_DIRECT_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-root-direct.out
+setup_root_direct_target
 [[ -f "$ROOT_DIRECT_DIR/AGENTS.md" ]] || fail "root bootstrap wrapper did not generate AGENTS.md"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/project-onboarding.md" ]] || fail "root bootstrap wrapper did not generate onboarding procedure"
 [[ -f "$ROOT_DIRECT_DIR/docs/agent-configs/first-10-minutes.md" ]] || fail "root bootstrap wrapper did not generate first 10 minutes guide"
@@ -2212,28 +2325,40 @@ need_contains "$(cat "$USER_OWNED_DIR/docs/agent-configs/project-brief.md")" "Fi
 
 cmp -s "$SHARED_LIB" "$TMP_DIR/scripts/agent-tech-stack-lib.sh" || fail "generated tech-stack lib drifted from source lib"
 
+group_end
+fi
+
+if group_begin contracts; then
+setup_canonical_home
+setup_main_target
+setup_root_direct_target
 note "template/runtime mirror drift checks"
 # Task 7: the docs template mirror is mechanically synced from agent-bootstrap/templates.
-# Checked before the transient .bak/.generated drift-test artifacts below, since
-# sync --check uses a plain recursive diff.
 (cd "$ROOT_DIR" && scripts/sync-template-catalog.sh --check) \
   || fail "template catalog mirror drifted from agent-bootstrap/templates; run scripts/sync-template-catalog.sh"
 
-source_template_bak="$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/base/README.md.bak.test-$$"
-bundle_template_generated="$BOOTSTRAP_BUNDLE/templates/base/README.md.generated.test-$$"
-printf '%s\n' "temporary backup must be ignored by drift tests" > "$source_template_bak"
-printf '%s\n' "temporary generated candidate must be ignored by drift tests" > "$bundle_template_generated"
-EXTRA_CLEANUP_FILES+=("$source_template_bak" "$bundle_template_generated")
+# The mirror loops below skip editor backups and generated candidates. Prove
+# the filters on a copy of both trees; the source tree is never written.
+probe_root="$CAMPAIGN_DIR/template-probe"
+mkdir -p "$probe_root"
+cp -R "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" "$probe_root/docs"
+cp -R "$BOOTSTRAP_BUNDLE/templates" "$probe_root/bundle"
+for probe_tree in docs bundle; do
+  printf '%s\n' "temporary backup must be ignored" >"$probe_root/$probe_tree/base/README.md.bak.test-probe"
+  printf '%s\n' "temporary candidate must be ignored" >"$probe_root/$probe_tree/base/README.md.generated.test-probe"
+done
+need_not_contains "$(list_docs_templates "$probe_root/docs")" "test-probe" "docs template listing skips backups and candidates"
+need_not_contains "$(list_bundle_templates "$probe_root/bundle")" "test-probe" "bundle template listing skips backups and candidates"
 while IFS= read -r source_template; do
   relative_template="${source_template#"$ROOT_DIR"/docs/agent-configs/bootstrap-multi-agent-project/templates/}"
   need_same_file "$source_template" "$BOOTSTRAP_BUNDLE/templates/$relative_template" "bundle template $relative_template"
-done < <(find "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' | sort)
+done < <(list_docs_templates "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates")
 while IFS= read -r bundle_template; do
   relative_template="${bundle_template#"$BOOTSTRAP_BUNDLE"/templates/}"
   [[ -f "$ROOT_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" ]] ||
     fail "template $relative_template has no docs mirror"
   need_same_file "$bundle_template" "$TMP_DIR/docs/agent-configs/bootstrap-multi-agent-project/templates/$relative_template" "generated template $relative_template"
-done < <(find "$BOOTSTRAP_BUNDLE/templates" -type f -not -name '*.bak.*' -not -name '*.generated.*' -not -path '*/skills/mobile-optimization/*' | sort)
+done < <(list_bundle_templates "$BOOTSTRAP_BUNDLE/templates")
 
 while IFS= read -r runtime_snapshot; do
   base="${runtime_snapshot#"$BOOTSTRAP_BUNDLE"/}"
@@ -2991,9 +3116,7 @@ if command -v python3 >/dev/null 2>&1; then
     fail "generated verifier --json output is not valid JSON"
 fi
 
-GUARD_DIR="$FIXTURE_DIR/guard-regressions"
-mkdir -p "$GUARD_DIR"
-bash "$CANONICAL_DIR/bootstrap-multi-agent-project.sh" --target "$GUARD_DIR" --workflow full >"$TMP_DIR"/out/bootstrap-guard-regressions.out
+setup_guard_target
 	(cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh preflight >"$TMP_DIR"/out/bootstrap-guard-regressions-preflight.out)
 	rm -f "$GUARD_DIR/.agents/state/context-pack.json"
 	if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-final >"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.out 2>"$TMP_DIR"/out/bootstrap-guard-prefinal-missing.err); then
@@ -3145,7 +3268,11 @@ PY
 (cd "$GUARD_DIR" && scripts/agent-guard.sh stats >"$TMP_DIR"/out/bootstrap-guard-stats.txt)
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-stats.txt")" "verification:none rate" "stats surfaces none-rate"
 need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-stats.txt")" "skill_usage: mobile-optimization=1" "stats surfaces skill usage"
+group_end
+fi
 
+if group_begin prefinal; then
+setup_canonical_home
 note "journal-independent pre-final"
 # pre-final no longer reads task journals. Protected-path detection still comes
 # from git diff, but memory/recall close-out is not a guard input.
@@ -3897,7 +4024,11 @@ EOF_MERGE_ERR
   ) 2>&1 >/dev/null
 )"
 need_contains "$merge_err" "synthetic overlay merge diagnostic" "write_overlay_file surfaces overlay_merge stderr"
+group_end
+fi
 
+if group_begin lifecycle; then
+setup_canonical_home
 note "overlay, cleanup, stale-version, and candidate lifecycle"
 # USER-overlay engine: keyed regions preserved, orphans parked (B1).
 . "$BOOTSTRAP_BUNDLE/lib/overlays.sh"
@@ -3979,6 +4110,7 @@ sv_out="$(
 need_contains "$sv_out" "stale harness version" "verify warns on stale harness version references"
 need_contains "$sv_out" "Fail: 0" "stale harness version verify stays non-failing"
 
+setup_guard_target
 python3 - "$GUARD_DIR/docs/agent-configs/context-policy.json" <<'PY'
 import json
 import pathlib
@@ -4271,39 +4403,8 @@ note "agent seats runtime and launcher regressions"
 SEATS_QA_BUNDLE_PROFILE="$BOOTSTRAP_BUNDLE/model-profiles/codex-model-profiles.json" \
   python3 "$ROOT_DIR/scripts/test-agent-seats.py" "$MP_DIR" "$BOOTSTRAP_BUNDLE/agent-seats.sh" "$TMP_DIR/out/seats-qa.json"
 python3 "$ROOT_DIR/scripts/test-agent-seats-launcher.py"
+group_end
+fi
 
-note "upgrade baseline, merge, plan and rollback"
-bash "$ROOT_DIR/scripts/test-upgrade-merge.sh"
-
-note "path policy fast paths and snapshot cost"
-bash "$ROOT_DIR/scripts/test-path-policy.sh"
-
-note "detector fixtures (wear flavors, sensitive files)"
-bash "$ROOT_DIR/scripts/test-detector-fixtures.sh"
-
-note "context pack is replaced atomically under concurrent readers"
-bash "$ROOT_DIR/scripts/test-guard-concurrency.sh"
-
-note "local-only mode: only specs, plan journals and summaries are pushed"
-bash "$ROOT_DIR/scripts/test-local-only-mode.sh"
-
-note "HK-07 retirement lifecycle"
-python3 "$ROOT_DIR/scripts/test-agent-retirement.py"
-
-note "verification evidence: contract commands, unverified, baseline, session hook"
-bash "$ROOT_DIR/scripts/test-verification-evidence.sh"
-
-note "one-shot entry, project knowledge and migrations"
-bash "$ROOT_DIR/scripts/test-harness-kit-entry.sh"
-python3 "$ROOT_DIR/scripts/test-harness-knowledge.py"
-bash "$ROOT_DIR/scripts/test-harness-migrations.sh"
-
-note "one-shot staging and orchestrator"
-bash "$ROOT_DIR/scripts/test-harness-kit-staging.sh"
-bash "$ROOT_DIR/scripts/test-harness-kit-oneshot.sh"
-bash "$ROOT_DIR/scripts/test-harness-kit-matrix.sh"
-
-note "change tiers"
-bash "$ROOT_DIR/scripts/test-change-tiers.sh"
-
-printf 'bootstrap-test: ok (%s)\n' "$TMP_DIR"
+assert_source_tree_unchanged
+printf 'bootstrap-test: ok (%s; groups: %s)\n' "$TMP_DIR" "${SELECTED_GROUPS[*]}"

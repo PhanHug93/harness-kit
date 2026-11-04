@@ -13,7 +13,7 @@ if [[ -n "${AGENT_BOOTSTRAP_STAMP:-}" ]]; then
   fi
   STAMP="$AGENT_BOOTSTRAP_STAMP"
 fi
-AGENT_BOOTSTRAP_VERSION="2026.11.04.1"
+AGENT_BOOTSTRAP_VERSION="2026.11.04.2"
 AGENT_BOOTSTRAP_CHANNEL="stable"
 WORKFLOW_PRESET="infra"
 IGNORE_TARGET=""
@@ -1350,7 +1350,7 @@ apply_generated_candidates() (
     if ! grep -Fxq "$rel_base" "$allowed_list"; then
       continue
     fi
-    if [[ -n "$APPLY_ONLY" ]] && ! printf '%s' "$APPLY_ONLY" | grep -Fxq "$rel_base"; then
+    if [[ -n "$APPLY_ONLY" ]] && ! grep -Fxq -- "$rel_base" <<<"$APPLY_ONLY"; then
       continue
     fi
     if bootstrap_user_owned_file_is_filled "$base"; then

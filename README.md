@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It writes local
 instructions, agent seats, onboarding helpers and checks into your project. It
 does not change your application code.
 
-Current release: [`2026.11.04.1`](agent-bootstrap/VERSION)
+Current release: [`2026.11.04.2`](agent-bootstrap/VERSION)
 
 ## What you get
 
@@ -41,11 +41,11 @@ lock: no script stops `@build` from starting early.
 
 ## Install
 
-From the project root. This installs release `2026.11.04.1`:
+From the project root. This installs release `2026.11.04.2`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.04.1/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.04.2/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Options go after `| bash -s --`: `--to latest` installs the newest release,

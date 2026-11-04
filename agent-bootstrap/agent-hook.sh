@@ -97,7 +97,7 @@ hash_text() {
   elif command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
   elif command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+    python3 -I -S -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   else
     echo "ERROR: missing SHA-256 tool: install sha256sum, shasum, or python3" >&2
     return 1
@@ -107,7 +107,7 @@ hash_text() {
 lock_value() {
   local key="$1"
   command -v python3 >/dev/null 2>&1 || fail "python3 is required to read bootstrap lock"
-  python3 - "$LOCK_FILE" "$key" <<'PY' 2>/dev/null || true
+  python3 -I -S - "$LOCK_FILE" "$key" <<'PY' 2>/dev/null || true
 import json
 import sys
 
@@ -187,7 +187,18 @@ print_no_scan_paths() {
 }
 
 guard_local_state() {
-  local relative
+  local relative tracked_path found=false
+  command -v git >/dev/null 2>&1 || return 0
+  git -C "$PROJECT_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  # One ls-files for every pattern. Only a hit (rare) is mapped back to the
+  # pattern that names it, one pattern at a time, for the same message.
+  while IFS= read -r tracked_path; do
+    if [[ -n "$tracked_path" && -e "$PROJECT_ROOT/$tracked_path" ]]; then
+      found=true
+      break
+    fi
+  done < <(git -C "$PROJECT_ROOT" ls-files -- "${LOCAL_ONLY_PATHS[@]}")
+  [[ "$found" == "true" ]] || return 0
   for relative in "${LOCAL_ONLY_PATHS[@]}"; do
     if is_tracked "$relative"; then
       fail "local-only agent state is tracked: $relative"
@@ -195,45 +206,70 @@ guard_local_state() {
   done
 }
 
-parse_claude_hook_input() {
-  local input="$1"
-  if command -v python3 >/dev/null 2>&1; then
-    HOOK_INPUT="$input" python3 - <<'PY'
+# One python3 run parses the Claude hook input and, when no envelope exists
+# yet, mints it from host-provided data (session_id, CLAUDE_PROJECT_DIR). It
+# never derives the envelope from the current directory or overwrites one.
+read -r -d '' READ_HOOK_PY <<'PY' || true
+import base64
 import json
 import os
+import re
 import sys
 
 try:
     payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
 except Exception:
-    sys.exit(1)
-
-tool_name = payload.get("tool_name") or payload.get("tool")
-tool_input = payload.get("tool_input") or payload.get("input") or {}
-if not isinstance(tool_input, dict):
-    tool_input = {}
-file_path = tool_input.get("file_path") or tool_input.get("path") or ""
-if not isinstance(tool_name, str):
-    tool_name = ""
-if not isinstance(file_path, str):
-    file_path = ""
-sys.stdout.buffer.write((tool_name + "\0" + file_path + "\0").encode("utf-8"))
+    payload = None
+tool_name = file_path = session = context = ""
+if isinstance(payload, dict):
+    name = payload.get("tool_name") or payload.get("tool")
+    tool_input = payload.get("tool_input") or payload.get("input") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    path = tool_input.get("file_path") or tool_input.get("path") or ""
+    tool_name = name if isinstance(name, str) else ""
+    file_path = path if isinstance(path, str) else ""
+    root = os.environ.get("CLAUDE_PROJECT_DIR", "")
+    sid = payload.get("session_id")
+    if (os.environ.get("HOOK_MINT") == "true" and isinstance(sid, str)
+            and re.fullmatch(r"[A-Za-z0-9._:-]+", sid) and os.path.isabs(root) and os.path.isdir(root)):
+        envelope = dict(original_workspace=root, target_repository=root, target_source="user", session_id=sid)
+        session = sid
+        context = "base64:" + base64.b64encode(json.dumps(envelope, ensure_ascii=False).encode("utf-8")).decode("ascii")
+for field in (tool_name, file_path, session, context):
+    sys.stdout.buffer.write(field.encode("utf-8", "surrogateescape") + b"\0")
 PY
-    return $?
+
+read_claude_hook_input() {
+  local input="$1" mint=false session="" context=""
+  CLAUDE_ANCHOR_MINTED=false
+  HOOK_TOOL_NAME=""
+  HOOK_EDIT_PATH=""
+  command -v python3 >/dev/null 2>&1 || return 0
+  if [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" && -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+    mint=true
   fi
-  local tool_name file_path
-  tool_name="$(printf '%s' "$input" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  file_path="$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  printf '%s\0%s\0' "$tool_name" "$file_path"
+  exec 3< <(HOOK_INPUT="$input" HOOK_MINT="$mint" python3 -I -S -c "$READ_HOOK_PY" 2>/dev/null || true)
+  IFS= read -r -d '' HOOK_TOOL_NAME <&3 || true
+  IFS= read -r -d '' HOOK_EDIT_PATH <&3 || true
+  IFS= read -r -d '' session <&3 || true
+  IFS= read -r -d '' context <&3 || true
+  exec 3<&-
+  if [[ -n "$session" && -n "$context" ]]; then
+    AGENT_HOST_SESSION_ID="$session"
+    AGENT_WORKSPACE_CONTEXT="$context"
+    export AGENT_HOST_SESSION_ID AGENT_WORKSPACE_CONTEXT
+    CLAUDE_ANCHOR_MINTED=true
+  fi
 }
 
 guard_claude_edit_tool() {
   local edit_path="$1" ask_reason="${2:-}" rc=0 classification=""
   [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
   if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
-    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path")" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --workspace-checked --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path")" || rc=$?
   else
-    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log "$edit_path")" || rc=$?
+    classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --workspace-checked "$edit_path")" || rc=$?
   fi
   # Stdout must be pure JSON when the hook asks the user; otherwise keep the
   # classification on stdout (debug log only), so denials stay two stderr lines.
@@ -245,7 +281,7 @@ guard_claude_edit_tool() {
     3) exit 2 ;;
     *)
       # Claude Code only blocks on exit 2; any other guard refusal (outside the
-      # project root, missing context, failed preflight) must block the edit too.
+      # project root, missing context, a policy error) must block the edit too.
       echo "agent-hook: ERROR: edit blocked: agent-guard pre-edit exited $rc" >&2
       exit 2
       ;;
@@ -253,38 +289,7 @@ guard_claude_edit_tool() {
 }
 
 claude_anchor_env() {
-  # Claude Code adapter: mint the workspace envelope from host-provided hook
-  # data (session_id, CLAUDE_PROJECT_DIR) only when no envelope exists. Never
-  # derive it from the agent's current directory or overwrite existing values.
-  local input="$1" minted
-  CLAUDE_ANCHOR_MINTED=false
-  [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" ]] || return 0
-  [[ -n "${CLAUDE_PROJECT_DIR:-}" ]] && command -v python3 >/dev/null 2>&1 || return 0
-  minted="$(HOOK_INPUT="$input" python3 - <<'PY' 2>/dev/null
-import base64
-import json
-import os
-import re
-import sys
-
-try:
-    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
-except Exception:
-    sys.exit(1)
-session = payload.get("session_id") if isinstance(payload, dict) else None
-root = os.environ.get("CLAUDE_PROJECT_DIR", "")
-if (not isinstance(session, str) or not re.fullmatch(r"[A-Za-z0-9._:-]+", session)
-        or not os.path.isabs(root) or not os.path.isdir(root)):
-    sys.exit(1)
-context = dict(original_workspace=root, target_repository=root, target_source="user", session_id=session)
-print(session)
-print("base64:" + base64.b64encode(json.dumps(context, ensure_ascii=False).encode("utf-8")).decode("ascii"))
-PY
-)" || return 0
-  AGENT_HOST_SESSION_ID="${minted%%$'\n'*}"
-  AGENT_WORKSPACE_CONTEXT="${minted#*$'\n'}"
-  export AGENT_HOST_SESSION_ID AGENT_WORKSPACE_CONTEXT
-  CLAUDE_ANCHOR_MINTED=true
+  read_claude_hook_input "$1"
 }
 
 workspace_ask_reason() {
@@ -292,7 +297,7 @@ workspace_ask_reason() {
   # mismatch. Worktree mismatches and unattested sessions stay advisory.
   local report
   report="$("$AGENT_GUARD" workspace-check 2>/dev/null)" && return 0
-  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+  REPORT="$report" python3 -I -S - <<'PY' 2>/dev/null || true
 import json
 import os
 
@@ -308,7 +313,7 @@ PY
 }
 
 claude_ask() {
-  ASK_REASON="$1" python3 - <<'PY'
+  ASK_REASON="$1" python3 -I -S - <<'PY'
 import json
 import os
 
@@ -321,7 +326,7 @@ PY
 hook_input_field() {
   # Print a string or boolean field of the Claude hook JSON; empty otherwise.
   command -v python3 >/dev/null 2>&1 || return 0
-  HOOK_INPUT="$1" python3 - "$2" <<'PY' 2>/dev/null || true
+  HOOK_INPUT="$1" python3 -I -S - "$2" <<'PY' 2>/dev/null || true
 import json
 import os
 import sys
@@ -394,7 +399,7 @@ change_map() {
   # HEAD and status). `write` replaces the snapshot atomically; `same` exits 0
   # only when the snapshot equals the current map, stopping at the first
   # difference (1 differs, 2 map unavailable).
-  python3 - "$PROJECT_ROOT" "$1" "$2" "$HOOK_STATE_DIR" <<'PY'
+  python3 -I -S - "$PROJECT_ROOT" "$1" "$2" "$HOOK_STATE_DIR" <<'PY'
 import hashlib
 import os
 import stat
@@ -554,7 +559,9 @@ claude_session_start() {
       "$AGENT_HOST_SESSION_ID" "$AGENT_WORKSPACE_CONTEXT" >>"$CLAUDE_ENV_FILE" 2>/dev/null || true
   fi
   report="$("$AGENT_GUARD" workspace-check 2>/dev/null || true)"
-  REPORT="$report" python3 - <<'PY' 2>/dev/null || true
+  # Bash calls no longer refresh the context pack; refresh it once per session.
+  "$AGENT_GUARD" preflight >/dev/null 2>&1 || true
+  REPORT="$report" python3 -I -S - <<'PY' 2>/dev/null || true
 import json
 import os
 
@@ -584,45 +591,29 @@ claude_pretool() {
     echo "agent-hook: warn: python3 or scripts/agent-guard.sh is unavailable; skipping the edit guard" >&2
     exit 0
   fi
-  local hook_input=""
-  local tool_name=""
-  local edit_path=""
-  local ask_reason=""
+  local hook_input="" ask_reason="" preflight_rc=0
   if [[ ! -t 0 ]]; then
     hook_input="$(cat || true)"
   fi
-  claude_anchor_env "$hook_input"
-  local preflight_rc=0
-  "$AGENT_GUARD" preflight >/dev/null || preflight_rc=$?
-  if [[ "$preflight_rc" -ne 0 && -z "$hook_input" ]]; then
-    exit "$preflight_rc"
+  read_claude_hook_input "$hook_input"
+  if [[ -z "$hook_input" ]]; then
+    # A manual run without hook input checks everything once, as before.
+    "$AGENT_GUARD" preflight >/dev/null || preflight_rc=$?
+    [[ "$preflight_rc" -eq 0 ]] || exit "$preflight_rc"
+    ask_reason="$(workspace_ask_reason)"
+    verify_detector_lock warn
+    [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
+    exit 0
   fi
+  # One workspace check per tool call. Edit/Write/MultiEdit go through the
+  # guard, whose pre-edit also refreshes the context pack. A Bash call skips
+  # preflight and the detector check: neither could block it (Claude Code
+  # blocks only on exit 2), and session start, pre-final and the Codex
+  # preflight still run them.
   ask_reason="$(workspace_ask_reason)"
-  if [[ -n "$hook_input" ]]; then
-    tool_name=""
-    edit_path=""
-    exec 3< <(parse_claude_hook_input "$hook_input" || true)
-    IFS= read -r -d '' tool_name <&3 || true
-    IFS= read -r -d '' edit_path <&3 || true
-    exec 3<&-
-    if [[ "$preflight_rc" -ne 0 ]]; then
-      case "$tool_name" in
-        Edit|Write|MultiEdit)
-          echo "agent-hook: ERROR: edit blocked: agent-guard preflight exited $preflight_rc" >&2
-          exit 2
-          ;;
-      esac
-      exit "$preflight_rc"
-    fi
-    case "$tool_name" in
-      Edit|Write|MultiEdit)
-        guard_claude_edit_tool "$edit_path" "$ask_reason"
-        [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
-        exit 0
-        ;;
-    esac
-  fi
-  verify_detector_lock warn
+  case "$HOOK_TOOL_NAME" in
+    Edit|Write|MultiEdit) guard_claude_edit_tool "$HOOK_EDIT_PATH" "$ask_reason" ;;
+  esac
   [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
   exit 0
 }
@@ -679,8 +670,8 @@ close_out() {
   # (exit 2) on missing evidence or any fail/error/timeout, and kept blocked
   # until the change verifies. Unverified only warns, and so does a change above
   # its declared tier: tier checks recommend, never block.
-  # Gemini/Cursor/Windsurf have no equivalent close-out hook, so those surfaces
-  # stay advisory and should call agent-guard pre-final manually.
+  # Hosts without a Stop hook stay advisory and should call agent-guard
+  # pre-final themselves.
   local input session snapshot out report verdict tier_note err_file budget declared measured reasons seats which digits='^[0-9]{1,3}$'
   local notes
   input="$(cat 2>/dev/null || true)"
@@ -704,7 +695,7 @@ close_out() {
     AGENT_GUARD_VERIFY_TOTAL_TIMEOUT_SECONDS="$((10#$budget))" \
     "$AGENT_GUARD" pre-final --run-verify --verify-scope fast --advisory 2>"$err_file" || true)"
   report="$(printf '%s\n' "$out" | sed -n 's/^agent-guard: verify_report=//p' | tail -n 1)"
-  verdict="$(python3 - "$report" <<'PY' 2>/dev/null || printf 'missing\n'
+  verdict="$(python3 -I -S - "$report" <<'PY' 2>/dev/null || printf 'missing\n'
 import json
 import sys
 
@@ -788,7 +779,7 @@ PY
   esac
   if [[ ${#notes[@]} -gt 0 ]]; then
     printf 'agent-hook: %s\n' "${notes[@]}" >&2
-    python3 -c 'import json, sys; print(json.dumps({"systemMessage": " ".join("agent-hook: " + note for note in sys.argv[1:])}))' \
+    python3 -I -S -c 'import json, sys; print(json.dumps({"systemMessage": " ".join("agent-hook: " + note for note in sys.argv[1:])}))' \
       "${notes[@]}" || true
   fi
   change_map write "$snapshot" ||

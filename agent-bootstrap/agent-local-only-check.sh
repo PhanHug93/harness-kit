@@ -122,7 +122,7 @@ check_path() {
 check_gitignore_blob() {
   local source="$1"
   local content="$2"
-  if printf '%s\n' "$content" | grep -Fq "$GITIGNORE_MARKER"; then
+  if grep -Fq -- "$GITIGNORE_MARKER" <<<"$content"; then
     record_violation ".gitignore" "contains harness-kit local-only block" "$source"
   fi
 }
@@ -171,7 +171,7 @@ scan_commit_delta() {
     check_path "$path" "$commit"
   done < <(git -C "$ROOT_DIR" diff-tree --root --no-commit-id --name-only -r "$commit")
 
-  if git -C "$ROOT_DIR" diff-tree --root --no-commit-id --name-only -r "$commit" | grep -Fxq ".gitignore" &&
+  if grep -Fxq ".gitignore" < <(git -C "$ROOT_DIR" diff-tree --root --no-commit-id --name-only -r "$commit") &&
     git -C "$ROOT_DIR" cat-file -e "$commit:.gitignore" 2>/dev/null; then
     content="$(git -C "$ROOT_DIR" show "$commit:.gitignore")"
     check_gitignore_blob "$commit" "$content"

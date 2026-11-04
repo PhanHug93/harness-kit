@@ -66,12 +66,6 @@ copy="$(fresh_copy entry-drift)"
 printf '# drift\n' >>"$copy/agent-bootstrap/harness-kit-one-shot-upgrade.sh"
 expect_fail "entry copy drift" "byte-identical copy" bash "$copy/scripts/release.sh" --check
 
-copy="$(fresh_copy snapshot-drift)"
-printf '# hand edit\n' >>"$copy/agent-bootstrap/agent-hook.sh"
-expect_fail "snapshot drift" "agent-bootstrap/agent-hook.sh differs" bash "$copy/scripts/release.sh" --check
-bash "$copy/scripts/sync-runtime-snapshots.sh" >/dev/null
-bash "$copy/scripts/release.sh" --check >/dev/null || fail "snapshot sync must repair drift"
-
 copy="$(fresh_copy migration-checks)"
 mig="$copy/agent-bootstrap/migrations"
 write_migration "$mig" next-zz-fixture next

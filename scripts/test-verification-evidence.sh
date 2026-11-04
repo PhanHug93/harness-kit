@@ -245,7 +245,7 @@ write_contract "{\"verification\":[{\"command\":\"$(stub base)\",\"purpose\":\"s
 echo v1 > "$TMP_ROOT/tool"; : > "$mark"
 git -C "$target" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m base
 (cd "$target" && scripts/agent-guard.sh baseline >/dev/null) || fail "baseline green"
-(cd "$target" && scripts/agent-guard.sh baseline | grep -q cached) || fail "second baseline must be cached"
+baseline_out="$(cd "$target" && scripts/agent-guard.sh baseline)" && grep -q cached <<<"$baseline_out" || fail "second baseline must be cached"
 [[ "$(grep -c base "$mark")" -eq 1 ]] || fail "cached baseline must not run commands"
 python3 - "$baseline_report" "$(git -C "$target" rev-parse HEAD)" <<'PY' || fail "baseline report fields"
 import json, sys
@@ -292,7 +292,7 @@ import json, sys
 t = json.load(open(sys.argv[1]))["toolchain"]
 assert t == [sys.argv[2] + "\n3\nbroken\n", 'bad "quote\n127\nunparseable command'], t
 PY
-(cd "$target" && scripts/agent-guard.sh baseline | grep -q cached) || fail "non-zero toolchain fingerprint must be stable"
+baseline_out="$(cd "$target" && scripts/agent-guard.sh baseline)" && grep -q cached <<<"$baseline_out" || fail "non-zero toolchain fingerprint must be stable"
 write_contract "{\"toolchain\":[\"$TMP_ROOT/slow-tool exit\",\"$TMP_ROOT/slow-tool hang\"]}"
 started=$SECONDS
 (cd "$target" && AGENT_GUARD_TOOLCHAIN_TIMEOUT=1 scripts/agent-guard.sh baseline >/dev/null) || fail "slow toolchain baseline"
@@ -541,8 +541,8 @@ build_model="$(seatsh resolve build | sed -n 5p)"
 [[ "$(seatsh model-overlap build "$gate_model" 2>/dev/null)" == *gate* ]] || fail "overlap must name @gate"
 [[ "$(seatsh model-overlap verify "$build_model" 2>/dev/null)" == *build* ]] || fail "verify on the build model must name build"
 [[ -z "$(seatsh model-overlap build unrelated-model-x 2>/dev/null)" ]] || fail "unrelated model must print nothing"
-seatsh model-overlap build "$gate_model" 2>&1 | grep -q gate_coding && fail "overlap output must not mention gate_coding"
-seatsh model-overlap build "$gate_model" 2>&1 >/dev/null | grep -q 'is also the primary model of' || fail "model-overlap must note the overlap"
+grep -q gate_coding < <(seatsh model-overlap build "$gate_model" 2>&1) && fail "overlap output must not mention gate_coding"
+grep -q 'is also the primary model of' < <(seatsh model-overlap build "$gate_model" 2>&1 >/dev/null) || fail "model-overlap must note the overlap"
 quiet_err="$(seatsh model-overlap --quiet build "$gate_model" 2>&1 >/dev/null)"
 [[ -z "$quiet_err" && "$(seatsh model-overlap --quiet build "$gate_model" 2>/dev/null)" == *gate* ]] ||
   fail "model-overlap --quiet must print the seats and no note: $quiet_err"
@@ -667,13 +667,13 @@ launched_ok "default @build launch"
 grep -q 'model_overlap=' "$codex_args" && fail "no overlap on the default roster"
 # 27 @build: Codex runs as a child, pre-final runs once after it, Codex's exit code wins
 [[ ! -s "$mark" ]] || fail "CODEX_SKIP_CLOSEOUT=1 must skip the close-out"
-launched | grep -q 'verify_report=' && fail "CODEX_SKIP_CLOSEOUT=1 must not report a verification"
+grep -q 'verify_report=' < <(launched) && fail "CODEX_SKIP_CLOSEOUT=1 must not report a verification"
 launch STUB_CODEX_RC=7 .codex/codex-mode.sh @build x
 [[ "$rc" -eq 7 ]] || fail "@build must exit with Codex's exit code (got $rc): $(launched)"
 [[ "$(grep -cx closeout "$mark")" -eq 1 ]] || fail "@build close-out must run pre-final --run-verify once"
 closeout_report="$(launched | sed -n 's/.*verify_report=//p' | tail -n1)"
 [[ -n "$closeout_report" && -f "$closeout_report" ]] || fail "@build close-out must print the report path: $(launched)"
-launched | grep -q 'pre-final ok' || fail "@build close-out must print pre-final's last line: $(launched)"
+grep -q 'pre-final ok' < <(launched) || fail "@build close-out must print pre-final's last line: $(launched)"
 # Codex keeps the terminal's stdin as a child
 printf 'stdin-line\n' > "$TMP_ROOT/stdin-in"; : > "$mark"
 launch STUB_CODEX_STDIN="$TMP_ROOT/stdin-got" .codex/codex-mode.sh @build x < "$TMP_ROOT/stdin-in"
@@ -713,7 +713,7 @@ rc=0; wait "$bg_launch" || rc=$?
 write_contract '{"verification":[{"command":"false","purpose":"red","source":"test"}]}'
 launch .codex/codex-mode.sh @build x
 [[ "$rc" -eq 0 ]] || fail "a failing close-out keeps Codex's exit code (got $rc): $(launched)"
-launched | grep -q 'verify_report=' || fail "a failing close-out still names its report: $(launched)"
+grep -q 'verify_report=' < <(launched) || fail "a failing close-out still names its report: $(launched)"
 write_contract "{\"verification\":[{\"command\":\"$(stub closeout)\",\"purpose\":\"stub\",\"source\":\"test\"}]}"
 : > "$mark"
 launch .codex/codex-mode.sh @verify x

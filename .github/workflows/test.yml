@@ -1,8 +1,8 @@
-name: drift-test
+name: tests
 
 on:
-  # Branch pushes are tested through their pull request; push runs only cover
-  # main and release tags, so one commit is not tested twice.
+  # Branch pushes are tested through their pull request. A push to main or a
+  # release tag skips the heavy jobs when the same tree already passed (gate).
   push:
     branches: [main]
     tags: ['v*']
@@ -14,13 +14,49 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
-  drift-test:
-    name: bootstrap drift test (${{ matrix.os }})
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.gate.outputs.full }}
+      tree: ${{ steps.gate.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release tag matches VERSION
+        if: github.ref_type == 'tag'
+        run: bash scripts/release.sh --check-tag "$GITHUB_REF_NAME"
+      - name: Decide whether this tree still needs the full tests
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-gate.sh >>"$GITHUB_OUTPUT"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+      - name: Lint (release pins, pipe safety, shellcheck, CI groups, gate)
+        env:
+          CI: 'true'
+        run: bash scripts/test.sh --group lint
+
+  tests:
+    needs: gate
+    if: needs.gate.outputs.full == 'true'
+    name: tests (${{ matrix.os }}, ${{ matrix.group }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        group: [ci-1, ci-2, ci-3, ci-4]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,113 +64,32 @@ jobs:
           fetch-depth: 0
       - name: Show bash version
         run: bash --version | head -1
-      - name: Install shellcheck on Ubuntu
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-      - name: Verify release tag matches VERSION
-        if: github.ref_type == 'tag'
-        run: bash scripts/release.sh --check-tag "$GITHUB_REF_NAME"
-      - name: Run release script checks
-        run: bash scripts/test-release.sh
-      - name: Run workspace repository guard checks
-        run: python3 scripts/test-workspace-repository-guard.py
-      - name: Run retirement lifecycle checks
-        run: python3 scripts/test-agent-retirement.py
-      - name: Run rule inventory checks
-        run: bash scripts/test-rule-inventory.sh
-      - name: Run agentmemory version check tests
-        run: bash scripts/test-agentmemory-check.sh
-      - name: Run bootstrap drift test
-        run: bash scripts/test-bootstrap-multi-agent-project.sh
-      # Bootstrap already runs onboarding and seats/launcher with inherited PATH.
-      - name: Run one-shot and tagged historical migrations
+      # The full historical campaign runs once per OS: from tags on Linux, from
+      # the tagless fixtures on macOS (bash 3.2 and BSD tools are macOS-only).
+      - name: Run ${{ matrix.group }}
         env:
-          HARNESS_MIGRATION_HISTORICAL_SOURCE: tags
-        run: bash scripts/test-one-shot-upgrade.sh
-      - name: Run tagless historical fixture migration
+          GROUP: ${{ matrix.group }}
         run: |
-          campaign="$(mktemp -d)"
-          trap 'rm -rf "$campaign"' EXIT
-          mkdir -p "$campaign/source/scripts"
-          cp -R agent-bootstrap "$campaign/source/"
-          cp scripts/test-agent-seats-migration.py "$campaign/source/scripts/"
-          cp -R scripts/fixtures "$campaign/source/scripts/"
-          python3 "$campaign/source/scripts/test-agent-seats-migration.py" \
-            --historical-source fixtures --evidence-dir "$campaign/evidence"
-      - name: Run seats and launcher with absent PATH
-        run: |
-          campaign="$(mktemp -d)"
-          trap 'rm -rf "$campaign"' EXIT
-          mkdir -p "$campaign/target"
-          bash scripts/bootstrap-multi-agent-project.sh --target "$campaign/target" --workflow full
-          python3 - "$PWD" "$campaign" <<'PY'
-          import os
-          from pathlib import Path
-          import subprocess
-          import sys
-          root, campaign = map(Path, sys.argv[1:])
-          env = dict(os.environ, SEATS_QA_BASH="/bin/bash")
-          env.pop("PATH", None)
-          subprocess.run([sys.executable, str(root / "scripts/test-agent-seats.py"),
-                          str(campaign / "target"), str(root / "agent-bootstrap/agent-seats.sh"),
-                          str(campaign / "seats.json")], env=env, check=True)
-          subprocess.run([sys.executable, str(root / "scripts/test-agent-seats-launcher.py")],
-                         env=env, check=True)
-          PY
-      - name: Run generated target verifier
-        run: |
-          tmp="$(mktemp -d)"
-          bash scripts/bootstrap-multi-agent-project.sh --target "$tmp" --workflow full
-          cd "$tmp"
-          scripts/verify-ai-deps.sh
-          scripts/verify-ai-deps.sh --json | python3 -m json.tool >/dev/null
-      - name: Run shellcheck if available
-        run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck --external-sources --exclude=SC1090,SC1091,SC2034,SC2154 \
-              scripts/bootstrap-multi-agent-project.sh \
-              scripts/install-agent-bootstrap-home.sh \
-              scripts/test-bootstrap-multi-agent-project.sh \
-              scripts/test-onboarding-fixtures.sh \
-              scripts/test-one-shot-upgrade.sh \
-              agent-bootstrap/bootstrap-multi-agent-project.sh \
-              agent-bootstrap/harness-kit-one-shot.sh \
-              agent-bootstrap/harness-kit-one-shot-upgrade.sh \
-              agent-bootstrap/harness-kit-run.sh \
-              agent-bootstrap/lib/migrations.sh \
-              scripts/test-verification-evidence.sh \
-              scripts/test-harness-kit-entry.sh \
-              scripts/test-harness-migrations.sh \
-              scripts/test-harness-kit-staging.sh \
-              scripts/test-harness-kit-oneshot.sh \
-              scripts/test-change-tiers.sh \
-              agent-bootstrap/agent-bootstrap-update.sh \
-              agent-bootstrap/install-agent-bootstrap-home.sh \
-              agent-bootstrap/agent-hook.sh \
-              agent-bootstrap/agent-guard.sh \
-              agent-bootstrap/agent-seats.sh \
-              agent-bootstrap/verify-ai-deps.sh \
-              agent-bootstrap/lib/core.sh \
-              agent-bootstrap/lib/overlays.sh \
-              agent-bootstrap/lib/detect.sh \
-              agent-bootstrap/lib/render.sh \
-              agent-bootstrap/lib/writers-runtime.sh \
-              agent-bootstrap/lib/writers-docs.sh \
-              agent-bootstrap/lib/onboarding.sh
-            shellcheck --shell=bash --exclude=SC1090,SC1091,SC2034,SC2154 agent-bootstrap/migrations/*.sh
+          skip=()
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            export HARNESS_MIGRATION_HISTORICAL_SOURCE=tags
+            skip=(--skip historical-fixtures)
           else
-            echo "shellcheck not installed; skipping optional shell lint"
+            export ONE_SHOT_HISTORICAL_CAMPAIGN=skip
           fi
-      - name: Run shellcheck on generated target if available
-        run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            tmp="$(mktemp -d)"
-            bash scripts/bootstrap-multi-agent-project.sh --target "$tmp" --workflow full
-            shellcheck --external-sources --exclude=SC1090,SC1091,SC2034,SC2154 \
-              "$tmp"/scripts/*.sh \
-              "$tmp"/.codex/codex-mode.sh
-          else
-            echo "shellcheck not installed; skipping optional generated target shell lint"
-          fi
+          bash scripts/test.sh --group "$GROUP" ${skip[@]+"${skip[@]}"}
+
+  record:
+    needs: [gate, lint, tests]
+    if: needs.gate.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write the tested tree
+        env:
+          TREE: ${{ needs.gate.outputs.tree }}
+        run: printf '%s %s\n' "$TREE" "$GITHUB_RUN_ID" >tested-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-tree-${{ needs.gate.outputs.tree }}
+          path: tested-tree.txt
+          retention-days: 30

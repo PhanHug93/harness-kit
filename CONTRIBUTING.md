@@ -28,10 +28,11 @@ This guide is for changing, testing and releasing the kit. Using the kit is in
 
 ## Changing the bundle
 
-- Generated runtime files in `agent-bootstrap/` (`agent-hook.sh`,
-  `verify-ai-deps.sh`, …) are snapshots of the writers' output: after editing
-  a writer, run `bash scripts/sync-runtime-snapshots.sh` instead of copying
-  heredocs by hand (`--check` reports drift).
+- Runtime scripts in `agent-bootstrap/` (`agent-guard.sh`, `agent-hook.sh`,
+  `verify-ai-deps.sh`, `detect-agent-tech-stack.sh`, `agent-tech-stack-lib.sh`,
+  …) are the source: edit them in place. The writers copy them into targets;
+  `agent-hook.sh` and `verify-ai-deps.sh` get the target's preset on their
+  `WORKFLOW_PRESET=` line.
 - Keep the template mirror, the home installer's copy list and `MANIFEST.md`
   in step with the bundle; the drift test checks all three.
 - A change that must reach existing projects once (removing a leftover file,
@@ -42,35 +43,52 @@ This guide is for changing, testing and releasing the kit. Using the kit is in
 On every edit, run the fast tier:
 
 ```bash
-bash scripts/test-fast.sh             # about 5 minutes; lists every failure at the end
-bash scripts/test-fast.sh --only <check>
+bash scripts/test.sh                  # fast tier in parallel; lists every failure at the end
+bash scripts/test.sh --only <suite>   # repeatable; --skip <suite> leaves one out
+bash scripts/test.sh --list           # the table: suite, tier, CI group, mode
 ```
 
-It covers syntax, release pins and mirrors, the release script, the workspace
-guard, onboarding, the retirement lifecycle, detector fixtures, path policy,
-concurrent guard reads, local-only mode, verification evidence, the one-shot
-entry, knowledge, migrations, staging and runs, the rule inventory and the
-agentmemory version check.
+`scripts/test.sh` holds the only list of suites. Each runs with an empty
+stdin and its own log, `-j N` sets the parallel jobs (default: CPU count, at
+most 4), and `serial` rows (`guard-race`) run alone after the batch.
+`scripts/test-fast.sh` still works and calls it.
 
-The full tier runs in CI on Linux and macOS for every pull request, push to
-`main` and release tag. Other branches are tested through their pull request
-(or a manual `workflow_dispatch` run), and a newer push cancels the older run.
-Run a full-tier entrypoint locally only to reproduce a CI failure or when CI
-cannot run, and run it once rather than after every edit:
+The full tier adds the drift test groups, the upgrade suites and the
+historical migration campaigns:
 
 ```bash
-bash scripts/test-bootstrap-multi-agent-project.sh
-HARNESS_MIGRATION_HISTORICAL_SOURCE=tags bash scripts/test-one-shot-upgrade.sh
-bash scripts/test-release.sh
+bash scripts/test.sh --full           # about 13 minutes on an idle Mac
+bash scripts/test-bootstrap-multi-agent-project.sh --group contracts   # one drift group
 ```
 
-`test-bootstrap-multi-agent-project.sh` is not parallel-safe: run it alone,
-and do not edit the bundle or the test while it runs. It checks the canonical
-home export, generated runtime mirrors, the manifest inventory, onboarding
-fixtures, model routing, non-destructive migration, context budgets and
-version pins. `python3 scripts/test-workspace-repository-guard.py` covers real
+The drift test has six groups (`--list-groups`). Each one sets up what it
+needs, writes nothing into the source tree (it checks `git status` at the
+end), and can run in parallel with the others. While suites run, do not add
+or edit files in the repository: a new untracked file fails that check, and
+bash reads a running script as it goes. Together the groups check:
+
+- the canonical home export, generated runtime scripts and the manifest
+  inventory;
+- onboarding fixtures, model routing, non-destructive migration;
+- context budgets and version pins.
+
+`python3 scripts/test-workspace-repository-guard.py` covers real
 repositories, symlinks, worktrees, stale sessions, changed workdirs and the
-generated launcher and hooks.
+generated launcher and hooks. `scripts/test-hook-hot-path.sh` holds the
+hook's per-call budget of `python3` and `git` starts.
+
+CI (`.github/workflows/test.yml`) has four jobs:
+
+- `gate` decides whether the heavy jobs are needed (`scripts/ci-gate.sh`);
+- `lint` runs on Linux;
+- `tests` is a matrix of four groups on Linux and macOS;
+- `record` runs last.
+
+A push to `main` or a release tag skips `tests` when the same tree already
+passed: the `record` job of a fully green run uploads `tested-tree-<tree>`.
+Pull requests and manual runs always test in full. When you add a suite, give
+it a group in the table; `bash scripts/test.sh --check-ci` (a lint row) fails
+if the workflow's matrix and the table's groups differ.
 
 ## Agent docs and the rule inventory
 
@@ -101,7 +119,7 @@ bash scripts/release.sh <YYYY.MM.DD.N> --title "<summary>"
 
 `agent-bootstrap/VERSION` is the single source: the script updates every
 version pin, turns `## Unreleased` into the release heading, renames
-`next-*` migrations, syncs the template mirror and runtime snapshots, and
+`next-*` migrations, syncs the template mirror, and
 verifies the result. It never commits, tags or pushes. Before an authorized
 tag, run `bash scripts/release.sh --check-tag v<version>`; CI repeats this
 check on every tag push.
@@ -165,10 +183,10 @@ belong below a private campaign parent. Do not snapshot a shared system temp roo
 
 | Parent command / group | Covered children / mode | Fixture / evidence |
 | --- | --- | --- |
-| `bash scripts/test-bootstrap-multi-agent-project.sh` | Onboarding; generator/detector/guard; seats and launcher with inherited PATH | Private target and fixtures; capture parent stdout/stderr/exit |
+| `bash scripts/test-bootstrap-multi-agent-project.sh [--group G]` | Six groups (focus install inventory contracts prefinal lifecycle): onboarding; generator/detector/guard; seats and launcher with inherited PATH | Private target and fixtures; capture parent stdout/stderr/exit |
 | `HARNESS_MIGRATION_HISTORICAL_SOURCE=tags bash scripts/test-one-shot-upgrade.sh` | One-shot; selector/negative archive probes; partial-auto selector; one full tags migration | Independent Git clone for ref mutations; source refs unchanged; migration summary/provenance |
-| `python3 scripts/test-agent-seats-migration.py --historical-source fixtures` in a source copy with no `.git` | One full tagless fixture migration | Checked-in archives + manifest; migration summary/provenance |
-| Seats and launcher with PATH removed from the process environment | Absent PATH only; use an absolute Python path and `SEATS_QA_BASH=/bin/bash` | Separate private generated target; seats JSON and launcher output |
+| `bash scripts/test-historical-fixtures.sh` (runs `test-agent-seats-migration.py --historical-source fixtures` in a source copy with no `.git`) | One full tagless fixture migration | Checked-in archives + manifest; migration summary/provenance |
+| `bash scripts/test-seats-no-path.sh`: seats and launcher with PATH removed from the process environment | Absent PATH only; use an absolute Python path and `SEATS_QA_BASH=/bin/bash` | Separate private generated target; seats JSON and launcher output |
 | Linux descriptor probe from the release recipe | Descriptor resolution and external sentinel preservation | Trace + parser result + sentinel bytes/mode/inode |
 
 Do not run onboarding again after a full bootstrap pass, or the same historical
