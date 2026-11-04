@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.11.04.2`
+Version: `2026.11.05.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -97,6 +97,7 @@ tag or source branch to complete a feature PR.
 | `migrations/2026.10.20.1-untrack-local-records.sh` | Migration `2026.10.20.1-untrack-local-records`. | Must match canonical home export; never emitted into targets. |
 | `migrations/2026.11.04.1-remove-rtk.sh` | Migration `2026.11.04.1-remove-rtk`. | Must match canonical home export; never emitted into targets. |
 | `migrations/2026.11.04.1-remove-legacy-entrypoints.sh` | Migration `2026.11.04.1-remove-legacy-entrypoints`. | Must match canonical home export; never emitted into targets. |
+| `migrations/2026.11.05.1-remove-mode-commands.sh` | Migration `2026.11.05.1-remove-mode-commands`. | Must match canonical home export; never emitted into targets. |
 
 ## Guardrail
 

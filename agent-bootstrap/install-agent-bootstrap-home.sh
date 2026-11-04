@@ -396,6 +396,7 @@ main() {
   copy_file "migrations/2026.10.20.1-untrack-local-records.sh" "migrations/2026.10.20.1-untrack-local-records.sh"
   copy_file "migrations/2026.11.04.1-remove-rtk.sh" "migrations/2026.11.04.1-remove-rtk.sh"
   copy_file "migrations/2026.11.04.1-remove-legacy-entrypoints.sh" "migrations/2026.11.04.1-remove-legacy-entrypoints.sh"
+  copy_file "migrations/2026.11.05.1-remove-mode-commands.sh" "migrations/2026.11.05.1-remove-mode-commands.sh"
   retire_rtk_copies
   write_source_metadata
   init_history

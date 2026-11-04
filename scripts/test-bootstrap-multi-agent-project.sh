@@ -1985,7 +1985,8 @@ for canonical_file in \
   migrations/2026.10.20.1-retire-files.sh \
   migrations/2026.10.20.1-untrack-local-records.sh \
   migrations/2026.11.04.1-remove-rtk.sh \
-  migrations/2026.11.04.1-remove-legacy-entrypoints.sh; do
+  migrations/2026.11.04.1-remove-legacy-entrypoints.sh \
+  migrations/2026.11.05.1-remove-mode-commands.sh; do
 need_same_file "$BOOTSTRAP_BUNDLE/$canonical_file" "$CANONICAL_DIR/$canonical_file" "canonical export $canonical_file"
 done
 for template_root in \
@@ -2702,7 +2703,8 @@ for name, heading in (("gate-review.md", "Pre-coding technical review"), ("verif
         raise SystemExit("final technical review missing fresh_session_attestation")
 PY_HANDOFF_ARTIFACTS
 
-need_not_contains "$handoff_contract" "audit-only procedural declaration" "handoff carries no duplicate Sol-coding policy"
+need_contains "$handoff_contract" "audit-only procedural declaration" "the gate-coding policy lives in the handoff reference"
+need_not_contains "$mode_contracts" "audit-only procedural declaration" "the contracts carry no duplicate gate-coding policy"
 need_not_contains "$handoff_contract" "declarations to be present" "handoff carries no duplicate cross-review checklist"
 
 need_not_contains "$mode_contracts" "initial implementation plus at most two remediation rounds" "mode remediation hard cap removed"
@@ -2769,16 +2771,21 @@ capture_task3_codex_launch() {
 }
 
 capture_task3_codex_launch "gate seat" @gate gpt-6-astra default ultra
-need_contains "$(cat "$TASK3_CAPTURE")" "MODE LOCK: TECHNICAL-REVIEW" "gate seat technical review lock"
+need_contains "$(cat "$TASK3_CAPTURE")" "SEAT LOCK: @gate" "gate seat lock"
+need_contains "$(cat "$TASK3_CAPTURE")" "follow section @gate of docs/agent-configs/agent-mode-contracts.md" "gate seed points to its section"
+need_not_contains "$(cat "$TASK3_CAPTURE")" "MODE LOCK" "gate seed carries no mode lock"
 rm -f "$TASK3_CAPTURE"
 task3_planning_out="$( (unset CODEX_HARNESS_SESSION CODEX_MODEL_OVERRIDE CODEX_USE_FALLBACK; cd "$TMP_DIR" && fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" planning) 2>&1 || true)"
-need_contains "$task3_planning_out" "seat @spec is occupied by claude" "planning route opens @spec"
-[[ ! -e "$TASK3_CAPTURE" ]] || fail "planning launched Codex for a claude-held @spec"
-capture_task3_codex_launch "coding route" coding gpt-5.6-luna default xhigh
-capture_task3_codex_launch "reviewing route" reviewing gpt-6-astra default ultra
+need_contains "$task3_planning_out" "planning: removed: use @spec" "the removed planning word names @spec"
+[[ ! -e "$TASK3_CAPTURE" ]] || fail "planning launched Codex"
+task3_spec_out="$( (unset CODEX_HARNESS_SESSION CODEX_MODEL_OVERRIDE CODEX_USE_FALLBACK; cd "$TMP_DIR" && fixture_workspace env PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" "$TASK3_CODEX_MODE" @spec) 2>&1 || true)"
+need_contains "$task3_spec_out" "seat @spec is occupied by claude" "@spec held by claude is refused"
+[[ ! -e "$TASK3_CAPTURE" ]] || fail "@spec launched Codex for a claude-held seat"
+capture_task3_codex_launch "build seat" @build gpt-5.6-luna default xhigh
+capture_task3_codex_launch "verify seat" @verify gpt-6-astra default ultra
 reviewing_seed="$(cat "$TASK3_CAPTURE")"
 severity_rule="Severity names its trigger condition and frequency, or is marked as an estimate."
-need_contains "$reviewing_seed" "mode contracts' severity rule" "reviewing seed points to the contract severity rule"
+need_contains "$reviewing_seed" "follow section @verify of docs/agent-configs/agent-mode-contracts.md" "verify seed points to its section"
 need_not_contains "$reviewing_seed" "$severity_rule" "reviewing seed restates the severity rule"
 for withdrawn_rule in \
   "at most three blockers" \
@@ -2786,7 +2793,7 @@ for withdrawn_rule in \
   "measurement, verification, or data integrity"; do
   need_not_contains "$reviewing_seed$mode_contracts" "$withdrawn_rule" "withdrawn reviewing rule"
 done
-capture_task3_codex_launch "coding fallback" coding gpt-5.6-terra CODEX_USE_FALLBACK xhigh CODEX_USE_FALLBACK=1
+capture_task3_codex_launch "build fallback" @build gpt-5.6-terra CODEX_USE_FALLBACK xhigh CODEX_USE_FALLBACK=1
 python3 - "$TASK3_PROFILE_FILE" <<'PY_TASK3_CATALOG'
 import json, sys
 p = sys.argv[1]
@@ -2795,10 +2802,10 @@ for name in ("custom-coder", "global-model"):
     d["catalog"]["models"][name] = {"host": "codex", "efforts": ["high", "xhigh"], "default_effort": "xhigh"}
 with open(p, "w") as f: json.dump(d, f)
 PY_TASK3_CATALOG
-capture_task3_codex_launch "coding route override" coding custom-coder CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=custom-coder
-capture_task3_codex_launch "global override precedence" coding global-model CODEX_MODEL_OVERRIDE xhigh CODEX_MODEL_OVERRIDE=global-model CODEX_CODING_MODEL_OVERRIDE=custom-coder CODEX_USE_FALLBACK=1
-capture_task3_codex_launch "reasoning override" coding gpt-5.6-luna default high CODEX_REASONING_EFFORT=high
-capture_task3_codex_launch "build on the gate model" coding gpt-6-astra CODEX_CODING_MODEL_OVERRIDE ultra CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
+capture_task3_codex_launch "build route override" @build custom-coder CODEX_CODING_MODEL_OVERRIDE xhigh CODEX_CODING_MODEL_OVERRIDE=custom-coder
+capture_task3_codex_launch "global override precedence" @build global-model CODEX_MODEL_OVERRIDE xhigh CODEX_MODEL_OVERRIDE=global-model CODEX_CODING_MODEL_OVERRIDE=custom-coder CODEX_USE_FALLBACK=1
+capture_task3_codex_launch "reasoning override" @build gpt-5.6-luna default high CODEX_REASONING_EFFORT=high
+capture_task3_codex_launch "build on the gate model" @build gpt-6-astra CODEX_CODING_MODEL_OVERRIDE ultra CODEX_CODING_MODEL_OVERRIDE=gpt-6-astra
 need_contains "$(cat "$TASK3_CAPTURE")" "model_overlap=gate" "model overlap seed fact"
 need_contains "$(cat "$TASK3_OUTPUT")" "WARN: model_overlap=gate" "model overlap printed warning"
 need_not_contains "$(cat "$TASK3_CAPTURE")$(cat "$TASK3_OUTPUT")" "authorization=" "launcher never writes an authorization"
@@ -2853,7 +2860,7 @@ for invalid_profile in malformed missing_seat unknown_model bad_effort orphan_fa
   esac
   fallback_case=0
   [[ "$invalid_profile" == "orphan_fallback" ]] && fallback_case=1
-  for strict_cmd in planning coding reviewing run; do
+  for strict_cmd in @spec @build @verify run; do
     assert_task3_profile_failure "$invalid_profile $strict_cmd" "$expected_profile_detail" "$strict_cmd" "$fallback_case"
   done
   assert_task3_profile_failure "$invalid_profile status" "$expected_profile_detail" status "$fallback_case"
@@ -2892,7 +2899,7 @@ need_not_contains "$(cat "$TASK3_OUTPUT")" "agent-seats: ERROR:" "cross_review a
 [[ ! -s "$TASK3_CAPTURE" ]] || fail "cross_review launched Codex"
 cp "$TASK3_VALID_PROFILE" "$TASK3_PROFILE_FILE"
 
-for nested_cmd in planning coding reviewing run; do
+for nested_cmd in @spec @build @verify run; do
   rm -f "$TASK3_CAPTURE" "$TASK3_OUTPUT"
   if PATH="$TASK3_FAKEBIN:$PATH" CODEX_CAPTURE_FILE="$TASK3_CAPTURE" CODEX_HARNESS_SESSION=1 "$TASK3_CODEX_MODE" "$nested_cmd" >"$TASK3_OUTPUT" 2>&1; then
     fail "nested $nested_cmd unexpectedly succeeded"

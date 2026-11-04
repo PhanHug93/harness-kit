@@ -51,7 +51,7 @@
     "gate": {
       "tag": "@gate",
       "phase": "technical_review",
-      "duty": "pre-coding technical review (blocking adequacy verdict)",
+      "duty": "technical gate and plan",
       "occupant": {
         "host": "codex",
         "model": "gpt-6-astra",
@@ -63,7 +63,7 @@
     "build": {
       "tag": "@build",
       "phase": "implementation",
-      "duty": "bounded implementation",
+      "duty": "build from the plan",
       "occupant": {
         "host": "codex",
         "model": "gpt-5.6-luna",
@@ -75,7 +75,7 @@
     "verify": {
       "tag": "@verify",
       "phase": "verification",
-      "duty": "final technical review",
+      "duty": "verification review",
       "occupant": {
         "host": "codex",
         "model": "gpt-6-astra",

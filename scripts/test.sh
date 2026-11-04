@@ -55,6 +55,8 @@ syntax                 fast ci-4     par    run_syntax
 detector               fast ci-4     par    bash scripts/test-detector-fixtures.sh
 pipe-safety            fast lint     par    bash scripts/test-pipe-safety.sh
 hook-hot-path          fast ci-4     par    bash scripts/test-hook-hot-path.sh
+seat-contracts         fast ci-4     par    bash scripts/test-seat-contracts.sh
+packet-seats           fast ci-4     par    bash scripts/test-packet-seats.sh
 guard-race             fast ci-4     serial bash scripts/test-guard-concurrency.sh
 shellcheck             fast lint     par    bash scripts/test-shellcheck.sh
 ci-groups              fast lint     par    bash scripts/test.sh --check-ci

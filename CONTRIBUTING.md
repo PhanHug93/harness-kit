@@ -92,7 +92,7 @@ if the workflow's matrix and the table's groups differ.
 
 ## Agent docs and the rule inventory
 
-The docs a project's agents read (AGENTS.md, CLAUDE.md, the mode contracts,
+The docs a project's agents read (AGENTS.md, CLAUDE.md, the seat contracts,
 the handoff schema and reference, RECOVERY, the READMEs under `.claude/` and
 `.codex/`, the skills) keep each rule in one file, in plain short sentences.
 `scripts/rule-inventory.tsv` lists every mandatory rule with its preset, the

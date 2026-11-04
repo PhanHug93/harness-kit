@@ -121,15 +121,15 @@ evaluate_common_onboarding() {
   need_contains "$task_journal" '`memory`' "task journal doc optional memory field"
   need_contains "$task_journal" '`verification`' "task journal doc optional verification field"
   local mode_contracts; mode_contracts="$(cat "$dir/docs/agent-configs/agent-mode-contracts.md")"
-  need_contains "$mode_contracts" "## Claude–Codex Collaboration Protocol" "mode contracts canonical collaboration protocol"
+  need_contains "$mode_contracts" "## Shared rules" "seat contracts canonical shared rules"
   need_contains "$mode_contracts" "The seat that changed code runs focused tests while editing" "mode contracts split verification duties"
-  need_contains "$mode_contracts" '`@spec` opens new behaviour with `superpowers:brainstorming`' "mode contracts brainstorming anchor"
-  need_contains "$mode_contracts" "Other seats never brainstorm" "mode contracts brainstorming stays in @spec"
-  need_contains "$mode_contracts" '`@gate` approves' "mode contracts plan after gate approval"
-  need_contains "$mode_contracts" "checks that seat's hand-off" "mode contracts build report is the test evidence"
-  need_contains "$mode_contracts" '`analysis` · `@spec`' "mode contracts Claude analysis owner"
-  need_contains "$mode_contracts" '`technical_review` · `@gate`' "mode contracts Sol technical review owner"
-  need_contains "$mode_contracts" '`implementation` · `@build`' "mode contracts Luna implementation owner"
+  need_contains "$mode_contracts" 'new behaviour opens with' "seat contracts brainstorming anchor"
+  need_contains "$mode_contracts" "the only seat that brainstorms" "seat contracts brainstorming stays in @spec"
+  need_contains "$mode_contracts" 'writes the plan with `superpowers:writing-plans`' "seat contracts: @gate writes the plan"
+  need_contains "$(cat "$dir/docs/agent-configs/agent-handoff-reference.md")" "checks the hand-off report against the diff" "the build report is the test evidence"
+  need_contains "$mode_contracts" 'Starts when: phase `analysis`' "seat contracts analysis owner"
+  need_contains "$mode_contracts" 'Starts when: phase `technical_review`' "seat contracts technical review owner"
+  need_contains "$mode_contracts" 'Starts when: phase `implementation`' "seat contracts implementation owner"
   need_contains "$mode_contracts" 'counts returns to `implementation` only' "mode remediation checkpoint"
   need_not_contains "$mode_contracts" "at most two remediation rounds" "mode remediation hard cap removed"
   need_contains "$mode_contracts" "another bounded pass is worth its cost" "mode remediation bounded cost"
@@ -146,9 +146,11 @@ evaluate_common_onboarding() {
     AGENTS.md \
     CLAUDE.md \
     .claude/README.md \
-    .claude/commands/planning.md \
-    .claude/commands/coding.md \
-    .claude/commands/reviewing.md \
+    .claude/commands/spec.md \
+    .claude/commands/gate.md \
+    .claude/commands/build.md \
+    .claude/commands/verify.md \
+    .claude/commands/audit.md \
     .claude/commands/codex/setup.md \
     .claude/commands/codex/rescue.md \
     .claude/commands/codex/status.md \
@@ -181,15 +183,12 @@ evaluate_common_onboarding() {
     need_not_contains "$host_text" "at most two remediation" "$host_surface copies canonical remediation limit"
   done
 
-  # Legacy aliases only point to their canonical command.
-  local alias
-  for alias in planning coding reviewing; do
-    need_contains "$(cat "$dir/.claude/commands/$alias-full-flow.md")" ".claude/commands/$alias.md" "/$alias-full-flow points to /$alias"
+  local removed
+  for removed in planning coding reviewing planning-full-flow coding-full-flow reviewing-full-flow; do
+    [[ ! -e "$dir/.claude/commands/$removed.md" ]] || fail "/$removed is still generated"
   done
-
-  local claude_coding; claude_coding="$(cat "$dir/.claude/commands/coding.md")"
-  need_contains "$claude_coding" "explicit user decision" "Claude coding wrapper user authorization"
-  need_contains "$claude_coding" 'blocking `@gate` adequacy verdict' "Claude coding wrapper Sol gate"
+  need_contains "$mode_contracts" "Only the packet's \`@build\` codes" "seat contracts: only the packet's @build codes"
+  need_contains "$mode_contracts" 'owns the blocking adequacy verdict' "seat contracts: the @gate verdict"
 
   need_contains "$(cat "$dir/.claude/commands/council.md" 2>/dev/null)" "llm-council-agent-workflow.md" "council command points to the doc"
   need_contains "$(cat "$dir/.claude/commands/karpathy.md" 2>/dev/null)" "karpathy-llm-coding-agent-config.md" "karpathy command points to the doc"
@@ -205,9 +204,11 @@ evaluate_common_onboarding() {
     "$dir/docs/agent-configs/agent-mode-contracts.md" \
     "$dir/docs/agent-configs/llm-council-agent-workflow.md" \
     "$dir/docs/agent-configs/karpathy-llm-coding-agent-config.md" \
-    "$dir/.claude/commands/planning.md" \
-    "$dir/.claude/commands/coding.md" \
-    "$dir/.claude/commands/reviewing.md" \
+    "$dir/.claude/commands/spec.md" \
+    "$dir/.claude/commands/gate.md" \
+    "$dir/.claude/commands/build.md" \
+    "$dir/.claude/commands/verify.md" \
+    "$dir/.claude/commands/audit.md" \
     "$dir/.claude/commands/council.md" \
     "$dir/.claude/commands/karpathy.md" \
     "$dir/.codex/codex-mode.sh")"

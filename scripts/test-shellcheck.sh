@@ -32,6 +32,8 @@ shellcheck --external-sources --exclude="$exclude" \
   scripts/test-runner-selftest.sh \
   scripts/test-pipe-safety.sh \
   scripts/test-hook-hot-path.sh \
+  scripts/test-seat-contracts.sh \
+  scripts/test-packet-seats.sh \
   scripts/test-historical-fixtures.sh \
   scripts/test-seats-no-path.sh \
   scripts/test-shellcheck.sh \

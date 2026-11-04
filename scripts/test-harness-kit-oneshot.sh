@@ -287,9 +287,26 @@ grep -Fxq "$MARKER" "$(exclude_of "$c1")" || fail "case 1: the ignore block must
 [[ "$(jget "$c1/.tools/agent-state/project-knowledge.json" 'd["kit"]["version"]')" == "$VERSION" ]] ||
   fail "case 1: project knowledge was not written"
 [[ "$(jget "$REPORT" '(d["result"], [v["check"] + "=" + v["status"] for v in d["verify"]])')" == \
-  "('done', ['scripts/agent-hook.sh doctor=pass', 'scripts/agent-guard.sh preflight=pass'])" ]] ||
-  fail "case 1: verification must run doctor and preflight once each: $(cat "$REPORT")"
+  "('done', ['scripts/agent-guard.sh preflight=pass', 'scripts/agent-hook.sh doctor=pass'])" ]] ||
+  fail "case 1: verification must run preflight, then doctor, once each: $(cat "$REPORT")"
 [[ ! -e "$c1/.tools/agent-state/run.lock" ]] || fail "case 1: the run lock must be released"
+# An update rewrites AGENTS.md and the lock, so the context pack of the old
+# install no longer matches them. Verify refreshes it (preflight) before the
+# doctor checks it; the next run must not fail on "stale required context".
+python3 -I -B - "$c1/.agents/state/context-pack.json" <<'PY' || fail "case 1: could not age the context pack"
+import json, sys
+path = sys.argv[1]
+pack = json.load(open(path))
+for entry in pack["required_context"]:
+    if entry["path"] == "AGENTS.md":
+        entry["sha256"] = "0" * 64
+json.dump(pack, open(path, "w"))
+PY
+hk "$c1"
+expect 0 "case 1 rerun after an old context pack"
+[[ "$(jget "$REPORT" '[v["check"] + "=" + v["status"] for v in d["verify"]]')" == \
+  "['scripts/agent-guard.sh preflight=pass', 'scripts/agent-hook.sh doctor=pass']" ]] ||
+  fail "case 1: an old context pack must not fail verify: $(cat "$REPORT")"
 
 # 10 checker: a tracked plain .gitignore beside the block in exclude passes.
 printf 'node_modules/\n' >"$c1/.gitignore"
@@ -318,13 +335,13 @@ mkdir -p "$c1/.harness-kit/v2026.01.01.1" "$c1/.harness-kit/v2026.02.01.1" "$c1/
 
 # 2 reinstall restores a deleted kit file and keeps a local patch; 5 a pin.
 rm "$c1/.claude/commands/council.md"
-printf 'local patch\n' >>"$c1/.claude/commands/coding.md"
-printf 'pinned text\n' >>"$c1/.claude/commands/planning.md"
-HARNESS_KIT_TEST_FAIL=apply hk "$c1" --skip-verify --keep-local .claude/commands/planning.md
+printf 'local patch\n' >>"$c1/.claude/commands/build.md"
+printf 'pinned text\n' >>"$c1/.claude/commands/spec.md"
+HARNESS_KIT_TEST_FAIL=apply hk "$c1" --skip-verify --keep-local .claude/commands/spec.md
 expect 0 "case 2 reinstall (the failure hook is off without HARNESS_KIT_TEST_HOOKS=1)"
 [[ "$(sed -n '1p' <<<"$OUT")" == "mode: reinstall $VERSION" ]] || fail "case 2: mode line: $OUT"
 [[ -f "$c1/.claude/commands/council.md" ]] || fail "case 2: a deleted kit file must be restored"
-grep -qx 'local patch' "$c1/.claude/commands/coding.md" || fail "case 2: a local patch must be kept"
+grep -qx 'local patch' "$c1/.claude/commands/build.md" || fail "case 2: a local patch must be kept"
 [[ "$OUT" == *"RESULT: done (verify skipped)"* ]] || fail "case 2: the result line must say verify skipped: $OUT"
 grep -q 'taking over a stale run lock' "$TMP_ROOT/hk.err" || fail "run lock: a dead holder must be taken over with a note"
 [[ ! -e "$lockdir" ]] || fail "run lock: not released"
@@ -351,8 +368,8 @@ kits="$(for dir in "$c1"/.harness-kit/v*; do printf '%s\n' "${dir##*/}"; done | 
 want="$(printf '%s\n' v2026.02.01.1 "v$VERSION" v2026.10.13.2-rc1 vjunk | LC_ALL=C sort | tr '\n' ' ')"
 [[ "$kits" == "$want" ]] || fail "kit copy pruning: $kits (want $want)"
 knowledge_out="$(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --knowledge 2>&1)" || fail "case 2: --knowledge failed: $knowledge_out"
-[[ "$(wc -l <<<"$knowledge_out")" -le 15 && "$knowledge_out" == *"patch: .claude/commands/coding.md"* &&
-  "$knowledge_out" == *"pin: .claude/commands/planning.md"* ]] ||
+[[ "$(wc -l <<<"$knowledge_out")" -le 15 && "$knowledge_out" == *"patch: .claude/commands/build.md"* &&
+  "$knowledge_out" == *"pin: .claude/commands/spec.md"* ]] ||
   fail "case 2: --knowledge must list the patch and the pin within 15 lines: $knowledge_out"
 [[ "$knowledge_out" != *"patch: docs/"* ]] || fail "case 2: --knowledge must not list project-owned files as kit patches: $knowledge_out"
 
@@ -360,16 +377,16 @@ knowledge_out="$(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --knowledge 
 # keeps its file byte-identical in its own run and moves the baseline. Both
 # simulate a kit change by giving the baseline the local text.
 base_dir="$c1/.tools/agent-state/harness-baseline/files"
-cp "$c1/.claude/commands/planning.md" "$base_dir/.claude/commands/planning.md"
-cp "$c1/.claude/commands/planning.md" "$TMP_ROOT/planning.pinned"
+cp "$c1/.claude/commands/spec.md" "$base_dir/.claude/commands/spec.md"
+cp "$c1/.claude/commands/spec.md" "$TMP_ROOT/spec.pinned"
 printf 'old kit text\n' >"$c1/.claude/commands/council.md"
 cp "$c1/.claude/commands/council.md" "$base_dir/.claude/commands/council.md"
 printf 'example\n' >"$c1/.claude/commands/council.md.generated.example"
 hk "$c1" --skip-verify --resolved .claude/commands/council.md --reason "older wording"
 expect 0 "case 5 pin and --resolved"
-cmp -s "$c1/.claude/commands/planning.md" "$TMP_ROOT/planning.pinned" || fail "case 5: a pinned file was updated"
+cmp -s "$c1/.claude/commands/spec.md" "$TMP_ROOT/spec.pinned" || fail "case 5: a pinned file was updated"
 [[ "$(jget "$REPORT" '(d["files"]["pinned"], d["files"]["resolved"])')" == \
-  "(['.claude/commands/planning.md'], ['.claude/commands/council.md'])" ]] ||
+  "(['.claude/commands/spec.md'], ['.claude/commands/council.md'])" ]] ||
   fail "case 5: report pinned/resolved: $(jget "$REPORT" 'd["files"]')"
 [[ "$(cat "$c1/.claude/commands/council.md")" == "old kit text" ]] || fail "--resolved must keep its file byte-identical in its own run"
 if grep -q 'old kit text' "$base_dir/.claude/commands/council.md" || [[ ! -s "$base_dir/.claude/commands/council.md" ]]; then
@@ -382,7 +399,7 @@ rm "$c1/.claude/commands/council.md.generated.example"
 # knowledge change; 5 an edited pinned file is reported as a stale pin; a plan
 # whose real run would be refused (here: the tracked .gitignore on main) ends
 # needs review.
-printf 'edited again\n' >>"$c1/.claude/commands/planning.md"
+printf 'edited again\n' >>"$c1/.claude/commands/spec.md"
 before="$(project_state "$c1")"
 know_before="$(sha_of "$c1/.tools/agent-state/project-knowledge.json")"
 RC=0
@@ -402,8 +419,8 @@ assert all({"name", "status", "seconds"} <= set(p) for p in report["phases"])
 assert {"counts", "conflicts", "kept", "pinned"} <= set(report["files"])
 assert {"applied", "pending", "declined"} <= set(report["migrations"])
 assert len(report["memory_note"].splitlines()) <= 3, report["memory_note"]
-assert report["files"]["stale_pins"] == [".claude/commands/planning.md"], report["files"]
-assert any(n.endswith("--keep-local .claude/commands/planning.md") and "--to " in n for n in report["next"]), report["next"]
+assert report["files"]["stale_pins"] == [".claude/commands/spec.md"], report["files"]
+assert any(n.endswith("--keep-local .claude/commands/spec.md") and "--to " in n for n in report["next"]), report["next"]
 PY
 [[ "$(project_state "$c1")" == "$before" ]] || fail "case 11: --plan wrote outside .harness-kit/ and .tools/"
 [[ "$(sha_of "$c1/.tools/agent-state/project-knowledge.json")" == "$know_before" ]] || fail "--plan changed project knowledge"
@@ -429,11 +446,11 @@ stamp="$(jget "$REPORT" 'd["stamp"]')"
 [[ "$(jget "$REPORT" '(d["result"], [p["status"] for p in d["phases"] if p["name"] == "apply"], "--rollback " + d["stamp"] in " ".join(d["next"]))')" == \
   "('failed', ['failed'], True)" ]] || fail "case 10: the failure report needs result, phase and undo: $(cat "$REPORT")"
 [[ "$(jget "$REPORT" 'd["reason"]')" == "test hook failure during apply" ]] || fail "case 10: the reason must name the test hook"
-cmp -s "$c1/.claude/commands/coding.md" "$base_dir/.claude/commands/coding.md" ||
+cmp -s "$c1/.claude/commands/build.md" "$base_dir/.claude/commands/build.md" ||
   fail "case 3: --reset must replace the patch with the kit output"
-grep -lqx 'local patch' "$c1"/.claude/commands/coding.md.bak.* 2>/dev/null || fail "case 3: --reset must keep a backup"
-grep -q 'edited again' "$c1/.claude/commands/planning.md" && fail "case 3: --reset must replace recorded pins too"
-[[ "$(jget "$REPORT" 'sorted(d["files"]["cleared"])')" == "['.claude/commands/council.md', '.claude/commands/planning.md']" ]] ||
+grep -lqx 'local patch' "$c1"/.claude/commands/build.md.bak.* 2>/dev/null || fail "case 3: --reset must keep a backup"
+grep -q 'edited again' "$c1/.claude/commands/spec.md" && fail "case 3: --reset must replace recorded pins too"
+[[ "$(jget "$REPORT" 'sorted(d["files"]["cleared"])')" == "['.claude/commands/council.md', '.claude/commands/spec.md']" ]] ||
   fail "case 3: --reset must report the cleared resolutions: $(jget "$REPORT" 'd["files"]')"
 [[ -z "$(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --knowledge 2>&1 | grep '^pin:')" ]] || fail "case 3: --reset must clear pins in knowledge"
 grep -qx 'Our own brief.' "$c1/docs/agent-configs/project-brief.md" || fail "case 3: --reset replaced the brief"
@@ -452,10 +469,10 @@ assert set(doc) == {"schema", "stamp", "rollback_id", "result", "restored", "kep
 assert doc["schema"] == "harness-kit-rollback/v1" and doc["result"] in ("done", "needs review", "failed"), doc
 assert all(isinstance(doc[key], list) for key in ("restored", "kept", "errors")), doc
 PY
-grep -qx 'local patch' "$c1/.claude/commands/coding.md" || fail "case 3: --rollback must restore the patch"
-[[ "$(jget "$c1/.tools/agent-state/project-knowledge.json" 'd["files"][".claude/commands/coding.md"]["local_sha256"]')" == \
-  "$(sha_of "$c1/.claude/commands/coding.md")" ]] || fail "case 3: --rollback must refresh knowledge"
-[[ "$(jget "$c1/.tools/agent-state/project-knowledge.json" '[d["files"][p].get("resolution", {}).get("kind") for p in (".claude/commands/planning.md", ".claude/commands/council.md")]')" == \
+grep -qx 'local patch' "$c1/.claude/commands/build.md" || fail "case 3: --rollback must restore the patch"
+[[ "$(jget "$c1/.tools/agent-state/project-knowledge.json" 'd["files"][".claude/commands/build.md"]["local_sha256"]')" == \
+  "$(sha_of "$c1/.claude/commands/build.md")" ]] || fail "case 3: --rollback must refresh knowledge"
+[[ "$(jget "$c1/.tools/agent-state/project-knowledge.json" '[d["files"][p].get("resolution", {}).get("kind") for p in (".claude/commands/spec.md", ".claude/commands/council.md")]')" == \
   "['keep-local', 'resolved']" ]] || fail "--rollback of a --reset run must restore the cleared pin and resolution"
 
 # 11 edges: downgrade and an unparseable installed version are refused; an
@@ -504,7 +521,7 @@ for args in "--bogus" "--branch main" "--workflow nope" "--take-kit ../x" "--tak
 done
 ln -s .claude "$c1/linkdir"
 RC=0
-(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --keep-local linkdir/commands/coding.md) >/dev/null 2>&1 || RC=$?
+(cd "$c1" && bash "$ENTRY" --source-dir "$ROOT_DIR" --keep-local linkdir/commands/build.md) >/dev/null 2>&1 || RC=$?
 [[ "$RC" -eq 2 ]] || fail "a path through a symbolic link must be rejected, got $RC"
 rm "$c1/linkdir"
 
@@ -593,7 +610,7 @@ bash "$kit2/agent-bootstrap/harness-kit-run.sh" --target "$c1" --decline next-zz
 touch "$c1/flaky.block"
 RC=0
 OUT="$(bash "$kit2/agent-bootstrap/harness-kit-run.sh" --target "$c1" --skip-verify \
-  --resolved .claude/commands/planning.md 2>"$TMP_ROOT/hk.err")" || RC=$?
+  --resolved .claude/commands/spec.md 2>"$TMP_ROOT/hk.err")" || RC=$?
 REPORT="$c1/$(printf '%s\n' "$OUT" | sed -n 's/^report: //p' | tail -n 1)"
 expect 1 "a failing migration"
 [[ "$(jget "$REPORT" '[m["id"] for m in d["migrations"]["failed"]]')" == "['next-zz-flaky']" ]] ||
@@ -617,12 +634,12 @@ printf 'node_modules/\n' >"$c4/.gitignore"
 git -C "$c4" add .gitignore
 git_c "$c4" commit -qm "plain gitignore"
 old_install "$c4"
-printf 'legacy patch\n' >>"$c4/.claude/commands/coding.md"
+printf 'legacy patch\n' >>"$c4/.claude/commands/codex/rescue.md"
 hk "$c4" --skip-verify
 expect 3 "case 4 update with a conflicting patch"
 [[ "$(sed -n '1p' <<<"$OUT")" == "mode: update 2026.09.07.1 -> $VERSION" ]] || fail "case 4: mode line: $OUT"
-grep -qx 'legacy patch' "$c4/.claude/commands/coding.md" || fail "case 4: a conflict overwrote the local file"
-cand="$(jget "$REPORT" '[c["candidate"] for c in d["files"]["conflicts"] if c["path"] == ".claude/commands/coding.md"][0]')"
+grep -qx 'legacy patch' "$c4/.claude/commands/codex/rescue.md" || fail "case 4: a conflict overwrote the local file"
+cand="$(jget "$REPORT" '[c["candidate"] for c in d["files"]["conflicts"] if c["path"] == ".claude/commands/codex/rescue.md"][0]')"
 if [[ ! -f "$c4/$cand" ]] || grep -q 'legacy patch' "$c4/$cand"; then
   fail "case 4: no kit candidate for the conflict: $cand"
 fi
@@ -637,18 +654,18 @@ while IFS= read -r rel; do
 done < <(jget "$REPORT" '"\n".join(c["path"] for c in d["files"]["conflicts"] if c["path"].startswith(("docs/agent-configs/project-", "docs/superpowers/specs/project-tech-stack")))')
 # A stale candidate from an older kit must never be promoted.
 printf 'stale kit output\n' >"$c4/.claude/README.md.generated.29991231-235959"
-hk "$c4" --skip-verify --resolved .claude/commands/coding.md --reason "local wording" \
+hk "$c4" --skip-verify --resolved .claude/commands/codex/rescue.md --reason "local wording" \
   --accept "$TOEXCL_ID" --apply-retirements --take-kit all ${user_conflicts[@]+"${user_conflicts[@]}"}
 expect 0 "case 4 --resolved and --take-kit all"
-grep -qx 'legacy patch' "$c4/.claude/commands/coding.md" || fail "case 4: --resolved must keep the local file"
-grep -q 'legacy patch' "$c4/.tools/agent-state/harness-baseline/files/.claude/commands/coding.md" &&
+grep -qx 'legacy patch' "$c4/.claude/commands/codex/rescue.md" || fail "case 4: --resolved must keep the local file"
+grep -q 'legacy patch' "$c4/.tools/agent-state/harness-baseline/files/.claude/commands/codex/rescue.md" &&
   fail "case 4: --resolved must move the baseline to the kit output"
 grep -q 'stale kit output' "$c4/.claude/README.md" && fail "--take-kit promoted a stale candidate"
 cmp -s "$c4/.claude/README.md" "$c4/.tools/agent-state/harness-baseline/files/.claude/README.md" ||
   fail "--take-kit all must install this run's kit output"
 leftover_candidates="$(find "$c4" \( -path "$c4/.git" -o -path "$c4/.tools" -o -path "$c4/.harness-kit" \) -prune -o -name '*.generated.*' -print)"
 [[ -z "$leftover_candidates" ]] || fail "case 4: candidates left after --resolved/--take-kit: $leftover_candidates"
-[[ "$(jget "$c4/.tools/agent-state/project-knowledge.json" '(lambda r: (r["kind"], d["files"][".claude/commands/coding.md"]["reason"]))(d["files"][".claude/commands/coding.md"]["resolution"])')" == \
+[[ "$(jget "$c4/.tools/agent-state/project-knowledge.json" '(lambda r: (r["kind"], d["files"][".claude/commands/codex/rescue.md"]["reason"]))(d["files"][".claude/commands/codex/rescue.md"]["resolution"])')" == \
   "('resolved', 'local wording')" ]] || fail "case 4: the resolution must be recorded in knowledge"
 if ! git -C "$c4" diff --quiet -- .gitignore || ! grep -Fq "$MARKER" "$(exclude_of "$c4")"; then
   fail "case 7: --accept must move the block to the exclude file and leave the committed .gitignore"
@@ -658,9 +675,9 @@ grep -q -- "--apply-retirements means --accept $RETIRE_ID" "$TMP_ROOT/hk.err" ||
 hk "$c4" --skip-verify
 expect 0 "case 4 next run"
 [[ "$(sed -n '1p' <<<"$OUT")" == "mode: reinstall $VERSION" ]] || fail "case 4: the next run must be a reinstall: $OUT"
-[[ "$(jget "$REPORT" '".claude/commands/coding.md" in d["files"]["kept"]')" == True ]] ||
+[[ "$(jget "$REPORT" '".claude/commands/codex/rescue.md" in d["files"]["kept"]')" == True ]] ||
   fail "case 4: the next run must keep the resolved file: $(jget "$REPORT" 'd["files"]')"
-compgen -G "$c4/.claude/commands/coding.md.generated.*" >/dev/null && fail "case 4: the resolved file got a new candidate"
+compgen -G "$c4/.claude/commands/codex/rescue.md.generated.*" >/dev/null && fail "case 4: the resolved file got a new candidate"
 
 # 6 tracked harness files: --take-kit of a tracked file is gated (protected,
 # uncommitted, detached, any remote's default branch); the untrack decision is

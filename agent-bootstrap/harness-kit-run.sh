@@ -1581,8 +1581,10 @@ verify_phase() {
   local failed=0
   start_phase verify
   : >"$RUN_DIR/verify.tsv"
-  run_check doctor scripts/agent-hook.sh doctor || failed=1
+  # Preflight first: it rewrites the context pack, which an update leaves stale
+  # (AGENTS.md and the lock change), and the doctor's guard check reads it.
   run_check preflight scripts/agent-guard.sh preflight || failed=1
+  run_check doctor scripts/agent-hook.sh doctor || failed=1
   # doctor already runs verify-ai-deps when the generated hook calls it.
   if ! grep -q 'verify-ai-deps' "$TARGET/scripts/agent-hook.sh" 2>/dev/null; then
     run_check verify-ai-deps scripts/verify-ai-deps.sh --json || failed=1

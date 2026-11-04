@@ -174,28 +174,28 @@ for kind in none web mobile; do
   dir="$TMP_ROOT/update-$kind"
   new_repo "$dir" "$kind"
   old_install "$dir"
-  printf 'legacy patch\n' >>"$dir/.claude/commands/coding.md"
+  printf 'legacy patch\n' >>"$dir/.claude/commands/codex/rescue.md"
   hk "$dir" --skip-verify
   expect 3 "$kind: update with a conflicting patch"
   [[ "$(sed -n '1p' <<<"$OUT")" == "mode: update 2026.09.07.1 -> $VERSION" ]] || fail "$kind: update mode line: $OUT"
-  grep -qx 'legacy patch' "$dir/.claude/commands/coding.md" || fail "$kind: a conflict overwrote the local file"
-  [[ "$(jget "$REPORT" '".claude/commands/coding.md" in [c["path"] for c in d["files"]["conflicts"]]')" == True ]] ||
+  grep -qx 'legacy patch' "$dir/.claude/commands/codex/rescue.md" || fail "$kind: a conflict overwrote the local file"
+  [[ "$(jget "$REPORT" '".claude/commands/codex/rescue.md" in [c["path"] for c in d["files"]["conflicts"]]')" == True ]] ||
     fail "$kind: the patched file must be a conflict: $(jget "$REPORT" 'd["files"]["counts"]')"
   [[ "$(stacks_of "$dir")" == "$stack" ]] || fail "$kind: the update must keep detecting $stack, got $(stacks_of "$dir")"
   takes=()
   while IFS= read -r rel; do
     [[ -n "$rel" ]] && takes+=(--take-kit "$rel")
   done < <(jget "$REPORT" '"\n".join(c["path"] for c in d["files"]["conflicts"] if c["path"].startswith(("docs/agent-configs/project-", "docs/superpowers/specs/project-tech-stack")))')
-  hk "$dir" --skip-verify --resolved .claude/commands/coding.md --accept "$TOEXCL_ID" \
+  hk "$dir" --skip-verify --resolved .claude/commands/codex/rescue.md --accept "$TOEXCL_ID" \
     --take-kit all ${takes[@]+"${takes[@]}"}
   expect 0 "$kind: --resolved"
-  grep -qx 'legacy patch' "$dir/.claude/commands/coding.md" || fail "$kind: --resolved must keep the local file"
+  grep -qx 'legacy patch' "$dir/.claude/commands/codex/rescue.md" || fail "$kind: --resolved must keep the local file"
   leftover="$(find "$dir" \( -path "$dir/.git" -o -path "$dir/.tools" -o -path "$dir/.harness-kit" \) -prune -o -name '*.generated.*' -print)"
   [[ -z "$leftover" ]] || fail "$kind: candidates left after --resolved and --take-kit: $leftover"
   hk "$dir" --skip-verify
   expect 0 "$kind: next run"
   [[ "$(sed -n '1p' <<<"$OUT")" == "mode: reinstall $VERSION" ]] || fail "$kind: the next run must be a reinstall: $OUT"
-  [[ "$(jget "$REPORT" '".claude/commands/coding.md" in d["files"]["kept"]')" == True ]] ||
+  [[ "$(jget "$REPORT" '".claude/commands/codex/rescue.md" in d["files"]["kept"]')" == True ]] ||
     fail "$kind: the next run must keep the resolved file: $(jget "$REPORT" 'd["files"]')"
   [[ "$(stacks_of "$dir")" == "$stack" ]] || fail "$kind: detection changed after the update: $(stacks_of "$dir")"
   printf 'oneshot-matrix: %s ok\n' "$kind"
