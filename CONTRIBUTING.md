@@ -75,7 +75,9 @@ bash reads a running script as it goes. Together the groups check:
 `python3 scripts/test-workspace-repository-guard.py` covers real
 repositories, symlinks, worktrees, stale sessions, changed workdirs and the
 generated launcher and hooks. `scripts/test-hook-hot-path.sh` holds the
-hook's per-call budget of `python3` and `git` starts.
+hook's per-call budget of `python3` and `git` starts, and
+`scripts/test-edit-guard-hosts.sh` the edit path rules of the Claude and
+Codex hooks.
 
 CI (`.github/workflows/test.yml`) has four jobs:
 

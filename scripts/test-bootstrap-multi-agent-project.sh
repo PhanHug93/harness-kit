@@ -447,11 +447,12 @@ PY
   need_contains "$(cat "$TMP_DIR/out/focus-malformed-policy.err")" "agent-hook: ERROR: edit blocked" "malformed policy blocks the edit"
   cp "$saved_file" "$focus_dir/docs/agent-configs/context-policy.json"
 
+  # A path outside the project is Claude Code's decision, not the guard's.
   focus_write_hook_input Edit "$FIXTURE_DIR/outside-focus-path.txt"
   focus_run_hook outside-root
-  focus_assert_rc "$TMP_DIR/out/focus-outside-root.rc" 2 "outside-root path error"
-  need_contains "$(cat "$TMP_DIR/out/focus-outside-root.err")" "agent-guard: ERROR: path outside project root" "outside-root reason"
-  need_contains "$(cat "$TMP_DIR/out/focus-outside-root.err")" "agent-hook: ERROR: edit blocked" "outside-root blocks the edit"
+  focus_assert_rc "$TMP_DIR/out/focus-outside-root.rc" 0 "outside-root path reaches the host"
+  need_contains "$(cat "$TMP_DIR/out/focus-outside-root.out")" "outside_project=true" "outside-root classification"
+  need_not_contains "$(cat "$TMP_DIR/out/focus-outside-root.err")" "edit blocked" "outside-root is not blocked"
 
   locked_parent="$focus_dir/locked-state-parent"
   locked_tmp="$focus_dir/locked-tmp"
@@ -2197,6 +2198,7 @@ root_codex_config="$(cat "$ROOT_DIRECT_DIR/.codex/config.toml")"
 need_not_contains "$root_codex_config" 'model = ' "Codex config has no hard-coded model"
 need_not_contains "$root_codex_config" 'model_reasoning_effort' "Codex config has no hard-coded effort"
 need_contains "$root_codex_config" '"CODEX_HARNESS_SESSION"' "Codex shell policy passes nesting marker"
+need_contains "$(cat "$ROOT_DIRECT_DIR/.codex/hooks.json")" 'codex-pretool' "Codex hooks file runs the edit guard"
 need_contains "$(cat "$ROOT_DIRECT_DIR/docs/agent-configs/context-policy.json")" '"schema": "agent-context-policy/v1"' "context policy schema"
 if command -v python3 >/dev/null 2>&1; then
   python3 -m json.tool "$ROOT_DIRECT_DIR/docs/agent-configs/seats.json" >/dev/null ||
@@ -2431,7 +2433,7 @@ chmod +x "$LOCAL_ONLY_DIR/scripts/agent-local-only-check.sh"
 )
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/SKILL.md" ]] || fail "full bootstrap did not generate agentmemory skill"
 	[[ -f "$TMP_DIR/.agents/skills/agentmemory-mcp/agents/openai.yaml" ]] || fail "full bootstrap did not generate agentmemory openai metadata"
-	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit"' "Claude settings edit/write guard hook"
+	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit|NotebookEdit"' "Claude settings edit/write guard hook"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" '"Stop"' "Claude settings registers Stop hook"
 	need_contains "$(cat "$TMP_DIR/.claude/settings.json")" 'agent-hook.sh close-out' "Claude Stop hook calls close-out subcommand"
 	python3 -m json.tool "$TMP_DIR/.claude/settings.json" >/dev/null || fail "generated settings.json is not valid JSON after Stop hook"
@@ -3148,7 +3150,7 @@ need_contains "$abs_guard_out" "protected_path=true" "pre-edit protects absolute
 if (cd "$GUARD_DIR" && fixture_workspace scripts/agent-guard.sh pre-edit ../outside.txt >"$TMP_DIR"/out/bootstrap-guard-path-escape.out 2>"$TMP_DIR"/out/bootstrap-guard-path-escape.err); then
   fail "agent guard pre-edit allowed path escaping project root"
 fi
-	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-path-escape.err")" "outside project root" "pre-edit path escape error"
+	need_contains "$(cat "$TMP_DIR/out/bootstrap-guard-path-escape.err")" "escapes the project root" "pre-edit path escape error"
 	python3 - "$GUARD_DIR/docs/agent-configs/context-policy.json" <<'PY'
 import json
 import pathlib

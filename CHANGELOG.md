@@ -1,5 +1,93 @@
 # Changelog
 
+## 2026.11.05.2 — Edit guard for outside paths, NotebookEdit and Codex
+
+- **Claude can write outside the project again.**
+  - Since 2026.10.20.1 the edit hook blocked every Edit or Write outside the
+    project, so Claude could not save its memory
+    (`~/.claude/projects/<slug>/memory/`) or use its scratchpad.
+  - `scripts/agent-guard.sh pre-edit` now exits 4 for a path that is outside
+    the project and does not resolve into it. The hook leaves that call to
+    Claude Code's own permissions.
+  - A cross-repository session is still asked first.
+- **Agent instructions outside the project still need you.** Claude asks
+  first, also in auto mode, before it writes outside the project to:
+  - the Claude or Codex home (`~/.claude`, `~/.codex`) or `~/.agents`;
+  - `~/.claude.json` (MCP servers, allowed tools) and your git config
+    (`~/.gitconfig`, `~/.config/git/config`), whose hooks run code;
+  - another repository's `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.mcp.json`,
+    `.claude/`, `.codex/`, `.agents/`, `.cursor/`, `.gemini/`, `.git/hooks/`
+    or `.git/config`.
+  The Codex hook blocks those writes, because Codex hooks cannot ask. This
+  keeps a prompt injection from planting instructions for a later session.
+  The one exception is the Markdown files of this project's own Claude auto
+  memory, which are written directly, as Claude Code does. Names match in
+  any case (`agents.md`, `~/.CODEX/`), because a case-insensitive volume
+  opens them as the same file.
+- **Escapes still block.** A path inside the project that leaves it through a
+  symlink or `..` still exits 2, also through an alias of the root. The
+  message is now "path escapes the project root".
+  - A path written from outside that resolves inside is checked as inside.
+    Example: `/x/../<project>/AGENTS.md` is a protected file.
+  - A `..` after a link blocks when it can name a file in the project, as in
+    `/var/../<project>/scripts/agent-hook.sh` on macOS: the guard follows the
+    `/var` link, while a host may drop `..` as text and write the project
+    file.
+  - The project root under another spelling (another case on macOS, a bind
+    mount) is found by inode. An existing file is matched by its name on
+    disk, so on macOS `claude.md` is the protected `CLAUDE.md`.
+- **Large edits are checked.** Both hooks read their JSON on stdin. Before,
+  a Claude Write over about 1 MiB on macOS (128 KiB on Linux) could not
+  start python, and the edit skipped the guard.
+- **A broken path no longer slips through.** A path that is not valid UTF-8
+  still asks, and a Claude edit call without a path blocks: Claude Code only
+  blocks on exit 2, and these used to end with exit 1.
+- **NotebookEdit is guarded.** It is in the Claude matcher
+  (`Edit|Write|MultiEdit|NotebookEdit`), and the hook reads `notebook_path`.
+- **Codex edit guard.**
+  - New kit file `.codex/hooks.json`: a `PreToolUse` hook runs
+    `scripts/agent-hook.sh codex-pretool` for `apply_patch`.
+  - Every file a patch adds, updates, deletes or moves goes through
+    `pre-edit`. A protected path blocks the patch until it is acked, as for
+    Claude. A path outside the project is left to the Codex sandbox.
+  - Header lines are read as Codex reads them: an indent, or Unicode
+    whitespace around a header, does not hide a path. Neither does a NUL. A
+    path that starts with `~` is checked as written and expanded. A Codex
+    `Edit` or `Write` call is checked by its `file_path`.
+  - A patch that names more than 100 files is blocked ("split the patch"):
+    each path costs one guard run, and the hook has 30 s.
+  - An ack from a Codex shell counts. Codex keeps `.agents/` read-only in
+    its sandbox, so that ack lands in the state dir under `TMPDIR` (or
+    `/tmp`). The hook now reads it there too.
+  - A log in a temp dir counts only when the log, its state dir and the
+    `agent-bootstrap-state` dir above it are yours, nobody else can write
+    them, and none is a link. This also holds when the hook's own state dir
+    is that temp dir. The guard makes those dirs private also under umask
+    002 (Ubuntu, Fedora), and an ack closes your own ones that are open to
+    the group.
+  - Codex runs the hook only after you trust it: open `codex`, run
+    `/hooks`. Trust covers the hook as written; a changed hook needs review
+    again. Until the first trust `.codex/codex-mode.sh` and its `doctor` warn.
+    After it, the `doctor` only finds the trust record and cannot tell if it
+    covers the current hook, so it says "not verified: check /hooks" instead
+    of `ok`.
+  - A project that already has its own `.codex/hooks.json` keeps it. The
+    update writes a `.generated` candidate to merge, and
+    `scripts/verify-ai-deps.sh` fails until the hook is in.
+  - The verifier wants the kit hook command exactly, as a `command` hook
+    that is not `async` (Codex does not wait for one). A command that only
+    names the guard, such as an `echo`, fails.
+  - An edited `.claude/settings.json` is kept on update; the verifier and
+    doctor then say "does not guard NotebookEdit" until its matcher has it.
+- **Codex shells find `bash` and other system tools.** The kit's
+  `.codex/config.toml` had `inherit = "none"`, so `include_only` had nothing
+  to keep: on Codex 0.166 the shell `PATH` held only Codex's own folder, and
+  `bash scripts/agent-guard.sh ...` failed with "command not found". It is now
+  `inherit = "core"`, and `TMPDIR` joins `include_only`.
+- **Tests.** New fast suite `scripts/test-edit-guard-hosts.sh`. The hot-path
+  budgets now cover NotebookEdit, an outside Write and a three-file Codex
+  patch.
+
 ## 2026.11.05.1 — Seats replace modes, seats per packet
 
 - **@gate writes the plan.** @gate checks the spec as requirements, writes the

@@ -170,6 +170,7 @@ recovery.recovery-gives-a-concrete-restore-command	both	docs/agent-configs/RECOV
 codex-readme.user-region	full	.codex/README.md	no	BEGIN USER: codex-readme:notes
 codex-readme.build-closeout	full	.codex/README.md	no	do not run it again
 codex-readme.fallback	full	.codex/README.md	no	CODEX_USE_FALLBACK=1 .codex/codex-mode.sh @build
+codex-readme.hook-trust	full	.codex/README.md	yes	guards `apply_patch` once trusted
 codex-readme.codex-readme-qualifies-claude-default-seats	full	.codex/README.md	no	only if the roster assigns @spec to Codex
 memory.task-state-in-packet	both	.agents/skills/agentmemory-mcp/SKILL.md	yes	The task packet owns the current task's state (`.agents/tasks/*/state.json` is authoritative
 memory.advisory	both	.agents/skills/agentmemory-mcp/SKILL.md	no	Memory is advisory: current files, tests, docs and user instructions win.

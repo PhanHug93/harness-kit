@@ -504,7 +504,7 @@ EOF
 	        ]
 	      },
 	      {
-	        "matcher": "Edit|Write|MultiEdit",
+	        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
 	        "hooks": [
 	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
 	        ]
@@ -537,8 +537,9 @@ This project has shared Claude Bash and edit/write hooks installed:
 ./scripts/agent-hook.sh claude-pretool
 ```
 
-The hook validates the detector lock and guards protected Edit/Write/MultiEdit
-paths. It is not a security boundary for arbitrary Bash commands.
+The hook validates the detector lock and guards protected
+Edit/Write/MultiEdit/NotebookEdit paths. It is not a security boundary for
+arbitrary Bash commands.
 Workflow command docs are opt-in; run bootstrap with `--workflow full` if the
 project wants seat commands.
 EOF
@@ -1349,7 +1350,7 @@ EOF
 	        ]
 	      },
 	      {
-	        "matcher": "Edit|Write|MultiEdit",
+	        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
 	        "hooks": [
 	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
 	        ]
@@ -1393,9 +1394,10 @@ If Bash is unavailable, continue analysis and cross-review, and record verificat
 Seat commands follow `docs/agent-configs/agent-mode-contracts.md` and
 `docs/agent-configs/agent-handoff-schema.md`.
 
-In Claude Code, the shared hook denies protected Edit/Write/MultiEdit paths with
-exit 2 unless `pre-edit --ack <reason> <path>` exists for that path. It is not a
-security boundary for Bash.
+In Claude Code, the shared hook denies protected
+Edit/Write/MultiEdit/NotebookEdit paths with exit 2 unless
+`pre-edit --ack <reason> <path>` exists for that path. It is not a security
+boundary for Bash.
 EOF
 
   write_file "$TARGET_DIR/.claude/commands/spec.md" <<'EOF'
@@ -1614,14 +1616,29 @@ allow_login_shell = false
 web_search = "disabled"
 
 [shell_environment_policy]
-inherit = "none"
-include_only = ["PATH", "HOME", "PWD", "SHELL", "CODEX_HARNESS_SESSION", "AGENT_HOST_SESSION_ID", "AGENT_WORKSPACE_CONTEXT"]
+inherit = "core"
+include_only = ["PATH", "HOME", "PWD", "SHELL", "TMPDIR", "CODEX_HARNESS_SESSION", "AGENT_HOST_SESSION_ID", "AGENT_WORKSPACE_CONTEXT"]
 ignore_default_excludes = false
 
 [apps._default]
 destructive_enabled = false
 open_world_enabled = false
 default_tools_approval_mode = "prompt"
+EOF
+
+  write_file "$TARGET_DIR/.codex/hooks.json" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write)$",
+        "hooks": [
+          { "type": "command", "command": "sh -c 'exec \"$(git rev-parse --show-toplevel)/scripts/agent-hook.sh\" codex-pretool'", "timeout": 30 }
+        ]
+      }
+    ]
+  }
+}
 EOF
 
   write_overlay_file "$TARGET_DIR/.codex/README.md" <<'EOF'
@@ -1650,11 +1667,12 @@ Open a seat that `docs/agent-configs/seats.json` gives to Codex with
 - Two checking seats on one primary model: the seed records
   `model_overlap=<seats>` for `@audit`, never an authorization.
 - `--task <id>` follows that packet's seats (default: the only open packet).
+- `.codex/hooks.json` guards `apply_patch` once trusted (`/hooks` in Codex).
 - Approval flags (`--supervised`, `--read-only`, `--propose`, `--standard`)
   follow the AGENTS.md approval policy.
 
-If Codex says `Selected model is at capacity. Please try a different model.`,
-use the seat's fallback once, or override for one launch:
+At capacity (`Selected model is at capacity`), use the seat's fallback once or
+override one launch:
 
 ```bash
 CODEX_USE_FALLBACK=1 .codex/codex-mode.sh @build
@@ -2194,6 +2212,27 @@ compute_overlap() {
   esac
 }
 
+codex_hook_trusted() {
+  # Codex runs a project hook only after /hooks trusts it; it then records a
+  # trusted_hash under [hooks.state."<root>/.codex/hooks.json:pre_tool_use:0:0"]
+  # in its config. The kit cannot recompute that hash, so this finds the
+  # record only: a changed hook entry would still need /hooks again.
+  local config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  [[ -f "$config" ]] || return 1
+  awk -v head="[hooks.state.\"$PROJECT_ROOT/.codex/hooks.json:pre_tool_use:0:0\"]" '
+    $0 == head { inside = 1; next }
+    inside && /^[[:space:]]*\[/ { inside = 0 }
+    inside && /^[[:space:]]*trusted_hash[[:space:]]*=/ { hash = 1 }
+    inside && /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*false/ { off = 1 }
+    END { exit !(hash && !off) }
+  ' "$config"
+}
+
+codex_hook_trust_note() {
+  codex_hook_trusted ||
+    echo "WARN: Codex has no trust record for the edit guard hook: open codex, run /hooks, trust scripts/agent-hook.sh codex-pretool" >&2
+}
+
 print_launch_summary() {
   local route="$1"
   local flow="$2"
@@ -2317,6 +2356,7 @@ run_doctor() {
     .claude/commands/council.md \
     .claude/commands/karpathy.md \
     .codex/config.toml \
+    .codex/hooks.json \
     .codex/codex-mode.sh \
     .codex/README.md \
     .claude/settings.json \
@@ -2339,6 +2379,13 @@ run_doctor() {
     docs/superpowers/plans/README.md; do
     doctor_file "$path"
   done
+  if codex_hook_trusted; then
+    # Not "ok": the record may belong to an older hook entry, which Codex
+    # skips until it is reviewed again (spec R4).
+    doctor_info "Codex edit guard hook has a trust record; trust for the current hook entry is not verified: check /hooks in codex"
+  else
+    doctor_warn "Codex edit guard hook has no trust record: run /hooks in codex"
+  fi
 
   if [[ -f "$PROJECT_ROOT/docs/agent-configs/project-brief.md" ]] &&
     grep -Fq '<!-- UNFILLED -->' "$PROJECT_ROOT/docs/agent-configs/project-brief.md"; then
@@ -2375,8 +2422,10 @@ run_doctor() {
   else
     doctor_bad "Claude PreToolUse does not use shared agent hook"
   fi
-  if grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
+  if grep -Fq '"matcher": "Edit|Write|MultiEdit|NotebookEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
     doctor_ok "Claude PreToolUse guards edit/write tools"
+  elif grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$PROJECT_ROOT/.claude/settings.json"; then
+    doctor_bad "Claude PreToolUse does not guard NotebookEdit: use matcher Edit|Write|MultiEdit|NotebookEdit (see the settings.json candidate)"
   else
     doctor_bad "Claude PreToolUse does not guard edit/write tools"
   fi
@@ -2425,6 +2474,10 @@ run_doctor() {
 
 doctor_ok() {
   printf '  ok    %s\n' "$1"
+}
+doctor_info() {
+  # Not checked here, and not counted as a warning.
+  printf '  info  %s\n' "$1"
 }
 doctor_roster_check() {
   # Drift between the AGENTS.md roster and seats.json is a warning, never a failure.
@@ -2641,6 +2694,7 @@ run_launch() {
     echo "ERROR: agent hook preflight failed for route $route." >&2
     return 1
   fi
+  codex_hook_trust_note
   print_launch_summary "$route" "$flow" "$requested_seat" "$EFFECTIVE_MODEL" "$MODEL_SOURCE" "$EFFECTIVE_EFFORT" "$sandbox" "$approval"
   prompt="$seed"
   if [[ "$#" -gt 0 ]]; then

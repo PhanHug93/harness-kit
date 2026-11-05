@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The Claude hook runs before every Bash, Edit, Write and MultiEdit call, so
-# its process count is a budget: python3 and git starts per call are counted
-# through PATH shims on a fresh full target. Also checked:
+# The Claude hook runs before every Bash, Edit, Write, MultiEdit and
+# NotebookEdit call, so its process count is a budget: python3 and git starts
+# per call are counted through PATH shims on a fresh full target. Also checked:
 #   - json_escape matches json.dumps;
 #   - a planted json.py is never imported;
 #   - the context pack is rewritten only when its content changes;
-#   - edit paths canonicalise as before.
+#   - edit paths canonicalise as before (scripts/test-edit-guard-hosts.sh
+#     covers the inside, escape and outside cases).
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -67,6 +68,25 @@ has "$OUT" "ack_source=log" "protected Edit uses the ack log"
 budget protected-log 5 3
 run_hook protected-deny '{"session_id":"hot1","tool_name":"Write","tool_input":{"file_path":"'"$target"'/AGENTS.md"}}'
 [[ "$RC" -eq 2 ]] || fail "protected Write without ack must exit 2: rc=$RC err=$ERR"
+run_hook notebook '{"session_id":"hot1","tool_name":"NotebookEdit","tool_input":{"notebook_path":"'"$target"'/src/n.ipynb"}}'
+[[ "$RC" -eq 0 ]] || fail "unprotected NotebookEdit: rc=$RC err=$ERR"
+budget notebook 4 3
+run_hook outside '{"session_id":"hot1","tool_name":"Write","tool_input":{"file_path":"'"$work"'/outside/x.txt"}}'
+[[ "$RC" -eq 0 ]] || fail "outside Write: rc=$RC err=$ERR"
+budget outside 4 3
+# The Codex hook runs one parser and one pre-edit per patch path (measured
+# 4 python3 / 0 git for three files).
+patch=$'*** Begin Patch\n*** Add File: src/a.txt\n+a\n*** Update File: src/main.txt\n@@\n-x\n+y\n*** Add File: src/b.txt\n+b\n*** End Patch\n'
+codex_input="$(PATCH="$patch" CWD="$target" python3 -I -S -c 'import json, os; print(json.dumps({"tool_name": "apply_patch", "cwd": os.environ["CWD"], "tool_input": {"command": os.environ["PATCH"]}}))')"
+log="$work/count.codex"
+RC=0
+(cd "$target" && printf '%s' "$codex_input" | env HOT_PATH_LOG="$log" PATH="$work/shim:$PATH" \
+  scripts/agent-hook.sh codex-pretool >"$work/codex.out" 2>"$work/codex.err") || RC=$?
+PY="$(count "$log.python3")"
+GIT="$(count "$log.git")"
+printf 'hook-hot-path: %-15s rc=%s python3=%s git=%s\n' "codex-3-files" "$RC" "$PY" "$GIT"
+[[ "$RC" -eq 0 ]] || fail "Codex three-file patch: rc=$RC err=$(cat "$work/codex.err")"
+budget codex-3-files 5 1
 
 # 2. json_escape matches json.dumps(value, ensure_ascii=False)[1:-1].
 eval "$(sed -n '/^json_escape() {/,/^}/p' "$target/scripts/agent-guard.sh")"
@@ -115,8 +135,9 @@ has "$(canon src/main.txt)" "path=src/main.txt" "relative path"
 has "$(canon "$target/src/../src/main.txt")" "path=src/main.txt" "absolute path with .."
 has "$(canon linkdir/main.txt)" "path=src/main.txt" "symlink inside the root"
 has "$(canon src/missing.txt)" "path=src/missing.txt" "missing file"
-has "$(canon out-link/x.txt)" "path outside project root" "symlink out of the root"
-has "$(canon ../x.txt)" "path outside project root" "dot-dot out of the root"
+has "$(canon out-link/x.txt)" "path escapes the project root" "symlink out of the root"
+has "$(canon ../x.txt)" "path escapes the project root" "dot-dot out of the root"
+has "$(canon "$work/outside/x.txt")" "outside_project=true" "absolute path outside the root"
 # 6. guard-local-state asks git once for every local-only pattern (it runs at
 #    every Codex launch), and still names the pattern of a tracked file.
 log="$work/count.local-state"

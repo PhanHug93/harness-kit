@@ -208,6 +208,12 @@ else
   STATE_DIR="$PROJECT_ROOT/.agents/state"
   STATE_WRITABLE=false
 fi
+# A temp state dir may be shared, and the ack check trusts it only when nobody
+# else can write it: whatever this run creates there is yours only (also under
+# umask 002).
+case "$STATE_DIR" in
+  */agent-bootstrap-state/*) umask 077 ;;
+esac
 CONTEXT_PACK="$STATE_DIR/context-pack.json"
 # Status lines name the real context pack: relative inside the project,
 # absolute when the state directory lives elsewhere.
@@ -259,6 +265,8 @@ BASELINE_TOOLCHAIN=""
 TREE_COMMIT=""
 TREE_DIRTY=""
 EXIT_PRE_EDIT_DENIED=3
+EXIT_PRE_EDIT_OUTSIDE=4
+EXIT_PRE_EDIT_ASK=5
 
 REQUIRED_CONTEXT=()
 RECOMMENDED_CONTEXT=()
@@ -270,6 +278,8 @@ REQUIRED_STATUS=()
 POLICY_FROM_SNAPSHOT=false
 EDIT_RELPATH=""
 EDIT_OUTSIDE=false
+EDIT_ESCAPE=false
+EDIT_INSTRUCTIONS=false
 PACK_RESULT=""
 
 usage() {
@@ -295,6 +305,54 @@ deny() {
   printf 'agent-guard: DENIED: protected path %s\n' "$quoted_path" >&2
   printf 'Run: scripts/agent-guard.sh pre-edit --ack "<reason>" -- %s\n' "$quoted_path" >&2
   exit "$EXIT_PRE_EDIT_DENIED"
+}
+
+outside_edit() {
+  # Neither the path nor its target is in the project: the host decides
+  # (Claude Code permissions, the Codex sandbox).
+  printf 'path=%s outside_project=true\n' "$(json_escape "$1")"
+  exit "$EXIT_PRE_EDIT_OUTSIDE"
+}
+
+instructions_edit() {
+  # Outside the project, but a file another agent session loads as
+  # instructions or config: the user confirms the write (prompt-injection
+  # guard). The Claude hook asks; the Codex hook, which cannot ask, blocks.
+  printf 'path=%s outside_project=true agent_instructions=true\n' "$(json_escape "$1")"
+  exit "$EXIT_PRE_EDIT_ASK"
+}
+
+instructions_lexical() {
+  # Without python3: the same agent-instruction names and homes, in any case,
+  # with no exception for Claude's auto memory (the safe direction: the user
+  # is asked).
+  local home rc=1 nocase=false
+  ! shopt -q nocasematch || nocase=true
+  shopt -s nocasematch
+  for home in "${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}" \
+    "${CODEX_HOME:-${HOME:-/nonexistent}/.codex}" "${HOME:-/nonexistent}/.agents" \
+    "${HOME:-/nonexistent}/.claude.json" "${HOME:-/nonexistent}/.gitconfig" \
+    "${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/git/config"; do
+    [[ "$1" != "${home%/}" && "$1" != "${home%/}"/* ]] || rc=0
+  done
+  case "/${1#/}" in
+    */.claude/*|*/.codex/*|*/.agents/*|*/.cursor/*|*/.gemini/*|*/.windsurf/*|*/.openclaude/*|*/.git/hooks/*) rc=0 ;;
+    */AGENTS.md|*/AGENTS.override.md|*/CLAUDE.md|*/CLAUDE.local.md|*/GEMINI.md|*/.cursorrules|*/.windsurfrules) rc=0 ;;
+    */.mcp.json|*/.git/config) rc=0 ;;
+  esac
+  [[ "$nocase" == "true" ]] || shopt -u nocasematch
+  return "$rc"
+}
+
+outside_lexical() {
+  # Without python3 (no symlink resolution): an absolute path that neither
+  # starts in the root nor normalises into it. "<root>/../x" starts in the
+  # root, so it stays an escape.
+  local norm
+  [[ "$1" == /* && "$1" != "$PROJECT_ROOT" && "$1" != "$PROJECT_ROOT"/* ]] || return 1
+  norm="$(collapse_relative_path "${1#/}")" || return 1
+  norm="/$norm"
+  [[ "$norm" != "$PROJECT_ROOT" && "$norm" != "$PROJECT_ROOT"/* ]]
 }
 
 tsv_escape() {
@@ -664,6 +722,140 @@ def canonical(raw):
         return None
 
 
+def file_id(path):
+    try:
+        status = os.stat(path)
+    except OSError:
+        return None
+    return status.st_dev, status.st_ino
+
+
+root_id = file_id(root)
+
+
+def root_alias(path):
+    # The root itself, or an existing ancestor that is the root under
+    # another spelling: a case variant on a case-insensitive volume, a bind
+    # mount. Compared by inode, never by text.
+    if path == root or root in path.parents:
+        return root
+    for ancestor in (path, *path.parents):
+        if root_id is not None and file_id(ancestor) == root_id:
+            return ancestor
+    return None
+
+
+def disk_case(rel):
+    # On a case-insensitive volume "agents.md" opens AGENTS.md: use the name
+    # on disk for each existing part, so protected patterns still match.
+    parts = []
+    current = str(root)
+    for part in pathlib.PurePosixPath(rel).parts:
+        try:
+            names = os.listdir(current)
+        except OSError:
+            names = []
+        if part not in names:
+            for name in names:
+                if name.casefold() == part.casefold():
+                    try:
+                        if os.path.samefile(os.path.join(current, name), os.path.join(current, part)):
+                            part = name
+                    except OSError:
+                        pass
+                    break
+        parts.append(part)
+        current = os.path.join(current, part)
+    return "/".join(parts)
+
+
+def classify_edit(raw):
+    # inside: the real path is in the root. escape: some textual prefix of
+    # the absolute raw path resolves into the root but the real path does not
+    # (a symlink or ".." out of the project). outside: neither.
+    candidate = pathlib.Path(raw)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve(strict=False)
+    base = root_alias(resolved)
+    # A ".." after a link: the guard follows the link, a host may drop ".." as
+    # text (macOS /var and /tmp are links). When the two name different files
+    # and one is in the project, the path is ambiguous: an escape.
+    textual = pathlib.Path(os.path.normpath(str(candidate))).resolve(strict=False)
+    if textual != resolved and (base is not None or root_alias(textual) is not None):
+        return "escape", None
+    if base is not None:
+        rel = str(resolved.relative_to(base))
+        return "inside", "." if rel == "." else disk_case(rel)
+    parts = candidate.parts
+    for end in range(len(parts), 0, -1):
+        if root_alias(pathlib.Path(*parts[:end]).resolve(strict=False)) is not None:
+            return "escape", None
+    return "outside", None
+
+
+# Compared casefolded: a case-insensitive volume opens .CLAUDE/ as .claude/.
+SURFACE_DIRS = {".claude", ".codex", ".agents", ".cursor", ".gemini", ".windsurf", ".openclaude"}
+SURFACE_FILES = {"agents.md", "agents.override.md", "claude.md", "claude.local.md", "gemini.md",
+                 ".cursorrules", ".windsurfrules", ".mcp.json"}
+
+
+def folded(path):
+    return pathlib.PurePosixPath(str(path).casefold())
+
+
+def homes(value):
+    path = pathlib.Path(value)
+    return {path, path.resolve(strict=False)}
+
+
+def within(path, bases, fold=False):
+    if fold:
+        path, bases = folded(path), {folded(base) for base in bases}
+    return any(path == base or base in path.parents for base in bases)
+
+
+def agent_instructions(raw):
+    # Outside the project: is this a file another agent session loads as
+    # instructions or config (Claude and Codex homes, ~/.agents, another
+    # repository's agent files)? The Markdown files of this project's own
+    # Claude auto memory are the one exception, as Claude Code treats them.
+    home = os.path.expanduser("~")
+    claude_home = homes(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(home, ".claude"))
+    other_homes = homes(os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")) | homes(os.path.join(home, ".agents"))
+    # Claude's user config (MCP servers, allowed tools) and the user's git
+    # config (hooks and fsmonitor run code).
+    config_dir = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    other_homes |= homes(os.path.join(home, ".claude.json")) | homes(os.path.join(home, ".gitconfig"))
+    other_homes |= homes(os.path.join(config_dir, "git", "config"))
+    slugs = set()
+    for project in (str(root), os.environ.get("CLAUDE_PROJECT_DIR", "")):
+        if os.path.isabs(project):
+            slugs.add("".join(ch if ch.isascii() and ch.isalnum() else "-" for ch in project))
+    memories = {base / "projects" / slug / "memory" for base in claude_home for slug in slugs}
+    candidate = pathlib.Path(raw)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    for path in {pathlib.Path(os.path.normpath(str(candidate))), candidate.resolve(strict=False)}:
+        if within(path, claude_home, fold=True):
+            # The exception needs the exact spelling; a variant asks.
+            if not (path.suffix == ".md" and within(path, memories)):
+                return True
+            continue
+        if within(path, other_homes, fold=True):
+            return True
+        parts = [part.casefold() for part in path.parts]
+        if any(part in SURFACE_DIRS for part in parts[:-1]):
+            return True
+        if any(parts[i] == ".git" and parts[i + 1] == "hooks" for i in range(len(parts) - 1)):
+            return True
+        if parts[-2:] == [".git", "config"]:
+            return True
+        if parts and parts[-1] in SURFACE_FILES:
+            return True
+    return False
+
+
 def read_json(path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -746,11 +938,15 @@ for pattern, reason in protected:
 for text in instructions:
     emit("instruction", text)
 if edit_path:
-    rel = canonical(edit_path)
-    if rel is None:
-        emit("relpath_outside", edit_path)
-    else:
+    kind, rel = classify_edit(edit_path)
+    if kind == "inside":
         emit("relpath", rel)
+    elif kind == "escape":
+        emit("relpath_escape", edit_path)
+    else:
+        emit("relpath_outside", edit_path)
+        if agent_instructions(edit_path):
+            emit("relpath_instructions", edit_path)
 
 if mode == "pack":
     if any(status != "present" for _, status in statuses):
@@ -805,6 +1001,8 @@ load_policy_snapshot() {
   AGENT_INSTRUCTIONS=()
   EDIT_RELPATH=""
   EDIT_OUTSIDE=false
+  EDIT_ESCAPE=false
+  EDIT_INSTRUCTIONS=false
   PACK_RESULT=""
   POLICY_FROM_SNAPSHOT=false
   [[ -f "$POLICY_FILE" ]] || fail "missing context policy: docs/agent-configs/context-policy.json"
@@ -825,6 +1023,8 @@ load_policy_snapshot() {
       instruction) AGENT_INSTRUCTIONS+=("$a") ;;
       relpath) EDIT_RELPATH="$a" ;;
       relpath_outside) EDIT_OUTSIDE=true ;;
+      relpath_escape) EDIT_ESCAPE=true ;;
+      relpath_instructions) EDIT_INSTRUCTIONS=true ;;
       pack) PACK_RESULT="$a" ;;
       error) fail "$a" ;;
       exit) status="$a" ;;
@@ -1010,71 +1210,149 @@ append_ack_log() {
     warn "ack path contains a tab/newline; acknowledgement will not be reusable"
     return 0
   fi
-  mkdir -p "$(dirname "$ACK_LOG")"
   escaped_pattern="$(tsv_escape "$pattern")"
   escaped_reason="$(tsv_escape "$reason")"
   escaped_ack="$(tsv_escape "$ack")"
-  printf '%s\tpath=%s\tpattern=%s\treason=%s\tack=%s\n' \
-    "$(utc_now)" \
-    "$relpath" \
-    "$escaped_pattern" \
-    "$escaped_reason" \
-    "$escaped_ack" >> "$ACK_LOG"
+  # A new log and state dir are yours only; ack_log_usable trusts a log in a
+  # temp dir only when nobody else can write it.
+  (
+    umask 077
+    mkdir -p "$(dirname "$ACK_LOG")"
+    # An older release made the temp dirs with the process umask; close yours.
+    case "$ACK_LOG" in
+      */agent-bootstrap-state/*/guard-ack.log)
+        for dir in "$(dirname "$ACK_LOG")" "$(dirname "$(dirname "$ACK_LOG")")"; do
+          [[ ! -O "$dir" || -L "$dir" ]] || chmod go-w "$dir" 2>/dev/null || true
+        done
+        ;;
+    esac
+    printf '%s\tpath=%s\tpattern=%s\treason=%s\tack=%s\n' \
+      "$(utc_now)" \
+      "$relpath" \
+      "$escaped_pattern" \
+      "$escaped_reason" \
+      "$escaped_ack" >> "$ACK_LOG"
+  )
 }
 
 ack_log_usable() {
   local relpath="$1"
-  local ttl="${AGENT_GUARD_ACK_TTL_SECONDS:-3600}"
+  local ttl="${AGENT_GUARD_ACK_TTL_SECONDS:-3600}" key tmp_log shared_log primary_kind=state
   [[ "$ttl" =~ ^-?[0-9]+$ ]] ||
     fail "invalid AGENT_GUARD_ACK_TTL_SECONDS: $ttl"
-  [[ -r "$ACK_LOG" ]] || return 1
-  python3 -I -S - "$ACK_LOG" "$relpath" "$ttl" <<'PY'
+  # Codex keeps .agents/ read-only in its sandbox, so an ack from a Codex
+  # shell lands in the TMPDIR (or /tmp) state dir, while the hook runs outside
+  # the sandbox and uses .agents/state. Read those logs too. A log in a temp
+  # dir counts only when it is private, also when it is the current state.
+  key="$(printf '%s' "$PROJECT_ROOT" | cksum | tr -d ' \t')"
+  tmp_log="${TMPDIR:-/tmp}/agent-bootstrap-state/$key/guard-ack.log"
+  shared_log="/tmp/agent-bootstrap-state/$key/guard-ack.log"
+  [[ "$ACK_LOG" != "$tmp_log" && "$ACK_LOG" != "$shared_log" ]] || primary_kind=temp
+  [[ -r "$ACK_LOG" || -r "$tmp_log" || -r "$shared_log" ]] || return 1
+  python3 -I -S - "$relpath" "$ttl" "$ACK_LOG" "$primary_kind" "$tmp_log" temp "$shared_log" temp <<'PY'
 import calendar
 import datetime
-import pathlib
+import os
 import re
+import stat
 import sys
 import time
 
-log_path = pathlib.Path(sys.argv[1])
-target_path = sys.argv[2]
-ttl = int(sys.argv[3], 10)
+target_path = sys.argv[1]
+ttl = int(sys.argv[2], 10)
 timestamp_pattern = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 latest = None
 
 if ttl <= 0:
     sys.exit(1)
 
-try:
-    with log_path.open("r", encoding="utf-8", newline="") as handle:
-        for raw_line in handle:
-            line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
-            if "\r" in line:
-                continue
-            fields = line.split("\t")
-            if len(fields) != 5:
-                continue
-            if not fields[1].startswith("path="):
-                continue
-            if not fields[2].startswith("pattern="):
-                continue
-            if not fields[3].startswith("reason="):
-                continue
-            if not fields[4].startswith("ack=") or fields[4][4:] == "":
-                continue
-            if not timestamp_pattern.fullmatch(fields[0]):
-                continue
-            try:
-                parsed = datetime.datetime.strptime(fields[0], "%Y-%m-%dT%H:%M:%SZ")
-            except ValueError:
-                continue
-            if fields[1][len("path="):] != target_path:
-                continue
-            epoch = calendar.timegm(parsed.timetuple())
-            if latest is None or epoch > latest:
-                latest = epoch
-except (OSError, UnicodeError):
-    sys.exit(1)
+
+class Untrusted(Exception):
+    pass
+
+
+def private(fd, kind):
+    status = os.fstat(fd)
+    if not kind(status.st_mode) or status.st_uid != os.getuid() or status.st_mode & 0o022:
+        raise Untrusted()
+
+
+def open_temp_log(path):
+    # A temp dir may be shared. Walk agent-bootstrap-state/<key>/guard-ack.log
+    # without following links, and check each opened descriptor: yours, and
+    # nobody else can write it. A swap between check and read cannot pass.
+    state_dir, name = os.path.split(path)
+    parent, key = os.path.split(state_dir)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(parent, flags)
+    try:
+        private(parent_fd, stat.S_ISDIR)
+        dir_fd = os.open(key, flags, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+    try:
+        private(dir_fd, stat.S_ISDIR)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+    try:
+        private(fd, stat.S_ISREG)
+    except BaseException:
+        os.close(fd)
+        raise
+    return os.fdopen(fd, "r", encoding="utf-8", newline="")
+
+
+seen_paths = set()
+seen_files = set()
+args = sys.argv[3:]
+for log_path, kind in zip(args[0::2], args[1::2]):
+    if log_path in seen_paths:
+        continue
+    seen_paths.add(log_path)
+    try:
+        handle = open_temp_log(log_path) if kind == "temp" else open(log_path, "r", encoding="utf-8", newline="")
+    except FileNotFoundError:
+        continue
+    except (OSError, Untrusted):
+        if kind == "temp":
+            print("agent-guard: warn: ignoring ack log %s: not yours, a link, or others can write it" % log_path,
+                  file=sys.stderr)
+        continue
+    with handle:
+        status = os.fstat(handle.fileno())
+        if (status.st_dev, status.st_ino) in seen_files:
+            continue
+        seen_files.add((status.st_dev, status.st_ino))
+        try:
+            for raw_line in handle:
+                line = raw_line[:-1] if raw_line.endswith("\n") else raw_line
+                if "\r" in line:
+                    continue
+                fields = line.split("\t")
+                if len(fields) != 5:
+                    continue
+                if not fields[1].startswith("path="):
+                    continue
+                if not fields[2].startswith("pattern="):
+                    continue
+                if not fields[3].startswith("reason="):
+                    continue
+                if not fields[4].startswith("ack=") or fields[4][4:] == "":
+                    continue
+                if not timestamp_pattern.fullmatch(fields[0]):
+                    continue
+                try:
+                    parsed = datetime.datetime.strptime(fields[0], "%Y-%m-%dT%H:%M:%SZ")
+                except ValueError:
+                    continue
+                if fields[1][len("path="):] != target_path:
+                    continue
+                epoch = calendar.timegm(parsed.timetuple())
+                if latest is None or epoch > latest:
+                    latest = epoch
+        except (OSError, UnicodeError):
+            continue
 
 if latest is not None and int(time.time()) - latest <= ttl:
     sys.exit(0)
@@ -1352,12 +1630,18 @@ pre_edit() {
   load_policy_snapshot pack "$raw_path"
   ensure_required_context
   local relpath="" canonical_path match pattern reason ack_source
-  [[ "$EDIT_OUTSIDE" != "true" ]] || fail "path outside project root: $raw_path"
+  [[ "$EDIT_ESCAPE" != "true" ]] || fail "path escapes the project root (symlink or ..): $raw_path"
+  [[ "$EDIT_INSTRUCTIONS" != "true" ]] || instructions_edit "$raw_path"
+  [[ "$EDIT_OUTSIDE" != "true" ]] || outside_edit "$raw_path"
   if [[ "$POLICY_FROM_SNAPSHOT" == "true" ]]; then
     relpath="$EDIT_RELPATH"
   else
+    if outside_lexical "$raw_path"; then
+      ! instructions_lexical "$raw_path" || instructions_edit "$raw_path"
+      outside_edit "$raw_path"
+    fi
     IFS= read -r -d '' relpath < <(canonical_project_relpath "$raw_path" && printf '\0') ||
-      fail "path outside project root: $raw_path"
+      fail "path escapes the project root (symlink or ..): $raw_path"
   fi
   canonical_path="$PROJECT_ROOT/$relpath"
   [[ "$relpath" == "." ]] && canonical_path="$PROJECT_ROOT"
