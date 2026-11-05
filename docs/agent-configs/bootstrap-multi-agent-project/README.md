@@ -315,7 +315,10 @@ A file-based guardrail, not a daemon or broker:
 - `scripts/agent-guard.sh pre-edit <path>` classifies protected context,
   harness, CI, release and generated paths; a protected path fails unless
   rerun with `--ack <reason>`, logged in `.agents/state/guard-ack.log`. Claude
-  Code's `Edit`, `Write` and `MultiEdit` hooks route through it.
+  Code's `Edit`, `Write`, `MultiEdit` and `NotebookEdit` hooks route through
+  it. A path outside the project is left to Claude Code, except agent
+  instructions or config (`~/.claude`, `~/.codex`, another repository's
+  `AGENTS.md` and the like), which ask first.
 - `scripts/agent-guard.sh pre-final` checks the context pack still matches the
   policy and required files before completion.
 
@@ -357,7 +360,7 @@ warn and keep their exit code; Claude Code hooks ask before acting in another
 repository. `check`/`doctor` are installation diagnostics, not workspace
 authorization. The launcher injects the original session metadata into child
 shells with per-launch `shell_environment_policy.set` overrides, keeping
-`inherit = "none"` (see the
+`inherit = "core"` and the `include_only` list (see the
 [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)).
 Every subagent handoff carries the same origin, target, source and
 authorization evidence and validates its checkout before writing.

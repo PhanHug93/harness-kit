@@ -216,8 +216,10 @@ import os
 import re
 import sys
 
+# Stdin, not the environment: a large Write would not fit in one variable,
+# python would not start, and the edit would skip the guard.
 try:
-    payload = json.loads(os.environ.get("HOOK_INPUT", "") or "{}")
+    payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "surrogateescape") or "{}")
 except Exception:
     payload = None
 tool_name = file_path = session = context = ""
@@ -226,7 +228,7 @@ if isinstance(payload, dict):
     tool_input = payload.get("tool_input") or payload.get("input") or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
-    path = tool_input.get("file_path") or tool_input.get("path") or ""
+    path = tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path") or ""
     tool_name = name if isinstance(name, str) else ""
     file_path = path if isinstance(path, str) else ""
     root = os.environ.get("CLAUDE_PROJECT_DIR", "")
@@ -237,7 +239,87 @@ if isinstance(payload, dict):
         session = sid
         context = "base64:" + base64.b64encode(json.dumps(envelope, ensure_ascii=False).encode("utf-8")).decode("ascii")
 for field in (tool_name, file_path, session, context):
-    sys.stdout.buffer.write(field.encode("utf-8", "surrogateescape") + b"\0")
+    try:
+        data = field.encode("utf-8", "surrogateescape")
+    except UnicodeEncodeError:
+        # A lone surrogate ("\ud800") from the JSON: keep the path, do not crash.
+        data = field.encode("utf-8", "surrogatepass")
+    sys.stdout.buffer.write(data.replace(b"\0", b"\\0") + b"\0")
+PY
+
+CODEX_PATCH_MAX_PATHS=100
+read -r -d '' READ_CODEX_PATCH_PY <<'PY' || true
+import json
+import os
+import sys
+
+# Stdin, not the environment: a large patch would not fit in one variable
+# (Linux caps each at 128 KiB) and the guard would be skipped.
+try:
+    payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "surrogateescape") or "{}")
+except Exception:
+    payload = None
+out = sys.stdout.buffer
+
+
+def done():
+    # An empty record ends a successful read; paths are never empty.
+    out.write(b"\0")
+    sys.exit(0)
+
+
+if not isinstance(payload, dict):
+    print("agent-hook: warn: Codex hook input is not JSON; skipping the edit guard", file=sys.stderr)
+    done()
+tool_name = payload.get("tool_name")
+if tool_name not in ("apply_patch", "Edit", "Write"):
+    done()
+tool_input = payload.get("tool_input")
+if not isinstance(tool_input, dict):
+    tool_input = {}
+command = tool_input.get("command")
+if isinstance(command, list):
+    command = "\n".join(part for part in command if isinstance(part, str))
+cwd = payload.get("cwd")
+seen = set()
+
+
+def emit(path):
+    # Repeats count once; a NUL would end the record and hide later paths.
+    path = path.replace("\0", "\\0")
+    variants = [path]
+    if path == "~" or path.startswith("~/"):
+        # Codex may expand "~"; check both readings.
+        variants.append(os.path.expanduser(path))
+    for value in variants:
+        if not os.path.isabs(value) and isinstance(cwd, str) and os.path.isabs(cwd):
+            value = os.path.join(cwd, value)
+        if value and value not in seen:
+            seen.add(value)
+            out.write(value.encode("utf-8", "surrogateescape") + b"\0")
+
+
+if not isinstance(command, str):
+    path = tool_input.get("file_path") or tool_input.get("path")
+    if tool_name != "apply_patch" and isinstance(path, str) and path:
+        emit(path)
+        done()
+    print("agent-hook: warn: %s input has no command or file_path; skipping the edit guard" % tool_name,
+          file=sys.stderr)
+    done()
+# Codex splits on "\n" and trims Unicode whitespace around a header line, so
+# "  *** Delete File: CLAUDE.md\u00a0" deletes CLAUDE.md. Trim the same set (Rust
+# char::is_whitespace) and take every header-like line, also an indented one
+# Codex reads as context: checking a path too many only blocks more.
+space = "\t\n\x0b\x0c\r \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+markers = ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: ")
+for line in command.split("\n"):
+    line = line.strip(space)
+    marker = next((m for m in markers if line.startswith(m)), None)
+    if marker is None:
+        continue
+    emit(line[len(marker):])
+done()
 PY
 
 read_claude_hook_input() {
@@ -249,7 +331,7 @@ read_claude_hook_input() {
   if [[ -z "${AGENT_WORKSPACE_CONTEXT:-}" && -z "${AGENT_HOST_SESSION_ID:-}" && -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
     mint=true
   fi
-  exec 3< <(HOOK_INPUT="$input" HOOK_MINT="$mint" python3 -I -S -c "$READ_HOOK_PY" 2>/dev/null || true)
+  exec 3< <(printf '%s' "$input" | HOOK_MINT="$mint" python3 -I -S -c "$READ_HOOK_PY" 2>/dev/null || true)
   IFS= read -r -d '' HOOK_TOOL_NAME <&3 || true
   IFS= read -r -d '' HOOK_EDIT_PATH <&3 || true
   IFS= read -r -d '' session <&3 || true
@@ -265,7 +347,11 @@ read_claude_hook_input() {
 
 guard_claude_edit_tool() {
   local edit_path="$1" ask_reason="${2:-}" rc=0 classification=""
-  [[ -n "$edit_path" ]] || fail "Claude edit hook did not include tool_input.file_path"
+  if [[ -z "$edit_path" ]]; then
+    # Claude Code only blocks on exit 2.
+    echo "agent-hook: ERROR: edit blocked: the Claude hook input has no tool_input.file_path or notebook_path" >&2
+    exit 2
+  fi
   if [[ -n "${AGENT_GUARD_EDIT_ACK:-}" ]]; then
     classification="$("$AGENT_GUARD" pre-edit --strict --use-ack-log --workspace-checked --ack "$AGENT_GUARD_EDIT_ACK" "$edit_path")" || rc=$?
   else
@@ -273,12 +359,18 @@ guard_claude_edit_tool() {
   fi
   # Stdout must be pure JSON when the hook asks the user; otherwise keep the
   # classification on stdout (debug log only), so denials stay two stderr lines.
-  if [[ -z "$ask_reason" && -n "$classification" ]]; then
+  if [[ -z "$ask_reason" && "$rc" -ne 5 && -n "$classification" ]]; then
     printf '%s\n' "$classification"
   fi
   case "$rc" in
     0) return 0 ;;
     3) exit 2 ;;
+    4) return 0 ;; # outside the project: Claude Code's permissions decide
+    5)
+      # Agent instructions outside the project: always the user's call.
+      EDIT_ASK_REASON="$edit_path holds agent instructions or config outside this project; confirm this write with the user (prompt-injection guard)"
+      return 0
+      ;;
     *)
       # Claude Code only blocks on exit 2; any other guard refusal (outside the
       # project root, missing context, a policy error) must block the edit too.
@@ -317,9 +409,10 @@ claude_ask() {
 import json
 import os
 
+# ASCII escapes: a path that is not valid UTF-8 must not crash the ask (exit 1
+# would let the write through).
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                         "permissionDecisionReason": os.environ["ASK_REASON"]}},
-                 ensure_ascii=False))
+                                         "permissionDecisionReason": os.environ["ASK_REASON"]}}))
 PY
 }
 
@@ -605,15 +698,17 @@ claude_pretool() {
     [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
     exit 0
   fi
-  # One workspace check per tool call. Edit/Write/MultiEdit go through the
-  # guard, whose pre-edit also refreshes the context pack. A Bash call skips
-  # preflight and the detector check: neither could block it (Claude Code
-  # blocks only on exit 2), and session start, pre-final and the Codex
-  # preflight still run them.
+  # One workspace check per tool call. Edit, Write, MultiEdit and NotebookEdit
+  # go through the guard, whose pre-edit also refreshes the context pack. A
+  # Bash call skips preflight and the detector check: neither could block it
+  # (Claude Code blocks only on exit 2), and session start, pre-final and the
+  # Codex preflight still run them.
   ask_reason="$(workspace_ask_reason)"
+  EDIT_ASK_REASON=""
   case "$HOOK_TOOL_NAME" in
-    Edit|Write|MultiEdit) guard_claude_edit_tool "$HOOK_EDIT_PATH" "$ask_reason" ;;
+    Edit|Write|MultiEdit|NotebookEdit) guard_claude_edit_tool "$HOOK_EDIT_PATH" "$ask_reason" ;;
   esac
+  [[ -z "$EDIT_ASK_REASON" ]] || ask_reason="${ask_reason:+$ask_reason; }$EDIT_ASK_REASON"
   [[ -z "$ask_reason" ]] || claude_ask "$ask_reason"
   exit 0
 }
@@ -647,6 +742,55 @@ codex_preflight() {
   fi
   verify_detector_lock
   echo "agent-hook: codex preflight ok (mode=$mode flow=$flow)" >&2
+}
+
+codex_pretool() {
+  # Codex PreToolUse hook (.codex/hooks.json): every file an apply_patch adds,
+  # updates, deletes or moves goes through pre-edit, as a Claude Edit does.
+  # Exit 2 blocks the patch; a path outside the project is left to the Codex
+  # sandbox. Codex skips this hook until the user trusts it in /hooks.
+  local input path rc blocked=false read_ok=false
+  local -a paths=()
+  if ! command -v "${AGENT_HOOK_PYTHON:-python3}" >/dev/null 2>&1 || [[ ! -x "$AGENT_GUARD" ]]; then
+    echo "agent-hook: warn: python3 or scripts/agent-guard.sh is unavailable; skipping the Codex edit guard" >&2
+    exit 0
+  fi
+  input="$(cat 2>/dev/null || true)"
+  while IFS= read -r -d '' path; do
+    if [[ -z "$path" ]]; then
+      read_ok=true
+      break
+    fi
+    paths+=("$path")
+  done < <(printf '%s' "$input" | python3 -I -S -c "$READ_CODEX_PATCH_PY")
+  if [[ "$read_ok" != "true" ]]; then
+    echo "agent-hook: warn: could not read the apply_patch paths; skipping the Codex edit guard" >&2
+    exit 0
+  fi
+  # Each path costs one guard run (about 0.15 s): keep a patch inside the 30 s
+  # hook timeout instead of letting a padded one run out the clock.
+  if [[ "${#paths[@]}" -gt "$CODEX_PATCH_MAX_PATHS" ]]; then
+    echo "agent-hook: ERROR: the patch names ${#paths[@]} files (limit $CODEX_PATCH_MAX_PATHS); split the patch" >&2
+    exit 2
+  fi
+  # bash 3.2 treats an empty "${paths[@]}" as unbound under set -u.
+  for path in ${paths[@]+"${paths[@]}"}; do
+    rc=0
+    "$AGENT_GUARD" pre-edit --strict --use-ack-log --workspace-checked "$path" >/dev/null || rc=$?
+    case "$rc" in
+      0|4) ;;
+      5)
+        echo "agent-hook: ERROR: $path holds agent instructions or config outside this project; Codex hooks cannot ask, so the user makes this change" >&2
+        blocked=true
+        ;;
+      *) blocked=true ;;
+    esac
+  done
+  if [[ "$blocked" == "true" ]]; then
+    echo "agent-hook: ERROR: patch blocked by agent-guard pre-edit" >&2
+    exit 2
+  fi
+  exit 0
 }
 
 doctor() {
@@ -795,6 +939,9 @@ case "${1:-}" in
   claude-session-start)
     claude_session_start
     ;;
+  codex-pretool)
+    codex_pretool
+    ;;
   codex-preflight)
     shift || true
     codex_preflight "$@"
@@ -812,7 +959,7 @@ case "${1:-}" in
     close_out
     ;;
   -h|--help|help|"")
-    echo "Usage: scripts/agent-hook.sh claude-pretool|claude-session-start|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
+    echo "Usage: scripts/agent-hook.sh claude-pretool|claude-session-start|codex-pretool|codex-preflight|guard-local-state|no-scan-paths|doctor|close-out"
     ;;
   *)
     fail "unknown command: $1"

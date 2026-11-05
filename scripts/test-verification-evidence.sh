@@ -492,7 +492,8 @@ import json, sys
 assert json.load(open(sys.argv[1]))["budget_seconds"] == 300
 PY
 
-# 25 the Claude edit hook blocks (exit 2) on every guard refusal, not only protected paths
+# 25 the Claude edit hook blocks (exit 2) on every guard refusal, not only protected
+# paths; a path outside the project is no refusal: Claude Code decides it
 edit_json() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$1"; }
 pretool() { local p="$1"; shift; rc=0; edit_json "$p" | (cd "$target" && env "$@" scripts/agent-hook.sh claude-pretool >"$TMP_ROOT/pre.out" 2>"$TMP_ROOT/pre.err") || rc=$?; }
 echo hi > "$target/src.txt"
@@ -501,7 +502,9 @@ pretool "$target/src.txt" X=1
 pretool "$target/AGENTS.md" X=1
 [[ "$rc" -eq 2 ]] || fail "a protected path must block with 2 (got $rc): $(cat "$TMP_ROOT/pre.err")"
 pretool /etc/hosts X=1
-[[ "$rc" -eq 2 ]] || fail "outside root must block (got $rc)"
+[[ "$rc" -eq 0 ]] || fail "a path outside the project must reach Claude Code (got $rc): $(cat "$TMP_ROOT/pre.err")"
+pretool "$target/../escape.txt" X=1
+[[ "$rc" -eq 2 ]] || fail "a .. escape from the project must block (got $rc)"
 ctx="$target/docs/agent-configs/project-agent-context.md"
 mv "$ctx" "$TMP_ROOT/ctx.bak"
 pretool "$target/src.txt" X=1

@@ -192,7 +192,10 @@ class WorkspaceGuardTests(unittest.TestCase):
         bash_input = json.dumps({'session_id': 'claude-1', 'tool_name': 'Bash', 'tool_input': {'command': 'true'}})
         edit_input = json.dumps({'session_id': 'claude-1', 'tool_name': 'Edit',
                                  'tool_input': {'file_path': str(self.android / 'notes.txt')}})
-        for tool_input in (bash_input, edit_input):
+        # A path outside the project skips the edit guard but not this question.
+        outside_input = json.dumps({'session_id': 'claude-1', 'tool_name': 'Write',
+                                    'tool_input': {'file_path': str(self.base / 'outside.txt')}})
+        for tool_input in (bash_input, edit_input, outside_input):
             asked = run([hook, 'claude-pretool'], bad_env, stdin=tool_input)
             self.assertEqual(asked.returncode, 0, asked.stderr)
             decision = json.loads(asked.stdout)['hookSpecificOutput']
@@ -252,7 +255,7 @@ class WorkspaceGuardTests(unittest.TestCase):
         # Launcher mints from the invocation directory and forwards existing envelopes.
         fake = self.base / 'bin'; fake.mkdir()
         executable = fake / 'codex'
-        executable.write_text('#!/usr/bin/env python3\nimport os, sys, json, subprocess\n# Emulate inherit=none: include_only cannot restore absent variables.\nchild_env = {"PATH": os.environ["PATH"]}\nfor index, arg in enumerate(sys.argv[:-1]):\n    if arg == "-c" and sys.argv[index + 1].startswith("shell_environment_policy.set."):\n        key, value = sys.argv[index + 1].split("=", 1)\n        child_env[key.rsplit(".", 1)[1]] = json.loads(value)\nchild = subprocess.run(["bash", "scripts/agent-guard.sh", "workspace-check"], env=child_env, text=True, capture_output=True)\nprint(json.dumps(dict(context=os.environ["AGENT_WORKSPACE_CONTEXT"], args=sys.argv,\n                     child_code=child.returncode, child_error=child.stderr)))\n')
+        executable.write_text('#!/usr/bin/env python3\nimport os, sys, json, subprocess\n# Emulate inherit=core plus include_only: PATH and the set overrides only.\nchild_env = {"PATH": os.environ["PATH"]}\nfor index, arg in enumerate(sys.argv[:-1]):\n    if arg == "-c" and sys.argv[index + 1].startswith("shell_environment_policy.set."):\n        key, value = sys.argv[index + 1].split("=", 1)\n        child_env[key.rsplit(".", 1)[1]] = json.loads(value)\nchild = subprocess.run(["bash", "scripts/agent-guard.sh", "workspace-check"], env=child_env, text=True, capture_output=True)\nprint(json.dumps(dict(context=os.environ["AGENT_WORKSPACE_CONTEXT"], args=sys.argv,\n                     child_code=child.returncode, child_error=child.stderr)))\n')
         executable.chmod(0o755)
         path = str(fake) + os.pathsep + os.environ.get('PATH', os.defpath)
         launcher = str(self.android / '.codex/codex-mode.sh')

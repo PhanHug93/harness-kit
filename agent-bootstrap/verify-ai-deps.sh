@@ -945,6 +945,7 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
   docs/agent-configs/project-onboarding.md \
   docs/agent-configs/project-brief.md \
   .codex/config.toml \
+  .codex/hooks.json \
   .codex/codex-mode.sh \
   .codex/README.md \
   .agents/skills/doubt-driven/SKILL.md \
@@ -1052,8 +1053,11 @@ else
   bad "Claude PreToolUse does not use shared agent hook"
 fi
 
-if grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$ROOT_DIR/.claude/settings.json"; then
+if grep -Fq '"matcher": "Edit|Write|MultiEdit|NotebookEdit"' "$ROOT_DIR/.claude/settings.json"; then
   ok "Claude PreToolUse guards edit/write tools"
+elif grep -Fq '"matcher": "Edit|Write|MultiEdit"' "$ROOT_DIR/.claude/settings.json"; then
+  # An update keeps an edited settings.json; its candidate has the new matcher.
+  bad "Claude PreToolUse does not guard NotebookEdit: use matcher Edit|Write|MultiEdit|NotebookEdit (see the settings.json candidate)"
 else
   bad "Claude PreToolUse does not guard edit/write tools"
 fi
@@ -1063,6 +1067,46 @@ if [[ "$WORKFLOW_PRESET" != "infra" && "$WORKFLOW_PRESET" != "none" ]]; then
     ok "Codex helper calls shared hook preflight"
   else
     bad "Codex helper does not call shared hook preflight"
+  fi
+  if python3 -I -S - "$ROOT_DIR/.codex/hooks.json" >/dev/null 2>&1 <<'PY'; then
+import json
+import re
+import sys
+
+# A PreToolUse group whose matcher takes apply_patch runs the kit hook.
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        groups = json.load(handle)["hooks"]["PreToolUse"]
+except Exception:
+    sys.exit(1)
+
+
+def takes_patch(matcher):
+    if matcher in (None, "", "*"):
+        return True
+    try:
+        return re.search(matcher, "apply_patch") is not None
+    except (re.error, TypeError):
+        return False
+
+
+# The kit entry, byte for byte: Codex trusts a hook by its hash, and a
+# command that only names the guard (echo, a comment) must not pass.
+GUARD = 'sh -c \'exec "$(git rev-parse --show-toplevel)/scripts/agent-hook.sh" codex-pretool\''
+
+
+def runs_guard(group):
+    # Codex does not wait for an async hook, so it cannot block.
+    return any(isinstance(h, dict) and h.get("type") == "command" and h.get("command") == GUARD
+               and not h.get("async") for h in group.get("hooks") or [])
+
+
+sys.exit(0 if any(isinstance(g, dict) and takes_patch(g.get("matcher")) and runs_guard(g)
+                  for g in groups if isinstance(groups, list)) else 1)
+PY
+    ok "Codex PreToolUse guards apply_patch"
+  else
+    bad "Codex PreToolUse does not guard apply_patch (.codex/hooks.json)"
   fi
 else
   ok "Codex mode helper not installed for infra-only workflow"
