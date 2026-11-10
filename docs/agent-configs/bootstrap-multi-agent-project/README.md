@@ -104,7 +104,7 @@ kit output of every generated file, and each run puts every file in one class:
 | update | you have not edited the file | write the new kit output |
 | kept | the kit did not change the file, you did | keep yours |
 | merge | both changed and the merge is clean | write the merged file |
-| conflict | both changed and the merge fails, or the file is JSON | keep yours; the kit's goes to `<path>.generated.<STAMP>` |
+| conflict | both changed and the merge fails, or the file is JSON (`.claude/settings.json` is merged when the result is still valid JSON) | keep yours; the kit's goes to `<path>.generated.<STAMP>` |
 | unsafe | a link or a path outside the project | skip and report |
 | pinned | pinned with `--keep-local` (or the generator's `--keep`) | leave it alone; a pin edited since is reported as stale |
 
@@ -252,13 +252,29 @@ examples.
   `--base <branch>` on any `tier set`; a stacked branch then counts only its
   own work once the parent is merged. Pre-final reminds you only when the
   task started on commits the default branch does not have.
+- When every work branch starts from the same branch that is not the
+  default one, name it once as `tier_base` in `project-tech-stack.json`
+  (for example `"tier_base": "origin/develop"`). It then takes the default
+  branch's place in every rule here. The name is looked up as a local
+  branch, then as a remote one (`origin/develop`), then on `origin`; a
+  slash in it (`release/next`) changes nothing. A name that is no branch
+  warns and the default branch is used. With no tier declared, the warning
+  says what its count starts from (`since origin/master, 2023-04-13`), so
+  a base far in the past is easy to spot.
 - A task started on the default branch moves to a new branch made from its
   work when you run `tier set` there. On the default branch the change is
   everything since `tier set`, minus commits pulled from teammates and
   commits already pushed, so each push is checked on its own.
-- The pre-push hook (`pre-final --committed`) counts only committed work on
-  the checked-out branch. A linked worktree has no kit files, so it has no
-  push check.
+- The pre-push hook (`pre-final --committed --advisory`) counts only
+  committed work on the checked-out branch, for the task in
+  `.agents/tasks/ACTIVE`. A push with no declared tier is not measured:
+  after `tier close` that is the usual push. The hook names the packets
+  still open on the pushed branch (the one the push sends, also when
+  another one is checked out; a push of tags alone names none) and counts
+  the other ones that are not closed (`tier list` shows them). It warns
+  and does not refuse a push, also when verification failed or did not
+  run; only kit local-only files in the pushed commits refuse it. A linked
+  worktree has no kit files, so it has no push check.
 - When git cannot tell the task's work apart (a rebase of a commit made
   before the task), pre-final names the cause and does not fail.
 - Thresholds live in `docs/agent-configs/context-policy.json`. Edit them

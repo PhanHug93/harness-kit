@@ -1,6 +1,6 @@
 # Agent Bootstrap Manifest
 
-Version: `2026.11.05.2`
+Version: `2026.11.10.1`
 Channel: `stable`
 
 This manifest defines the portable `agent-bootstrap/` bundle layout. Keep this
@@ -35,12 +35,12 @@ tag or source branch to complete a feature PR.
 | `agent-tech-stack-lib.sh` | Runtime detector library for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-tech-stack-lib.sh`. |
 | `agent-hook.sh` | Runtime hook for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-hook.sh`. |
 | `agent-guard.sh` | Agent Guard Lite runtime for generated projects. | Must match `--workflow full` generated `scripts/agent-guard.sh`. |
-| `agent-tier.py` | Change-tier program (`suggest`, `set`, `show`, `close`, `stats`) that `agent-guard.sh tier` runs; it alone writes `.agents/tasks/<id>/tier.json`. | Must match canonical home export and generated target `scripts/agent-tier.py`. |
+| `agent-tier.py` | Change-tier program (`suggest`, `set`, `show`, `list`, `close`, `stats`) that `agent-guard.sh tier` runs; it alone writes `.agents/tasks/<id>/tier.json`. | Must match canonical home export and generated target `scripts/agent-tier.py`. |
 | `agent-seats.sh` | Runtime seat assignment, migration, validation, and roster renderer for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-seats.sh`. |
 | `agent-onboarding.sh` | Runtime onboarding readiness helper for generated full-workflow projects. | Must match `--workflow full` generated `scripts/agent-onboarding.sh`. |
 | `agent-local-only-check.sh` | Runtime Git hygiene checker that blocks harness-kit generated files from being pushed. | Must match generated target `scripts/agent-local-only-check.sh` and pre-push hook expectations. |
 | `detect-agent-tech-stack.sh` | Runtime detector entrypoint for generated full-workflow projects. | Must match `--workflow full` generated `scripts/detect-agent-tech-stack.sh`. |
-| `githooks/pre-push` | Optional portable git pre-push close-out gate copied into generated target `scripts/githooks/pre-push`. | Must match generated target hook and remain opt-in via `scripts/install-git-hooks.sh`. |
+| `githooks/pre-push` | Optional portable git pre-push close-out check (it warns; only kit local-only files refuse a push) copied into generated target `scripts/githooks/pre-push`. | Must match generated target hook and remain opt-in via `scripts/install-git-hooks.sh`. |
 | `install-git-hooks.sh` | Optional installer that sets `core.hooksPath=scripts/githooks` without clobbering an existing hooks path unless `--force` is used. | Must match generated target `scripts/install-git-hooks.sh`. |
 | `verify-ai-deps.sh` | Runtime verifier for generated full-workflow projects. | Must match `--workflow full` generated `scripts/verify-ai-deps.sh`. |
 | `model-profiles/codex-model-profiles.json` | Legacy model profile catalog retained as one-release migration input; fresh targets do not receive `model-profiles.json`. | Must match canonical home export; used only when `seats.json` is missing. |

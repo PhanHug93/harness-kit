@@ -56,6 +56,7 @@ detector               fast ci-4     par    bash scripts/test-detector-fixtures.
 pipe-safety            fast lint     par    bash scripts/test-pipe-safety.sh
 hook-hot-path          fast ci-4     par    bash scripts/test-hook-hot-path.sh
 edit-guard-hosts       fast ci-4     par    bash scripts/test-edit-guard-hosts.sh
+host-codex             fast ci-4     par    bash scripts/test-host-codex.sh
 seat-contracts         fast ci-4     par    bash scripts/test-seat-contracts.sh
 packet-seats           fast ci-4     par    bash scripts/test-packet-seats.sh
 guard-race             fast ci-4     serial bash scripts/test-guard-concurrency.sh

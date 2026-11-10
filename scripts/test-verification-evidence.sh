@@ -478,7 +478,7 @@ hook_json s3 | (cd "$target" && AGENT_STATE_DIR="$inner" scripts/agent-hook.sh c
 python3 - "$target/.claude/settings.json" <<'PY' || fail "Stop hook must declare timeout 360"
 import json, sys
 stop = json.load(open(sys.argv[1]))["hooks"]["Stop"]
-assert [(h["command"], h.get("timeout")) for e in stop for h in e["hooks"]] == [("./scripts/agent-hook.sh close-out", 360)], stop
+assert [(h["command"], h.get("timeout")) for e in stop for h in e["hooks"]] == [('"$CLAUDE_PROJECT_DIR"/scripts/agent-hook.sh close-out', 360)], stop
 PY
 
 # 24 the close-out caps the guard's total budget at 300 s whatever the environment asks

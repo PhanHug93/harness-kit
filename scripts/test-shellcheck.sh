@@ -33,6 +33,8 @@ shellcheck --external-sources --exclude="$exclude" \
   scripts/test-pipe-safety.sh \
   scripts/test-hook-hot-path.sh \
   scripts/test-edit-guard-hosts.sh \
+  scripts/test-host-codex.sh \
+  scripts/release-smoke.sh \
   scripts/test-seat-contracts.sh \
   scripts/test-packet-seats.sh \
   scripts/test-historical-fixtures.sh \

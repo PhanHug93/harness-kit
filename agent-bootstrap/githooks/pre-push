@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # AGENT_BOOTSTRAP_GENERATED
-# Portable close-out gate. Runs preflight before fast verification so fresh
-# clones have a context pack before pre-final freshness checks.
+# Portable close-out check for a push. It warns and does not refuse the push,
+# with one exception: kit local-only files in the pushed commits. Runs
+# preflight before fast verification so fresh clones have a context pack
+# before pre-final freshness checks.
 set -euo pipefail
 
 # The project is two levels up from this hook: the Git top level, or the
@@ -24,7 +26,19 @@ if [[ -s "$push_input" ]] && ! awk '$2 !~ /^0+$/ { found = 1 } END { exit !found
   exit 0
 fi
 
-bash "$ROOT/scripts/agent-guard.sh" preflight >/dev/null
-# --committed: the tier check reads the commits of the checked-out branch,
-# not drafts. Tier checks only recommend; verification can still fail.
-exec bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope" --committed
+# From here on nothing refuses the push: the packets still open on the pushed
+# branches, the tier and the verification result are warnings for whoever
+# pushes. The packets are the ones of the branches git names on stdin
+# (AGENT_GUARD_PREPUSH_REFS). --committed: the tier and the verification read
+# the commits of the checked-out branch, not drafts. --advisory: a failed or
+# missing verification warns.
+code=0
+bash "$ROOT/scripts/agent-guard.sh" preflight >/dev/null || code=$?
+if [[ "$code" -eq 0 ]]; then
+  AGENT_GUARD_PREPUSH_REFS="$push_input" \
+    bash "$ROOT/scripts/agent-guard.sh" pre-final --run-verify --verify-scope "$scope" --committed --advisory || code=$?
+fi
+if [[ "$code" -ne 0 ]]; then
+  printf 'agent-guard: warn: the push check did not finish (exit %s); the push goes ahead\n' "$code" >&2
+fi
+exit 0

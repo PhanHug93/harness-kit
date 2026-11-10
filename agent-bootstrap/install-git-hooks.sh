@@ -11,7 +11,8 @@ case "${1:-}" in
     printf '%s\n' \
       "Usage: scripts/install-git-hooks.sh [--force]" \
       "" \
-      "Opt in to the agent-bootstrap pre-push close-out gate."
+      "Opt in to the agent-bootstrap pre-push check. It warns about packets still open," \
+      "the tier and verification; it refuses a push only for kit local-only files."
     exit 0
     ;;
   "")
@@ -41,4 +42,4 @@ fi
 
 chmod +x "$HOOKS/pre-push" 2>/dev/null || true
 git -C "$ROOT" config core.hooksPath "$hooks_path"
-printf 'agent-bootstrap: git pre-push gate armed (core.hooksPath=%s). Bypass once with: git push --no-verify\n' "$hooks_path"
+printf 'agent-bootstrap: git pre-push check armed (core.hooksPath=%s). It warns; it refuses a push only for kit local-only files. Skip it once with: git push --no-verify\n' "$hooks_path"

@@ -290,6 +290,117 @@ need_contains "$kept_out" "Kept local edits (kit output unchanged): $jsonkept/$S
   fail "an edited JSON file with unchanged kit output must not get a candidate"
 cmp -s "$jsonkept/$SETTINGS_REL" "$TMP_ROOT/settings-local" || fail "the kept JSON file keeps its local edit"
 
+# An edited .claude/settings.json merges with a kit change, like a text file,
+# when the three-way merge is clean and its result is valid JSON. Edits at the
+# same place, or a result that is not JSON, stay a candidate. "Kit v3" changes
+# the Stop hook line of the settings template.
+KIT_V3="$TMP_ROOT/kit-v3"
+cp -R "$KIT_V1" "$KIT_V3"
+python3 -B - "$KIT_V3/lib/writers-docs.sh" <<'PY' || fail "cannot make kit v3"
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+assert text.count('"timeout": 360 }') == 2, text.count('"timeout": 360 }')
+open(sys.argv[1], "w", encoding="utf-8").write(text.replace('"timeout": 360 }', '"timeout": 420 }'))
+PY
+# settings_edit <target> <old> <new>: one local text edit in settings.json.
+settings_edit() {
+  python3 -B - "$1/$SETTINGS_REL" "$2" "$3" <<'PY' || fail "cannot edit settings.json in $1"
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+assert text.count(sys.argv[2]) >= 1, sys.argv[2]
+open(sys.argv[1], "w", encoding="utf-8").write(text.replace(sys.argv[2], sys.argv[3], 1))
+PY
+}
+settings_plan() { # settings_plan <target> <action> [kit]
+  local plan
+  plan="$(bash "${3:-$KIT_V3}/bootstrap-multi-agent-project.sh" --target "$1" --upgrade-plan --json)"
+  python3 - "$plan" "$SETTINGS_REL" "$2" <<'PY' || fail "settings.json in $1 must be planned as $2: $plan"
+import json, sys
+item = {entry["path"]: entry for entry in json.loads(sys.argv[1])["files"]}[sys.argv[2]]
+assert item["action"] == sys.argv[3], item
+PY
+}
+# a. A local edit away from the kit change: merged, valid JSON, no candidate.
+jsonmerge="$TMP_ROOT/json-merge"
+mkdir -p "$jsonmerge"
+generate "$KIT_V1" "$jsonmerge" >/dev/null
+settings_edit "$jsonmerge" 'agent-hook.sh claude-pretool" }' 'agent-hook.sh claude-pretool", "timeout": 30 }'
+settings_plan "$jsonmerge" merge
+merge_out="$(generate "$KIT_V3" "$jsonmerge")"
+need_contains "$merge_out" "Merged kit changes into local edits: $jsonmerge/$SETTINGS_REL" "settings.json merge log"
+python3 -B - "$jsonmerge/$SETTINGS_REL" <<'PY' || fail "the merged settings.json must hold both changes as valid JSON"
+import json, sys
+doc = json.load(open(sys.argv[1], encoding="utf-8"))
+commands = [hook for event in doc["hooks"].values() for group in event for hook in group["hooks"]]
+assert any(hook.get("timeout") == 30 and hook["command"].endswith("claude-pretool") for hook in commands), commands
+assert [hook["timeout"] for hook in commands if hook["command"].endswith("close-out")] == [420], commands
+PY
+[[ -z "$(find "$jsonmerge/.claude" -name 'settings.json.generated.*' -print -quit)" ]] ||
+  fail "a merged settings.json must not get a candidate"
+# b. A local edit at the place the kit changes: a candidate, the local file stays.
+jsonclash="$TMP_ROOT/json-clash"
+mkdir -p "$jsonclash"
+generate "$KIT_V1" "$jsonclash" >/dev/null
+settings_edit "$jsonclash" '"timeout": 360 }' '"timeout": 300 }'
+cp "$jsonclash/$SETTINGS_REL" "$TMP_ROOT/settings-clash"
+settings_plan "$jsonclash" conflict
+generate "$KIT_V3" "$jsonclash" >/dev/null
+[[ -n "$(find "$jsonclash/.claude" -name 'settings.json.generated.*' -print -quit)" ]] ||
+  fail "overlapping settings.json edits must leave a candidate"
+cmp -s "$jsonclash/$SETTINGS_REL" "$TMP_ROOT/settings-clash" || fail "a settings.json conflict must keep the local file"
+# c. A clean merge whose result is not JSON (the local file has a comment): a candidate.
+jsonbad="$TMP_ROOT/json-bad"
+mkdir -p "$jsonbad"
+generate "$KIT_V1" "$jsonbad" >/dev/null
+settings_edit "$jsonbad" '"hooks": {' '"hooks": { // mine'
+cp "$jsonbad/$SETTINGS_REL" "$TMP_ROOT/settings-bad"
+settings_plan "$jsonbad" conflict
+generate "$KIT_V3" "$jsonbad" >/dev/null
+[[ -n "$(find "$jsonbad/.claude" -name 'settings.json.generated.*' -print -quit)" ]] ||
+  fail "a merge that is not valid JSON must leave a candidate"
+cmp -s "$jsonbad/$SETTINGS_REL" "$TMP_ROOT/settings-bad" || fail "a settings.json that is not JSON must stay as it is"
+# d. A clean merge that repeats a key: the project added "permissions" at the
+# top, "kit v4" adds one at the end. A parser keeps the last one only, so the
+# project's rules would be lost without a word: a candidate, the local file stays.
+KIT_V4="$TMP_ROOT/kit-v4"
+cp -R "$KIT_V1" "$KIT_V4"
+python3 -B - "$KIT_V4/lib/writers-docs.sh" <<'PY' || fail "cannot make kit v4"
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+old = '"timeout": 360 }\n\t        ]\n\t      }\n\t    ]\n\t  }\n}\n'
+assert text.count(old) == 2, text.count(old)
+new = old[:-len("\n}\n")] + ',\n  "permissions": { "allow": ["Bash(git status)"] }\n}\n'
+open(sys.argv[1], "w", encoding="utf-8").write(text.replace(old, new))
+PY
+jsondup="$TMP_ROOT/json-dup"
+mkdir -p "$jsondup"
+generate "$KIT_V1" "$jsondup" >/dev/null
+settings_edit "$jsondup" '  "hooks": {' '  "permissions": { "deny": ["Read(./.env)"] },'$'\n''  "hooks": {'
+cp "$jsondup/$SETTINGS_REL" "$TMP_ROOT/settings-dup"
+settings_plan "$jsondup" conflict "$KIT_V4"
+generate "$KIT_V4" "$jsondup" >/dev/null
+[[ -n "$(find "$jsondup/.claude" -name 'settings.json.generated.*' -print -quit)" ]] ||
+  fail "a merge that repeats a key must leave a candidate"
+cmp -s "$jsondup/$SETTINGS_REL" "$TMP_ROOT/settings-dup" || fail "a settings.json merge that repeats a key must keep the local file"
+# e. The same inside an object, asked of the merge helper itself.
+(
+  # shellcheck source=/dev/null
+  source "$KIT_V1/lib/core.sh"
+  dup="$TMP_ROOT/json-nested"
+  mkdir -p "$dup"
+  printf '{\n  "hooks": {\n    "a": 1,\n    "b": 2,\n    "c": 3\n  }\n}\n' >"$dup/base"
+  printf '{\n  "hooks": {\n    "mine": true,\n    "a": 1,\n    "b": 2,\n    "c": 3\n  }\n}\n' >"$dup/local"
+  printf '{\n  "hooks": {\n    "a": 1,\n    "b": 2,\n    "c": 3,\n    "kit": true\n  }\n}\n' >"$dup/new"
+  harness_json_merge "$dup/local" "$dup/base" "$dup/new" "$dup/merged" || fail "two different keys must merge"
+  python3 -B -c 'import json, sys
+assert json.load(open(sys.argv[1]))["hooks"] == {"mine": True, "a": 1, "b": 2, "c": 3, "kit": True}' "$dup/merged" \
+    || fail "the merge must hold both keys: $(cat "$dup/merged")"
+  printf '{\n  "hooks": {\n    "a": 1,\n    "b": 2,\n    "c": 3,\n    "mine": false\n  }\n}\n' >"$dup/new"
+  if harness_json_merge "$dup/local" "$dup/base" "$dup/new" "$dup/merged"; then
+    fail "a merge that repeats a key inside an object must be refused: $(cat "$dup/merged")"
+  fi
+) || exit 1
+
 # The local-only ignore block follows the kit: a stale block in the exclude
 # file is refreshed in place (lines around it untouched, a current block is
 # not rewritten); a stale block in the tracked .gitignore stays as it is while

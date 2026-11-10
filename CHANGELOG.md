@@ -1,5 +1,78 @@
 # Changelog
 
+## 2026.11.10.1 — Open packets at push, tier_base, and host fixes for Claude and Codex
+
+- **A push names the packets that are still open.**
+  - The pre-push check lists the packets still open on the pushed branch
+    and counts the other ones that are not closed. Before, it only looked
+    at the task in `.agents/tasks/ACTIVE`, so a packet left open on the
+    branch went unmentioned. The branch is the one the push sends, also
+    when another one is checked out or the push sends several. A push that
+    only sends tags names no packet.
+  - `scripts/agent-guard.sh tier list` shows every packet that is not
+    closed, the ones on the current branch first. It only reads, so it
+    also runs in the Codex sandbox. Agents run it when asked to push
+    (AGENTS.md, "Pick a tier", step 4).
+  - `tier close` also closes an older packet that has a `state.json` and no
+    tier record.
+- **A push with no task in progress is not measured.** After `tier close`
+  the check printed "no tier declared; measured: ...", counted from the
+  default branch, which can be far from where the branch started (one
+  project got `large (588 files)` for a one-commit push). That line is gone
+  at push; a session still gets it.
+- **The pre-push check warns; it does not refuse a push.** A failed
+  verification, or none that could run, stopped the push. It is a warning
+  now, as the tier already was, and the check ends with "verification did
+  not pass; the push goes ahead". The one thing that still refuses a push is
+  a kit local-only file in the pushed commits. Projects that armed the hook
+  get this with the update; there is nothing to run.
+- **`tier_base`: the branch your work starts from.** A project whose
+  branches start from `develop` while the repository's default branch is an
+  old `master` got counts like 589 files for a small change, in every
+  session and for every task without `--base`. Name the branch once in
+  `docs/superpowers/specs/project-tech-stack.json`
+  (`"tier_base": "origin/develop"`; a short name like `develop` or
+  `release/next` is looked up as a local branch, then on `origin`). The
+  no-tier warning now also says what its count starts from:
+  `since origin/master, 2023-04-13`.
+- **The PR line follows the review.** `tier show --pr-line` kept "lowered
+  despite a negative @audit review" after a later attempt passed, because it
+  read the note stored at the last `tier set`. It now names only the reviews
+  that are still negative, and nothing once none is. The words also say
+  what the set did: "lowered", "kept below the suggestion" or "set below the
+  suggestion". The history in `tier.json` is unchanged.
+- **Claude hooks keep working after `cd`.**
+  - `.claude/settings.json` started the hooks with `./scripts/agent-hook.sh`.
+    Claude Code runs a hook in the session's current directory, so after the
+    agent ran `cd src` no hook started: the edit guard and the close-out
+    check were off, with no message. The commands now start with
+    `"$CLAUDE_PROJECT_DIR"/scripts/agent-hook.sh`.
+  - The verifier warns when a `settings.json` kept from an older kit still
+    has the relative path.
+- **An edited `.claude/settings.json` merges on update.** A JSON file with a
+  local edit and a kit change always became a conflict, and the doctor then
+  failed the update until you merged by hand. This file is now merged like
+  a text file when the three-way merge is clean and the result is still
+  valid JSON with no key twice in one object. Edits at the same place, and
+  every other JSON file, stay a conflict as before.
+- **Codex seats can write their packet.** Codex keeps `.agents/` read-only
+  in its workspace sandbox, so in full flow (`workspace-write`, approvals
+  off) `@gate`, `@build` and `@verify` could not write their review files.
+  The launcher now adds `.agents/tasks` and `.agents/state` as writable
+  folders (`--add-dir`), next to the ones your own Codex config names;
+  `.agents/skills` stays read-only.
+- **`apply_state` ignores your own generated files.** A project file named
+  like `R.generated.swift`, or a dependency's `x.generated.d.ts`, kept the
+  lock at `"apply_state": "pending"`. Only kit candidates count now:
+  `<file>.generated.<YYYYMMDD-HHMMSS>`.
+- **Checks on the real hosts, for contributors.** The two host defects
+  fixed above shipped because no suite starts a host.
+  - `scripts/test.sh` gains `host-codex`: the launcher's own options go to
+    the installed Codex, with no model call (skipped where Codex is not
+    installed).
+  - `scripts/release-smoke.sh` starts one real Claude Code session and one
+    real Codex session in a scratch project before a release.
+
 ## 2026.11.05.2 — Edit guard for outside paths, NotebookEdit and Codex
 
 - **Claude can write outside the project again.**

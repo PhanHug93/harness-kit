@@ -650,9 +650,71 @@ MERGED_BEFORE = "commits from before the task were merged with pulled commits"
 BASE_MISSING = "the base commit is not here, so uncommitted changes only"
 
 
+# Set by configure_base() from tier_base in project-tech-stack.json: the
+# branch work branches start from, when that is not the default branch.
+PROJECT_BASE = None
+_project_base = _MISSING
+
+
+def configure_base(contract_path):
+    """Reads the optional tier_base of the project contract. A value that is
+    not a one-line name is ignored with a warning."""
+    global PROJECT_BASE, _project_base
+    PROJECT_BASE, _project_base = None, _MISSING
+    try:
+        contract = read_json(contract_path, missing=None)
+    except TierError:
+        return  # load_rules warns about a contract that is not valid JSON
+    value = contract.get("tier_base") if isinstance(contract, dict) else None
+    if value is None:
+        return
+    if isinstance(value, str) and value.strip() and "\n" not in value and not value.strip().startswith("-"):
+        PROJECT_BASE = value.strip()
+    else:
+        warn("project-tech-stack.json tier_base is not a branch name; it is ignored")
+
+
+def project_base():
+    """default_branch()'s answer when tier_base names a branch here: (full
+    refname, ref like origin/develop, name like develop). The name is looked
+    up as a local branch, then as a remote one (origin/develop), then on
+    origin; a slash in it (release/next) changes nothing. A full refname is
+    taken as it is. None when tier_base is not set or names no branch; that
+    warns once."""
+    global _project_base
+    if _project_base is not _MISSING:
+        return _project_base
+    _project_base = None
+    if not PROJECT_BASE:
+        return None
+    local, remote = "refs/heads/", "refs/remotes/"
+    if PROJECT_BASE.startswith((local, remote)):
+        candidates = (PROJECT_BASE,)
+    else:
+        candidates = (local + PROJECT_BASE, remote + PROJECT_BASE, remote + "origin/" + PROJECT_BASE)
+    # for-each-ref also lists refs under a name: only an exact name counts.
+    found = set((git("for-each-ref", "--format=%(refname)", *candidates) or "").splitlines())
+    for full in candidates:
+        if full not in found:
+            continue
+        if full.startswith(local):
+            short = full[len(local):]
+            _project_base = (full, short, short)
+        else:
+            short = full[len(remote):]
+            _project_base = (full, short, short.split("/", 1)[-1])
+        return _project_base
+    warn(f"project-tech-stack.json tier_base ({shown(PROJECT_BASE)}) names no branch here; the default branch is used")
+    return None
+
+
 def default_branch():
     """(full refname for merge-base, default_ref like origin/main, default_name
-    like main to compare with the current branch); all None when none."""
+    like main to compare with the current branch); all None when none. The
+    project's tier_base, when it names a branch here, takes this place."""
+    project = project_base()
+    if project is not None:
+        return project
     origin_head = "refs/remotes/origin/HEAD"
     candidates = ("refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master")
     out = git("for-each-ref", "--format=%(refname)%00%(symref)", origin_head, *candidates) or ""
@@ -1203,6 +1265,9 @@ def collect(record, branch, head, committed=False):
         "files": files,
         "move_hint": move_hint,
         "base": base_facts(sha, kind, ref, head),
+        # For the no-tier warning: how old the commit is that the count starts from.
+        "base_date": day((git("log", "-1", "--no-show-signature", "--format=%cs", sha, "--") or "").strip())
+        if kind == "merge-base" else None,
         "status": "stale" if stale else "open" if has_tier else "none",
         "stale_reason": stale,
         "partial": cause is not None,
@@ -1834,6 +1899,38 @@ def tier_outcome(record, result, packet):
     return TIERS.index(result["tier"]) > TIERS.index(allowed), missing_reviews(packet, declared) if raised else []
 
 
+def override_note(record, packet):
+    """The note for a last set that went past a negative review (spec rule
+    1), or None. It names the reviews that are still negative now: once the
+    latest attempt of each is no longer negative the note is gone, and the
+    history keeps what the set went past. lowered: below the tier declared
+    before; kept: the same tier, below the suggestion; set: any other set
+    below the suggestion (a first set, a raise that stays below it)."""
+    last = last_set_index(record)
+    if last < 0:
+        return None
+    entry, still = record["history"][last], []
+    for seat in entry.get("overrode") or []:
+        if seat not in REVIEWS:
+            continue
+        try:
+            negative = review_state(packet, seat) == "negative"
+        except TierError:
+            negative = True  # a review file that cannot be read does not clear the note
+        if negative:
+            still.append(seat)
+    if not still:
+        return None
+    tier = entry.get("tier")
+    before = next((item.get("tier") for item in reversed(record["history"][:last])
+                   if item.get("event") in ("set", "checkpoint")), None)
+    if before in TIERS and tier in TIERS and TIERS.index(tier) < TIERS.index(before):
+        action = "lowered"
+    else:
+        action = "kept below the suggestion" if before == tier else "set below the suggestion"
+    return f"{action} despite a negative {joined_seats(still)} review"
+
+
 def op_show(args):
     task = args.task
     if task is None:
@@ -1854,8 +1951,7 @@ def op_show(args):
     except TierError as exc:
         problem = str(exc)
     declared, suggested, reason = record["declared"], record["suggested"], record.get("reason")
-    last = last_set_index(record)
-    overrode = record["history"][last].get("overrode") or [] if last >= 0 else []
+    note = override_note(record, packet_paths(task)[0])
     if args.pr_line:
         line = f"Tier: {declared or 'not set'}"
         covers = reason_covers(record) if reason else None
@@ -1877,8 +1973,8 @@ def op_show(args):
                 line += f" · measured {result['tier']}, above the tier"
             if missing:
                 line += f" · {joined_seats(missing)} review{'s' if len(missing) > 1 else ''} still needed"
-        if overrode:
-            line += f" · lowered despite a negative {joined_seats(overrode)} review"
+        if note:
+            line += f" · {note}"
         print(line)
         return
     count = len(record["history"])
@@ -1886,8 +1982,8 @@ def op_show(args):
     print(f"declared: {declared or 'none'}")
     print(f"suggested: {suggested or 'none'}")
     print(f"reason: {shown(reason) if reason else 'none'}")
-    if overrode:
-        print(f"note: lowered despite a negative {joined_seats(overrode)} review")
+    if note:
+        print(f"note: {note}")
     stale = found is not None and found["status"] == "stale"
     print(f"status: stale ({found['stale_reason']})" if stale else f"status: {record['status']}")
     print(f"history: {count} {'entry' if count == 1 else 'entries'}")
@@ -1954,7 +2050,26 @@ def op_close(args):
     with packet_lock(packet):
         record = load_tier(tier_path, task)
         if record is None:
-            raise TierError(f"task {task} has no tier record; nothing to close")
+            # An older packet: a state.json and no tier record. Closing it
+            # closes that state; no tier record is made up for it.
+            try:
+                state = read_json(state_path, missing=None)
+            except TierError as exc:
+                raise TierError(f"{exc}; fix it, then close again")
+            if not isinstance(state, dict) or not isinstance(state.get("status"), str):
+                raise TierError(f"task {task} has no tier record; nothing to close")
+            if state["status"] == "closed":
+                print(f"Packet already closed (task {task})")
+                return
+            state.update({"phase": "closed", "status": "closed", "closed_by": "user", "updated_at": now()})
+            if "seat" in state:
+                state["seat"] = "@owner"
+            write_json(state_path, state)
+            if read_active() == task:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(ACTIVE_PATH)
+            print(f"Packet closed: no tier record (task {task})")
+            return
         if record["status"] == "closed":
             print(f"Tier already closed (task {task})")
             return
@@ -2172,6 +2287,10 @@ def op_measure(args):
     with no record). Without --task it measures the ACTIVE task; --committed
     counts the commits alone (the pre-push hook). A task with no
     tier record is measured with the no-tier rule (status none).
+    With --committed the result also has open_related (the packets still open
+    on the pushed branches, see pushed_branches) and open_other (how many
+    others are not closed), and a push with no declared tier is not measured:
+    status none, skipped true.
     raised_after_coding: the declared tier is above coding_started_tier;
     missing_reviews then lists the reviews that tier needs whose latest
     attempt does not pass (empty otherwise)."""
@@ -2182,8 +2301,24 @@ def op_measure(args):
             if active and TASK_ID.fullmatch(active) and active.lower() not in RESERVED_IDS:
                 task = active
     record = load_tier(packet_paths(task)[1], task) if task else None
-    rules = load_rules(args.policy, args.tech_stack)
     branch, head = repo_state()
+    packets = {}
+    if args.committed:
+        # The push check names the packets still open on the pushed branches
+        # and counts the other ones that are not closed.
+        here, elsewhere, _ = open_packets(pushed_branches(branch))
+        packets = {"open_related": [{key: item[key] for key in ("task", "tier", "phase", "branch", "last")}
+                                    for item in here],
+                   "open_other": len(elsewhere)}
+        if record is None or record["declared"] is None:
+            # A push with no declared tier is not measured. After tier close
+            # that is the usual push, and the no-tier base (the default
+            # branch) can be far from where the branch started.
+            print(json.dumps(dict(packets, status="none", skipped=True, task=record["task_id"] if record else None,
+                                  declared=None, suggested=record["suggested"] if record else None, branch=branch),
+                             ensure_ascii=False))
+            return
+    rules = load_rules(args.policy, args.tech_stack)
     found = collect(record, branch, head, committed=args.committed)
     started = note_coding_start(record, found) if record is not None else None
     result = judge(found, rules)
@@ -2196,7 +2331,133 @@ def op_measure(args):
                   coding_started_tier=started, raised_after_coding=raised,
                   missing_reviews=missing_reviews(packet_paths(task)[0], declared, args.committed) if raised else [],
                   base_ref=record.get("base_ref"), branch=branch, base_hint=needs_base_hint(record, branch))
+    result.update(packets)
     print(json.dumps(result, ensure_ascii=False))
+
+
+# ---- open packets: tier list and the push check ----
+DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def day(value):
+    """The date (YYYY-MM-DD) a stored time starts with, or None."""
+    text = value[:10] if isinstance(value, str) else ""
+    return text if DAY.fullmatch(text) else None
+
+
+PUSH_REFS_ENV = "AGENT_GUARD_PREPUSH_REFS"
+BRANCH_PREFIX = "refs/heads/"
+TAG_PREFIX = "refs/tags/"
+
+
+def pushed_branches(branch):
+    """The branches a push names, for the push check. The pre-push hook keeps
+    the lines git gives it ("<local ref> <local id> <remote ref> <remote id>")
+    in the file AGENT_GUARD_PREPUSH_REFS names. Each line that sends commits
+    gives the local branch (HEAD is the checked-out branch) and the remote
+    branch. A line that deletes a ref gives none, and neither does one that
+    sends a tag, whatever it is made from (HEAD:refs/tags/v1): no branch is
+    updated. With no line that sends commits (the check run by hand) the
+    answer is the checked-out branch."""
+    names, sends = [], False
+    lines = []
+    path = os.environ.get(PUSH_REFS_ENV)
+    if path:
+        with contextlib.suppress(OSError):
+            with open(path, encoding="utf-8", errors="surrogateescape") as handle:
+                lines = handle.read().splitlines()
+    for line in lines:
+        fields = line.split()
+        if len(fields) != 4 or not fields[1].strip("0"):
+            continue
+        sends = True
+        local, remote = fields[0], fields[2]
+        if remote.startswith(TAG_PREFIX):
+            continue
+        if local == "HEAD" and branch is not None:
+            names.append(branch)
+        names += [ref[len(BRANCH_PREFIX):] for ref in (local, remote) if ref.startswith(BRANCH_PREFIX)]
+    if not sends:
+        return [branch] if branch is not None else []
+    return list(dict.fromkeys(names))
+
+
+def open_packets(branches):
+    """(here, elsewhere, skipped): the packets that are not closed, by task
+    id. here: the open tier records whose branch is one of `branches`.
+    elsewhere: the other open tier records, and older packets with a
+    state.json whose status is not closed and no tier record (their folder
+    may have any name). skipped: tier records that cannot be read. It only
+    reads, so it also runs where .agents/ is read-only."""
+    here, elsewhere, skipped = [], [], 0
+    try:
+        names = sorted(os.listdir(TASKS_DIR))
+    except (FileNotFoundError, NotADirectoryError):
+        return here, elsewhere, skipped
+    for name in names:
+        packet, tier_path, state_path = packet_paths(name)
+        if name.startswith(".") or name.lower() in RESERVED_IDS or not os.path.isdir(packet):
+            continue
+        try:
+            state = read_json(state_path, missing=None)
+        except TierError:
+            state = None
+        state = state if isinstance(state, dict) else {}
+        phase = state.get("phase") if isinstance(state.get("phase"), str) and state.get("phase") else None
+        if TASK_ID.fullmatch(name) and os.path.isfile(tier_path):
+            try:
+                record = load_tier(tier_path, name)
+            except (TierError, OSError, UnicodeDecodeError):
+                record = None
+            if record is None:
+                skipped += 1
+            elif record["status"] == "open":
+                where = record.get("branch") if isinstance(record.get("branch"), str) else None
+                times = [entry.get("at") for entry in record["history"]]
+                item = {"task": name, "tier": record["declared"], "record": True, "phase": phase, "branch": where,
+                        "last": day(times[-1]) if times else None}
+                (here if where is not None and where in branches else elsewhere).append(item)
+        elif isinstance(state.get("status"), str) and state["status"] != "closed":
+            elsewhere.append({"task": name, "tier": None, "record": False, "phase": phase, "branch": None,
+                              "last": day(state.get("updated_at"))})
+    return here, elsewhere, skipped
+
+
+def packet_line(item, with_branch):
+    facts = [item["tier"] or ("no tier" if item["record"] else "no tier record")]
+    if item["phase"]:
+        facts.append(f"phase {one_line(shown(item['phase']))}")
+    if with_branch and item["branch"]:
+        facts.append(f"branch {shown(item['branch'])}")
+    if item["last"]:
+        facts.append(f"last change {item['last']}")
+    return f"- {shown(item['task'])}: {', '.join(facts)}"
+
+
+def op_list(args):
+    branch, _ = repo_state()
+    here, elsewhere, skipped = open_packets([branch] if branch is not None else [])
+    if skipped:
+        warn(f"tier list: {plural(skipped, 'record')} skipped (not readable)")
+    if not here and not elsewhere:
+        print("No open packets.")
+        return
+    print(f"Open on this branch ({branch_name(branch)}): {len(here)}")
+    for item in here:
+        print(packet_line(item, False))
+    if elsewhere:
+        print(f"Not closed elsewhere: {len(elsewhere)}")
+        for item in elsewhere:
+            print(packet_line(item, True))
+    if any(item["record"] or TASK_ID.fullmatch(item["task"]) for item in here + elsewhere):
+        print("Close a packet when the user says its task is done: scripts/agent-guard.sh tier close --task <id>")
+    # tier close takes a task id; an older folder may have another kind of name.
+    odd = [shown(item["task"]) for item in elsewhere if not item["record"] and not TASK_ID.fullmatch(item["task"])]
+    if odd:
+        print(f"A packet whose folder name is not a task id ({', '.join(odd)}) is closed in its state.json "
+              "(status and phase closed, closed_by user).")
+    if here:
+        print("Before a push: tell the user which packets on this branch are still open, then push.")
 
 
 # ---- command line ----
@@ -2204,6 +2465,7 @@ SYNOPSIS = (
     "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]",
     "tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]",
     "tier show [--task <id>] [--pr-line]",
+    "tier list",
     "tier close --task <id>",
     "tier stats [--since YYYY-MM-DD] [--json]",
 )
@@ -2220,7 +2482,9 @@ HELP = USAGE + "\n".join((
     "  With --task, it also records the suggestion in .agents/tasks/<id>/tier.json.",
     "set records the tier the user confirmed. A tier below the suggestion needs --reason.",
     "  --base names the branch a stacked branch starts from. --answer records a checkpoint answer.",
+    "  When every branch starts from one branch that is not the default one, name it once: tier_base in project-tech-stack.json.",
     "show prints the task record and the change since its base; --pr-line prints one line for the PR body.",
+    "list prints the packets that are not closed, the ones on the current branch first. Run it before a push.",
     "close closes the task. Run it only when the user says the task is done.",
     "stats counts the tasks in this checkout: tiers, suggestions kept or changed, warnings, time to close.",
     "  --since keeps the tasks started on or after that date.",
@@ -2308,6 +2572,8 @@ def command_parsers():
     show.add_argument("--task", type=task_id)
     show.add_argument("--pr-line", action="store_true")
 
+    list_ = parser("list")
+
     close = parser("close")
     close.add_argument("--task", type=task_id, required=True)
 
@@ -2324,7 +2590,7 @@ def command_parsers():
     measure_.add_argument("--committed", action="store_true")
 
     return {
-        "suggest": (suggest, op_suggest), "set": (set_, op_set), "show": (show, op_show),
+        "suggest": (suggest, op_suggest), "set": (set_, op_set), "show": (show, op_show), "list": (list_, op_list),
         "close": (close, op_close), "stats": (stats_, op_stats), "classify": (classify_, op_classify),
         "measure": (measure_, op_measure),
     }
@@ -2349,7 +2615,7 @@ def main(argv):
         return
     if options.command is None:
         sys.stderr.write(USAGE)
-        raise TierError("tier needs a command: suggest, set, show, close or stats")
+        raise TierError("tier needs a command: suggest, set, show, list, close or stats")
     if options.command not in commands:
         sys.stderr.write(USAGE)
         raise TierError(f"unknown tier command: {shown(options.command)}")
@@ -2357,6 +2623,7 @@ def main(argv):
     args = parser.parse_args(options.args)
     args.policy = options.policy or os.path.join(ROOT, "docs", "agent-configs", "context-policy.json")
     args.tech_stack = options.tech_stack or os.path.join(ROOT, "docs", "superpowers", "specs", "project-tech-stack.json")
+    configure_base(args.tech_stack)
     if os.environ.get("HARNESS_KIT_TEST_HOOKS") == "1" and os.environ.get("AGENT_GUARD_TEST_TIER_CRASH") == "1":
         raise RuntimeError("test hook AGENT_GUARD_TEST_TIER_CRASH")
     run(args)

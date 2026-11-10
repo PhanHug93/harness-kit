@@ -747,7 +747,7 @@ if isinstance(doc, dict):
             "conventions",
             "source_evidence",
             "open_questions",
-        ) + tuple(key for key in ("toolchain", "risk_paths", "binary_asset_extensions") if key in doc),
+        ) + tuple(key for key in ("toolchain", "risk_paths", "binary_asset_extensions", "tier_base") if key in doc),
         "project tech-stack contract",
     )
     require(doc.get("schema") == "agent-project-tech-stack/v1", "project tech-stack schema must be agent-project-tech-stack/v1")
@@ -790,6 +790,8 @@ if isinstance(doc, dict):
     if "risk_paths" in doc:
         risk_paths = doc.get("risk_paths")
         require(isinstance(risk_paths, list) and all(non_empty_string(entry) for entry in risk_paths), "project tech-stack risk_paths must be an array of non-empty strings")
+    if "tier_base" in doc:
+        require(non_empty_string(doc.get("tier_base")), "project tech-stack tier_base must be a non-empty string (a branch like origin/develop)")
     if "binary_asset_extensions" in doc:
         assets = doc.get("binary_asset_extensions")
         require(isinstance(assets, list) and all(non_empty_string(entry) for entry in assets), "project tech-stack binary_asset_extensions must be an array of non-empty strings")
@@ -1051,6 +1053,12 @@ if grep -Eq '(\./|[$][{]?CLAUDE_PROJECT_DIR[}]?(\\")?/)scripts/agent-hook\.sh(\\
   ok "Claude PreToolUse uses shared agent hook"
 else
   bad "Claude PreToolUse does not use shared agent hook"
+fi
+# Claude Code runs a hook command in the session's current directory, so a
+# relative path stops working once the agent changes directory. A
+# settings.json kept from an older kit may still have it.
+if grep -Eq '"command": *"\./scripts/agent-hook\.sh ' "$ROOT_DIR/.claude/settings.json"; then
+  warn "Claude hooks use a relative path and stop after the agent changes directory: start each command with \"\$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh (see the settings.json candidate)"
 fi
 
 if grep -Fq '"matcher": "Edit|Write|MultiEdit|NotebookEdit"' "$ROOT_DIR/.claude/settings.json"; then

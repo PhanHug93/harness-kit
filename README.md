@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It writes local
 instructions, agent seats, onboarding helpers and checks into your project. It
 does not change your application code.
 
-Current release: [`2026.11.05.2`](agent-bootstrap/VERSION)
+Current release: [`2026.11.10.1`](agent-bootstrap/VERSION)
 
 ## What you get
 
@@ -41,11 +41,11 @@ lock: no script stops `@build` from starting early.
 
 ## Install
 
-From the project root. This installs release `2026.11.05.2`:
+From the project root. This installs release `2026.11.10.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.05.2/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.10.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Options go after `| bash -s --`: `--to latest` installs the newest release,
@@ -130,6 +130,9 @@ scripts/agent-seats.sh set gate --host codex --model gpt-6-astra --effort ultra
 
 Assignments live in `docs/agent-configs/seats.json`; `set` and `wizard` update
 the roster in `AGENTS.md`. `.codex/codex-mode.sh` launches the Codex seats.
+In full flow it lets a seat write its packet (`.agents/tasks/`) and the
+guard's state (`.agents/state/`); Codex keeps the rest of `.agents/`
+read-only.
 In Claude Code, `/spec`, `/gate`, `/build`, `/verify` and `/audit` open a seat
 (they replace `/planning`, `/coding` and `/reviewing`). `@gate` checks the
 spec and writes the plan; only a gap in the spec goes back to `@spec`.
@@ -159,6 +162,7 @@ The agent collects facts, a script suggests, and you confirm:
 scripts/agent-guard.sh tier suggest --task fix-logout --paths app/settings/SettingsView.swift
 scripts/agent-guard.sh tier set small --task fix-logout      # after you say yes
 scripts/agent-guard.sh tier show --task fix-logout --pr-line # one line for the PR body
+scripts/agent-guard.sh tier list                             # packets not closed yet
 scripts/agent-guard.sh tier close --task fix-logout          # when you say done
 scripts/agent-guard.sh tier stats --since 2026-10-23         # how tiers worked out
 ```
@@ -174,6 +178,10 @@ scripts/agent-guard.sh tier stats --since 2026-10-23         # how tiers worked 
 
 Add your own risky paths as `risk_paths` in
 `docs/superpowers/specs/project-tech-stack.json` (yours; updates keep it).
+If your work branches start from a branch that is not the repository's
+default one (git-flow's `develop`), name it once in the same file:
+`"tier_base": "origin/develop"`. The size check then counts from that
+branch, for every task and when no task is open.
 
 Tiers recommend; they never block. When the real change grows above its tier,
 pre-final, the Claude Code Stop hook and the optional pre-push hook say so and
@@ -198,6 +206,13 @@ risky PR, add `--verify-scope full` after checking the heavier commands.
 Claude Code runs the fast check on its own when a session changed files (Stop
 hook); the Codex `@build` seat runs it when its session ends. Install the
 optional pre-push check once with `scripts/install-git-hooks.sh`.
+
+The pre-push check warns; it does not refuse a push for a check result. It
+names the packets still open on the pushed branch
+(`scripts/agent-guard.sh tier list` shows every packet that is not closed)
+and says when verification failed or did not run. A push with no task in
+progress is not measured. The one thing that refuses a push is a kit
+local-only file in the pushed commits.
 
 ## Claude Desktop/Cowork
 

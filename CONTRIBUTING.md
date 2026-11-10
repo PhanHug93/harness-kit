@@ -79,6 +79,13 @@ hook's per-call budget of `python3` and `git` starts, and
 `scripts/test-edit-guard-hosts.sh` the edit path rules of the Claude and
 Codex hooks.
 
+One suite asks a real host. `scripts/test-host-codex.sh` (`host-codex`)
+gives the generated launcher's own options to the Codex installed on your
+machine, with no model call, and checks that a seat can write its packet
+and the guard's state, that nothing else under `.agents/` opens, and that a
+writable folder from your own Codex config stays. Where Codex is not
+installed (CI) it is skipped and says so.
+
 CI (`.github/workflows/test.yml`) has four jobs:
 
 - `gate` decides whether the heavy jobs are needed (`scripts/ci-gate.sh`);
@@ -125,6 +132,21 @@ version pin, turns `## Unreleased` into the release heading, renames
 verifies the result. It never commits, tags or pushes. Before an authorized
 tag, run `bash scripts/release.sh --check-tag v<version>`; CI repeats this
 check on every tag push.
+
+Before the release is merged, try it on the real hosts once:
+
+```bash
+bash scripts/release-smoke.sh         # about a minute; --only claude|codex runs one host
+```
+
+It installs this checkout into a scratch project and starts one real Claude
+Code session and one real Codex session there, on your own accounts (a few
+cents). After `cd src` the edit guard must still refuse an edit to
+`AGENTS.md`, and a Codex session with the launcher's sandbox options must
+write a packet file and fail to write `.agents/skills/`. The suites never
+start a host with a model, so nothing else catches these two. Exit 1 is a
+failed check; exit 3 means a host could not be tried (not installed, not
+signed in), so nothing is proven for it.
 
 ## Adding a migration
 
