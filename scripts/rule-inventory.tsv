@@ -32,6 +32,7 @@ agents.packet-no-authority	both	AGENTS.md	no	packet paths, memory and subagent m
 agents.tier-suggest	full	AGENTS.md	no	tier suggest --task <id>
 agents.tier-set	full	AGENTS.md	no	tier set <tier> --task <id>
 agents.tier-close	full	AGENTS.md	no	tier close --task <id>
+agents.tier-push	full	AGENTS.md	no	Before pushing: `tier list`
 agents.tier-ask	full	AGENTS.md	no	Ask the user in one line
 agents.records-packet	full	AGENTS.md	no	.agents/tasks/<task-id>/
 agents.records-no-add-f	full	AGENTS.md	yes	Never `git add -f` an ignored record.

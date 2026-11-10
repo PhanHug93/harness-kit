@@ -500,27 +500,27 @@ EOF
 	      {
 	        "matcher": "Bash",
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-pretool" }
 	        ]
 	      },
 	      {
 	        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-pretool" }
 	        ]
 	      }
 	    ],
     "SessionStart": [
 	      {
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-session-start" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-session-start" }
 	        ]
 	      }
 	    ],
     "Stop": [
 	      {
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh close-out", "timeout": 360 }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh close-out", "timeout": 360 }
 	        ]
 	      }
 	    ]
@@ -621,19 +621,19 @@ If detection fails, infer from build/config files; state uncertainty.
 
 ## Pick a tier
 
-Each task gets a tier: small (one agent), medium (+ a fresh \`@verify\`) or
+Each task gets a tier: small (one agent), medium (+ fresh \`@verify\`) or
 large (all seats).
 
 1. Find the change's files in a few searches.
 2. Run \`scripts/agent-guard.sh tier suggest --task <id> --paths <files>\`; add
    \`--data\` (stored or sent data), \`--access\` (who may do what),
-   \`--dependency\` (a library), \`--unclear\` (vague request) or
+   \`--dependency\` (library), \`--unclear\` (vague request) or
    \`--handoff\` (another agent codes) when true.
 3. Ask the user in one line (\`Enter = keep <tier> · l = large · m = medium · s = small · + = add scope\`),
    then \`tier set <tier> --task <id>\`; a seat adds \`--by <seat>\` to both and
    \`--answer keep|switch|scope\` ("not recorded" when read-only).
 4. Pre-final checks the real change; new scope mid-task: suggest again.
-   When the user says done: \`tier close --task <id>\`.
+   When the user says done: \`tier close --task <id>\`. Before pushing: \`tier list\`.
 
 ## Agentmemory
 
@@ -1346,27 +1346,27 @@ EOF
 	      {
 	        "matcher": "Bash",
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-pretool" }
 	        ]
 	      },
 	      {
 	        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-pretool" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-pretool" }
 	        ]
 	      }
 	    ],
     "SessionStart": [
 	      {
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh claude-session-start" }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh claude-session-start" }
 	        ]
 	      }
 	    ],
     "Stop": [
 	      {
 	        "hooks": [
-	          { "type": "command", "command": "./scripts/agent-hook.sh close-out", "timeout": 360 }
+	          { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-hook.sh close-out", "timeout": 360 }
 	        ]
 	      }
 	    ]
@@ -2647,7 +2647,7 @@ run_launch() {
   local persist="$4"
   shift 4 || true
   local sandbox approval seed codex_bin prompt resolve_rc codex_rc reaped_rc
-  local -a codex_argv
+  local -a codex_argv sandbox_argv
   reject_nested_launch || return 1
   local workspace_report workspace_rc=0 workspace_context_override workspace_session_override
   mint_launch_envelope || return 1
@@ -2673,9 +2673,17 @@ run_launch() {
     return "$resolve_rc"
   fi
   compute_overlap "$requested_seat" "$EFFECTIVE_MODEL" || return 1
+  sandbox_argv=()
   if [[ "$flow" == "full_flow" ]]; then
     sandbox="workspace-write"
     approval="$FULL_FLOW_APPROVAL"
+    # Codex keeps .agents/ read-only in its workspace sandbox. A seat writes
+    # its packet files and the guard's state there, so those two folders are
+    # added as writable ones; .agents/skills stays read-only. --add-dir adds
+    # to the folders the user's own Codex config makes writable; an override
+    # of sandbox_workspace_write.writable_roots would replace them.
+    mkdir -p "$PROJECT_ROOT/.agents/tasks" "$PROJECT_ROOT/.agents/state" || return 1
+    sandbox_argv=(--add-dir "$PROJECT_ROOT/.agents/tasks" --add-dir "$PROJECT_ROOT/.agents/state")
   else
     sandbox="read-only"
     approval="$STANDARD_APPROVAL"
@@ -2700,7 +2708,7 @@ run_launch() {
   if [[ "$#" -gt 0 ]]; then
     prompt="$seed"$'\n\n'"USER PROMPT:"$'\n'"$*"
   fi
-  codex_argv=(-C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "$workspace_context_override" -c "$workspace_session_override" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" -s "$sandbox" -a "$approval" "$prompt")
+  codex_argv=(-C "$PROJECT_ROOT" --model "$EFFECTIVE_MODEL" -c "$workspace_context_override" -c "$workspace_session_override" -c "model_reasoning_effort=\"$EFFECTIVE_EFFORT\"" ${sandbox_argv[@]+"${sandbox_argv[@]}"} -s "$sandbox" -a "$approval" "$prompt")
   export CODEX_HARNESS_SESSION=1
   if [[ "$requested_seat" == "build" ]] && ! truthy "${CODEX_SKIP_CLOSEOUT:-}"; then
     # Codex has no Stop hook: @build runs it as a child, then verifies once.

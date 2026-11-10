@@ -81,14 +81,17 @@ compute_apply_state() {
   local ro=false eligible=false c d rel candidates detect_root="${DETECT_ROOT:-$TARGET_DIR}"
   candidates="$(bootstrap_find_pruned "$TARGET_DIR" -type f -name '*.generated.*' -print 2>/dev/null)"
   # A preview generates into staging, which holds only the candidates beside
-  # harness outputs; the real tree's candidates (codegen sources, retired
-  # paths, ...) count as they do in a real run.
+  # harness outputs; the real tree's candidates (retired paths, ...) count
+  # as they do in a real run.
   if [[ "$detect_root" != "$TARGET_DIR" ]]; then
     candidates+=$'\n'"$(bootstrap_find_pruned "$detect_root" -type f -name '*.generated.*' -print 2>/dev/null)"
   fi
   [[ -n "${candidates//$'\n'/}" ]] || { printf 'complete\n'; return 0; }
   while IFS= read -r c; do
     [[ -n "$c" ]] || continue
+    # A kit candidate is <file>.generated.<YYYYMMDD-HHMMSS>. A project's own
+    # generated sources (R.generated.swift, x.generated.d.ts) are not.
+    [[ "$c" =~ \.generated\.[0-9]{8}-[0-9]{6}$ ]] || continue
     case "$c" in
       "$TARGET_DIR"/*) rel="${c#"$TARGET_DIR"/}" ;;
       *) rel="${c#"$detect_root"/}" ;;

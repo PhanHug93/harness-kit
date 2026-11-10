@@ -316,7 +316,7 @@ tier_synopsis="$(cd "$tier_target" && scripts/agent-guard.sh tier --help | grep 
 for want in 'tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]' \
   'tier stats [--since YYYY-MM-DD] [--json]' \
   'tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]' \
-  'tier show [--task <id>] [--pr-line]' 'tier close --task <id>'; do
+  'tier show [--task <id>] [--pr-line]' 'tier list' 'tier close --task <id>'; do
   grep -qF -- "$want" <<<"$tier_synopsis" || fail "tier synopsis lacks '$want': $tier_synopsis"
 done
 
@@ -1854,6 +1854,120 @@ printf 'export const z = 1;\n' >"$sub_repo/other/z.ts"
 expect_measured sub small 2 2
 measure_assert sub "sorted(f['path'] for f in m['files']) == ['src/u.ts', 'src/x.ts']"
 
+# ---- tier_base: the branch work starts from -------------------------------------
+# A project whose branches start from a branch that is not the default one
+# (git-flow's develop) names it once as tier_base in project-tech-stack.json.
+# The measure then counts from it, with and without a tier; the no-tier
+# warning says what its count starts from.
+tb="$TMP_ROOT/tier-base-target"
+tb_remote="$TMP_ROOT/tier-base-remote.git"
+git init -q --bare -b main "$tb_remote"
+mkdir -p "$tb/src"
+bg() { git -C "$tb" "$@" || fail "git $* failed in the base target"; }
+bg init -q -b main
+bg config user.name Test
+bg config user.email test@example.invalid
+printf 'export const a = 1;\n' >"$tb/src/app.ts"
+bg add src/app.ts
+bg commit -q -m init
+bg remote add origin "$tb_remote"
+bg push -q origin main
+bash "$ROOT_DIR/agent-bootstrap/bootstrap-multi-agent-project.sh" --target "$tb" --workflow full --project-name budget-fixture >/dev/null
+# develop is 20 files ahead of the default branch; the work branch starts from it.
+bg checkout -q -b develop
+for n in $(seq 1 20); do printf 'export const d%s = 1;\n' "$n" >"$tb/src/d$n.ts"; done
+bg add src
+bg commit -q -m "develop work"
+bg push -q origin develop
+bg remote set-head origin main
+bg checkout -q -b feature/base
+printf 'export const a = 2;\n' >"$tb/src/app.ts"
+bg commit -q -a -m "one fix"
+contract="$tb/docs/superpowers/specs/project-tech-stack.json"
+tb_set() { # tb_set <python value or DEL>
+  python3 - "$contract" "$1" <<'PY' || fail "cannot edit the contract"
+import json, sys
+d = json.load(open(sys.argv[1]))
+if sys.argv[2] == "DEL":
+    d.pop("tier_base", None)
+else:
+    d["tier_base"] = json.loads(sys.argv[2])
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+PY
+}
+tb_measure() { TB_OUT="$(cd "$tb" && python3 -I scripts/agent-tier.py measure "$@" 2>"$TMP_ROOT/tb.err")" || fail "measure $*: $(cat "$TMP_ROOT/tb.err")"; }
+tb_assert() { python3 -c 'import json, sys
+m = json.loads(sys.argv[1])
+for expr in sys.argv[2:]:
+    assert eval(expr), (expr, {k: m.get(k) for k in ("counted_files", "base", "base_date", "status", "partial_reason", "default_ref")})' "$TB_OUT" "$@" || fail "measure: $TB_OUT"; }
+# 1. Without tier_base the default branch decides: everything since main counts.
+tb_measure
+tb_assert "m['counted_files'] == 21" "m['base']['ref'] == 'refs/remotes/origin/main'" "len(m['base_date']) == 10"
+# 2. With tier_base the work is counted since that branch, with and without a tier.
+tb_set '"origin/develop"'
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/remotes/origin/develop'" "m['default_ref'] == 'origin/develop'" "m['status'] == 'none'"
+[[ ! -s "$TMP_ROOT/tb.err" ]] || fail "a valid tier_base must not warn: $(cat "$TMP_ROOT/tb.err")"
+(cd "$tb" && scripts/agent-guard.sh tier set small --task tb-one >"$TMP_ROOT/tb-set.out" 2>&1) || fail "tier set: $(cat "$TMP_ROOT/tb-set.out")"
+grep -qF '1 file is already changed' "$TMP_ROOT/tb-set.out" || fail "tier set must count since tier_base: $(cat "$TMP_ROOT/tb-set.out")"
+tb_measure --task tb-one
+tb_assert "m['counted_files'] == 1" "m['tier'] == 'small'" "m['base']['ref'] == 'refs/remotes/origin/develop'"
+# 3. The no-tier warning names what the count starts from.
+(cd "$tb" && scripts/agent-guard.sh tier close --task tb-one >/dev/null 2>&1) || fail "tier close"
+(cd "$tb" && scripts/agent-guard.sh preflight >/dev/null 2>&1) || fail "preflight"
+tb_pf="$(cd "$tb" && scripts/agent-guard.sh pre-final 2>&1)" || true
+grep -qE '^agent-guard: warn: no tier declared; measured: small \(1 file, partial; since origin/develop, [0-9]{4}-[0-9]{2}-[0-9]{2}\); run scripts/agent-guard.sh tier suggest$' <<<"$tb_pf" \
+  || fail "no-tier warning with the base: $tb_pf"
+# 4. A short name works when the branch is local; a remote one is found under origin.
+tb_set '"develop"'
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/heads/develop'"
+bg branch -q -D develop
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/remotes/origin/develop'"
+# A branch name can hold a slash (release/next): the same lookup, the local
+# branch first, then origin's.
+bg branch -q --no-track release/next origin/develop
+bg push -q origin release/next
+tb_set '"release/next"'
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/heads/release/next'" "m['default_ref'] == 'release/next'"
+bg branch -q -D release/next
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/remotes/origin/release/next'" "m['default_ref'] == 'origin/release/next'"
+[[ ! -s "$TMP_ROOT/tb.err" ]] || fail "a tier_base with a slash that origin has must not warn: $(cat "$TMP_ROOT/tb.err")"
+# A full refname is taken as it is.
+tb_set '"refs/remotes/origin/develop"'
+tb_measure
+tb_assert "m['counted_files'] == 1" "m['base']['ref'] == 'refs/remotes/origin/develop'" "m['default_ref'] == 'origin/develop'"
+# 5. A name that is no branch here: a warning, and the default branch decides.
+tb_set '"origin/nope"'
+tb_measure
+tb_assert "m['counted_files'] == 21" "m['base']['ref'] == 'refs/remotes/origin/main'"
+grep -qxF 'agent-guard: warn: project-tech-stack.json tier_base (origin/nope) names no branch here; the default branch is used' "$TMP_ROOT/tb.err" \
+  || fail "unknown tier_base warning: $(cat "$TMP_ROOT/tb.err")"
+# A tag is not a branch: the same warning.
+bg tag base-tag origin/develop
+tb_set '"base-tag"'
+tb_measure
+tb_assert "m['counted_files'] == 21" "m['base']['ref'] == 'refs/remotes/origin/main'"
+grep -qxF 'agent-guard: warn: project-tech-stack.json tier_base (base-tag) names no branch here; the default branch is used' "$TMP_ROOT/tb.err" \
+  || fail "a tag as tier_base warns: $(cat "$TMP_ROOT/tb.err")"
+# 6. Not a branch name: ignored with a warning.
+tb_set '["develop"]'
+tb_measure
+tb_assert "m['counted_files'] == 21"
+grep -qxF 'agent-guard: warn: project-tech-stack.json tier_base is not a branch name; it is ignored' "$TMP_ROOT/tb.err" \
+  || fail "bad tier_base warning: $(cat "$TMP_ROOT/tb.err")"
+# 7. The verifier accepts the key and rejects a value that is not a name.
+verify_fails() { { cd "$tb" && scripts/verify-ai-deps.sh --json 2>"$TMP_ROOT/tb-verify.err"; } | python3 -c '
+import json, sys
+print(sum(1 for c in json.load(sys.stdin)["checks"] if c.get("status") == "fail"))' || true; }
+[[ "$(verify_fails)" != 0 ]] || fail "a tier_base that is not a string must fail the verifier"
+grep -q 'tier_base must be a non-empty string' "$TMP_ROOT/tb-verify.err" || fail "verifier stderr: $(cat "$TMP_ROOT/tb-verify.err")"
+tb_set '"origin/develop"'
+[[ "$(verify_fails)" == 0 ]] || fail "a valid tier_base must pass the verifier: $(cat "$TMP_ROOT/tb-verify.err")"
+
 # ---- pre-final checks the tier -----------------------------------------------
 # One target; each case is a branch. verification[] in the contract says what
 # the runner runs: true passes, false fails.
@@ -2076,7 +2190,8 @@ report_assert "d['tier']['status'] == 'stale' and d['tier']['stale_reason'].star
 # 7. No tier declared: one warning line, no TIER line, the old last line last.
 rm "$packets/ACTIVE"
 pf_expect 0 --split
-[[ "$PF_ERR" == *'agent-guard: warn: no tier declared; measured: medium (6 files, partial); run scripts/agent-guard.sh tier suggest'* ]] \
+# The warning names what the count starts from: the branch and its commit date.
+grep -qE '^agent-guard: warn: no tier declared; measured: medium \(6 files, partial; since main, [0-9]{4}-[0-9]{2}-[0-9]{2}\); run scripts/agent-guard.sh tier suggest$' <<<"$PF_ERR" \
   || fail "no-tier warning: $PF_ERR"
 [[ "$(grep -ci tier <<<"$PF_ERR")" -eq 1 ]] || fail "more than one tier line without a tier: $PF_ERR"
 last_starts 'agent-guard: pre-final ok'
@@ -2260,13 +2375,43 @@ grep -qxF 'agent-guard: warn: setting the tier below the suggested large althoug
   <<<"$RV_ERR" || fail "lw-a override warning: $RV_ERR"
 tier_assert lw-a "d['history'][-1]['overrode'] == ['@gate'] and d['declared'] == 'small'"
 rv_tier 0 show --task lw-a --pr-line
-[[ "$RV_OUT" == *" · lowered despite a negative @gate review" ]] || fail "lw-a pr-line: $RV_OUT"
+[[ "$RV_OUT" == *" · kept below the suggestion despite a negative @gate review" ]] || fail "lw-a pr-line: $RV_OUT"
 rv_tier 0 show --task lw-a
-grep -qxF 'note: lowered despite a negative @gate review' <<<"$RV_OUT" || fail "lw-a show: $RV_OUT"
+grep -qxF 'note: kept below the suggestion despite a negative @gate review' <<<"$RV_OUT" || fail "lw-a show: $RV_OUT"
+# The note follows the review: once the latest @gate attempt says yes it is
+# gone, and the history keeps what the set went past.
+review lw-a gate-review.md 'sufficient_for_coding_model: no' 'sufficient_for_coding_model: yes'
+rv_tier 0 show --task lw-a --pr-line
+[[ "$RV_OUT" != *"despite a negative"* ]] || fail "lw-a note after the review passed: $RV_OUT"
+rv_tier 0 show --task lw-a
+if grep -qF 'despite a negative' <<<"$RV_OUT"; then fail "lw-a show after the review passed: $RV_OUT"; fi
+tier_assert lw-a "d['history'][-1]['overrode'] == ['@gate']"
+review lw-a gate-review.md 'sufficient_for_coding_model: no'
 # c. Up to the suggestion: allowed, and the PR line no longer has the note.
 rv_tier 0 set large --task lw-a
 rv_tier 0 show --task lw-a --pr-line
-[[ "$RV_OUT" != *"lowered despite"* ]] || fail "lw-a note after a later set: $RV_OUT"
+[[ "$RV_OUT" != *"despite a negative"* ]] || fail "lw-a note after a later set: $RV_OUT"
+# A real lowering names itself "lowered", a first set below the suggestion
+# "set below"; of two negative reviews the note names the ones still negative.
+rv_case feature/lw-low
+pf_tier set large --task lw-low
+review lw-low gate-review.md 'sufficient_for_coding_model: no'
+review lw-low audit-review.md 'verdict: changes_required'
+rv_tier 0 set medium --task lw-low --reason "scope cut"
+rv_tier 0 show --task lw-low --pr-line
+[[ "$RV_OUT" == *" · lowered despite a negative @gate and @audit review" ]] || fail "lw-low pr-line: $RV_OUT"
+review lw-low gate-review.md 'sufficient_for_coding_model: no' 'sufficient_for_coding_model: yes'
+rv_tier 0 show --task lw-low --pr-line
+[[ "$RV_OUT" == *" · lowered despite a negative @audit review" ]] || fail "lw-low pr-line with one review left: $RV_OUT"
+review lw-low audit-review.md 'verdict: changes_required' 'verdict: pass'
+rv_tier 0 show --task lw-low --pr-line
+[[ "$RV_OUT" != *"despite a negative"* ]] || fail "lw-low pr-line after both passed: $RV_OUT"
+rv_case feature/lw-first
+pf_tier suggest --task lw-first --access
+review lw-first gate-review.md 'sufficient_for_coding_model: no'
+rv_tier 0 set small --task lw-first --reason hotfix
+rv_tier 0 show --task lw-first --pr-line
+[[ "$RV_OUT" == *" · set below the suggestion despite a negative @gate review" ]] || fail "lw-first pr-line: $RV_OUT"
 # A read-only packet: the set fails, and no override warning is printed.
 lw_case lw-ro
 review lw-ro gate-review.md 'sufficient_for_coding_model: no'
@@ -2800,6 +2945,108 @@ Time to close (median): small 45 min · large 2.0 d"
 $ST_OUT
 $(cat "$TMP_ROOT/st.err")"
 
+# ---- tier list ----------------------------------------------------------------
+# The packets that are not closed: the ones on the current branch first, then
+# the others. It only reads, so it also runs where .agents/ is read-only.
+ls_t="$(fresh_target)"
+ls_run() {
+  LS_RC=0
+  LS_OUT="$(cd "$ls_t" && scripts/agent-guard.sh tier list 2>"$TMP_ROOT/ls.err")" || LS_RC=$?
+}
+ls_run
+[[ "$LS_RC" -eq 0 && "$LS_OUT" == "No open packets." ]] \
+  || fail "list with no packets: $LS_RC $LS_OUT $(cat "$TMP_ROOT/ls.err")"
+git -C "$ls_t" checkout -q -b feature/list || fail "git checkout failed in the list target"
+python3 - "$ls_t" <<'PY' || fail "cannot write the list fixture"
+import json, os, sys
+root = sys.argv[1]
+
+def packet(task, tier=None, state=None):
+    os.makedirs(os.path.join(root, ".agents/tasks", task), exist_ok=True)
+    for name, doc in (("tier.json", tier), ("state.json", state)):
+        if doc is not None:
+            with open(os.path.join(root, ".agents/tasks", task, name), "w") as handle:
+                json.dump(doc, handle)
+
+def record(task, declared, status, branch, at):
+    return {"schema": "harness-tier/v1", "task_id": task, "branch": branch, "base_ref": None,
+            "start_commit": "0" * 40, "declared": declared, "suggested": None, "suggestion_inputs": {},
+            "reason": None, "coding_started_tier": None, "coding_started_at": None, "status": status,
+            "closed_at": at if status == "closed" else None, "closed_by": None,
+            "history": [{"at": at, "event": "set" if declared else "suggest", "tier": declared or "small"}]}
+
+packet("here-b", record("here-b", "medium", "open", "feature/list", "2026-11-09T08:00:00Z"),
+       {"status": "open", "phase": "cross_review"})
+packet("here-a", record("here-a", None, "open", "feature/list", "2026-11-08T08:00:00Z"))
+packet("done", record("done", "small", "closed", "feature/list", "2026-11-07T08:00:00Z"),
+       {"status": "closed", "phase": "closed"})
+packet("far", record("far", "large", "open", "feature/elsewhere", "2026-11-07T09:00:00Z"),
+       {"status": "open", "phase": "analysis"})
+# Older packets have a state.json and no tier record.
+packet("legacy", None, {"status": "awaiting_user", "phase": "resolution", "updated_at": "2026-10-25T03:00:00Z"})
+packet("legacy-done", None, {"status": "closed", "phase": "closed"})
+# An older packet may have a name the tier commands refuse; it is listed all the same.
+packet("HK-old", None, {"status": "open", "phase": "analysis", "updated_at": "2026-09-13T00:00:00Z"})
+packet("no-status", None, {})
+packet("bad")
+with open(os.path.join(root, ".agents/tasks/bad/tier.json"), "w") as handle:
+    handle.write("{}\n")
+PY
+ls_expected="$(cat <<'EOF'
+Open on this branch (feature/list): 2
+- here-a: no tier, last change 2026-11-08
+- here-b: medium, phase cross_review, last change 2026-11-09
+Not closed elsewhere: 3
+- HK-old: no tier record, phase analysis, last change 2026-09-13
+- far: large, phase analysis, branch feature/elsewhere, last change 2026-11-07
+- legacy: no tier record, phase resolution, last change 2026-10-25
+Close a packet when the user says its task is done: scripts/agent-guard.sh tier close --task <id>
+A packet whose folder name is not a task id (HK-old) is closed in its state.json (status and phase closed, closed_by user).
+Before a push: tell the user which packets on this branch are still open, then push.
+EOF
+)"
+(cd "$ls_t/.agents/tasks" && find . -type f -exec cksum {} + | sort) >"$TMP_ROOT/ls.before"
+ls_run
+[[ "$LS_RC" -eq 0 && "$LS_OUT" == "$ls_expected" ]] || fail "list: $LS_RC
+$LS_OUT
+$(cat "$TMP_ROOT/ls.err")"
+grep -qxF 'agent-guard: warn: tier list: 1 record skipped (not readable)' "$TMP_ROOT/ls.err" \
+  || fail "list must count the unreadable record: $(cat "$TMP_ROOT/ls.err")"
+(cd "$ls_t/.agents/tasks" && find . -type f -exec cksum {} + | sort) >"$TMP_ROOT/ls.after"
+cmp -s "$TMP_ROOT/ls.before" "$TMP_ROOT/ls.after" || fail "tier list changed files under .agents/tasks"
+# A read-only packet folder (a Codex sandbox): the same list, exit 0.
+chmod -R a-w "$ls_t/.agents/tasks"
+ls_run
+chmod -R u+w "$ls_t/.agents/tasks"
+[[ "$LS_RC" -eq 0 && "$LS_OUT" == "$ls_expected" ]] || fail "list with read-only packets: $LS_RC $LS_OUT"
+# On another branch none of them is "on this branch".
+git -C "$ls_t" checkout -q main || fail "git checkout main failed in the list target"
+ls_run
+[[ "$LS_RC" -eq 0 && "$LS_OUT" == "Open on this branch (main): 0"$'\n'"Not closed elsewhere: 5"$'\n'* ]] \
+  || fail "list on another branch: $LS_RC $LS_OUT"
+grep -qxF -- '- here-b: medium, phase cross_review, branch feature/list, last change 2026-11-09' <<<"$LS_OUT" \
+  || fail "list on another branch must name the branch: $LS_OUT"
+if grep -qF 'Before a push' <<<"$LS_OUT"; then fail "no packet is open on main, so nothing to tell before a push: $LS_OUT"; fi
+# An older packet has no tier record: tier close closes its state.json, and
+# the list drops it. A folder name the tier commands refuse stays listed.
+git -C "$ls_t" checkout -q feature/list || fail "git checkout failed in the list target"
+LS_RC=0
+LS_OUT="$(cd "$ls_t" && scripts/agent-guard.sh tier close --task legacy 2>"$TMP_ROOT/ls.err")" || LS_RC=$?
+[[ "$LS_RC" -eq 0 && "$LS_OUT" == "Packet closed: no tier record (task legacy)" ]] \
+  || fail "closing an older packet: $LS_RC $LS_OUT $(cat "$TMP_ROOT/ls.err")"
+python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+assert (d["status"], d["phase"], d["closed_by"]) == ("closed", "closed", "user") and d["updated_at"] != "2026-10-25T03:00:00Z", d' \
+  "$ls_t/.agents/tasks/legacy/state.json" || fail "the older packet's state.json is not closed"
+[[ ! -e "$ls_t/.agents/tasks/legacy/tier.json" ]] || fail "closing an older packet must not invent a tier record"
+LS_OUT="$(cd "$ls_t" && scripts/agent-guard.sh tier close --task legacy 2>&1)" || fail "closing a closed older packet again: $LS_OUT"
+[[ "$LS_OUT" == "Packet already closed (task legacy)" ]] || fail "closing a closed older packet again: $LS_OUT"
+ls_run
+if grep -qF -- '- legacy:' <<<"$LS_OUT"; then fail "a closed older packet is still listed: $LS_OUT"; fi
+grep -qF -- '- HK-old: no tier record' <<<"$LS_OUT" || fail "the other older packet must stay listed: $LS_OUT"
+grep -qxF 'A packet whose folder name is not a task id (HK-old) is closed in its state.json (status and phase closed, closed_by user).' <<<"$LS_OUT" \
+  || fail "the list must say how to close a packet the tier commands refuse: $LS_OUT"
+
 # ---- the Stop hook: verification blocks, the tier warns -----------------------
 # close-out: a verification problem blocks (exit 2, no snapshot advance); an
 # exceeded tier only warns; a closed task never makes pre-push exit 5.
@@ -2988,6 +3235,267 @@ push_rc=0
 git -C "$push_repo" push -q origin --delete feature/push >"$TMP_ROOT/real-push.out" 2>&1 || push_rc=$?
 [[ "$push_rc" -eq 0 ]] || fail "a delete-only push must pass (got $push_rc): $(cat "$TMP_ROOT/real-push.out")"
 if grep -qF 'TIER:' "$TMP_ROOT/real-push.out"; then fail "a delete-only push ran the tier check: $(cat "$TMP_ROOT/real-push.out")"; fi
+# A real push whose verification fails is not refused: git sends it, with a warning.
+python3 - "$push_repo/app/docs/superpowers/specs/project-tech-stack.json" <<'PY' || fail "cannot write a failing verification[]"
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc["verification"] = [{"command": "false", "purpose": "test", "source": "test"}]
+json.dump(doc, open(sys.argv[1], "w"), indent=2)
+PY
+ph switch -q -c feature/push-fail
+printf 'export const pf = 1;\n' >"$push_repo/app/src/pf.ts"
+ph add app/src/pf.ts
+ph commit -q -m pf
+push_rc=0
+git -C "$push_repo" push -q origin feature/push-fail >"$TMP_ROOT/real-push.out" 2>&1 || push_rc=$?
+[[ "$push_rc" -eq 0 ]] || fail "a real push with a failing verification must pass with a warning (got $push_rc): $(cat "$TMP_ROOT/real-push.out")"
+grep -qF 'verification failed in advisory mode' "$TMP_ROOT/real-push.out" \
+  || fail "the real push did not warn about the failing verification: $(cat "$TMP_ROOT/real-push.out")"
+git -C "$push_remote" rev-parse --verify -q refs/heads/feature/push-fail >/dev/null \
+  || fail "the push with a failing verification did not reach the remote"
+
+# ---- push: open packets warn, nothing refuses the push -------------------------
+# The pre-push hook names the packets still open on the pushed branch, counts
+# the other ones, and does not measure a push that has no task in ACTIVE. A
+# failed or missing verification warns. Only kit local-only files in the push
+# refuse it.
+pk="$(fresh_target)"
+pk_git() { git -C "$pk" "$@" || fail "git $* failed in the packet target"; }
+pk_tier() {
+  (cd "$pk" && scripts/agent-guard.sh tier "$@") >/dev/null 2>"$TMP_ROOT/pk-tier.err" \
+    || fail "packet tier $*: $(cat "$TMP_ROOT/pk-tier.err")"
+}
+pk_verify() {
+  python3 - "$pk/docs/superpowers/specs/project-tech-stack.json" "$1" <<'PY' || fail "cannot write packet verification[]"
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc["verification"] = [{"command": sys.argv[2], "purpose": "test", "source": "test"}]
+json.dump(doc, open(sys.argv[1], "w"), indent=2)
+PY
+}
+PK_RC=0
+PK_OUT=""
+pk_push() {
+  PK_RC=0
+  (cd "$pk" && bash scripts/githooks/pre-push </dev/null >"$TMP_ROOT/pk-push.out" 2>&1) || PK_RC=$?
+  PK_OUT="$(cat "$TMP_ROOT/pk-push.out")"
+}
+pk_verify true
+(cd "$pk" && scripts/agent-guard.sh preflight >/dev/null 2>&1) || fail "preflight failed in the packet target"
+pk_git checkout -q -b feature/pk
+printf 'export const k1 = 1;\n' >"$pk/src/k1.ts"
+pk_git add src/k1.ts
+pk_git commit -q -m k1
+# 1. No packet at all: the push says nothing about tiers or packets.
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "a push with no packet must pass (got $PK_RC): $PK_OUT"
+if grep -qE 'no tier declared|still open|not closed|TIER:' <<<"$PK_OUT"; then
+  fail "a push with no packet must print no tier or packet line: $PK_OUT"
+fi
+# 2. The task in ACTIVE is closed and another packet of the branch stays open:
+# the push names it and measures nothing.
+pk_tier set small --task pk-one
+pk_tier set small --task pk-two
+pk_tier close --task pk-two
+[[ ! -e "$pk/.agents/tasks/ACTIVE" ]] || fail "closing the active task must clear ACTIVE"
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "a push with an open packet must pass (got $PK_RC): $PK_OUT"
+grep -qxF 'agent-guard: warn: 1 packet on the pushed branch is still open:' <<<"$PK_OUT" || fail "open packet warning: $PK_OUT"
+grep -qE '^  - pk-one \(small, phase analysis, last change [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' <<<"$PK_OUT" \
+  || fail "open packet line: $PK_OUT"
+grep -qxF '  close it when the user says the task is done: scripts/agent-guard.sh tier close --task pk-one' <<<"$PK_OUT" \
+  || fail "open packet close hint: $PK_OUT"
+if grep -qE 'no tier declared|TIER:|not closed' <<<"$PK_OUT"; then
+  fail "a push with no task in ACTIVE must not be measured: $PK_OUT"
+fi
+pk_measure="$(cd "$pk" && python3 -I scripts/agent-tier.py measure --committed 2>/dev/null)" \
+  || fail "measure --committed with no task"
+python3 -c 'import json, sys
+m = json.loads(sys.argv[1])
+assert m["status"] == "none" and m["skipped"] is True and "files" not in m, m
+assert [item["task"] for item in m["open_related"]] == ["pk-one"] and m["open_other"] == 0, m' "$pk_measure" \
+  || fail "measure --committed with no task: $pk_measure"
+# 3. The task in ACTIVE is open too: both are named, and its tier line is as before.
+pk_tier set small --task pk-three
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "a push with two open packets must pass (got $PK_RC): $PK_OUT"
+grep -qxF 'agent-guard: warn: 2 packets on the pushed branch are still open:' <<<"$PK_OUT" || fail "two open packets: $PK_OUT"
+grep -qF '  - pk-one (small, ' <<<"$PK_OUT" || fail "two open packets, first line: $PK_OUT"
+grep -qF '  - pk-three (small, ' <<<"$PK_OUT" || fail "two open packets, second line: $PK_OUT"
+grep -qxF '  close each one when the user says its task is done: scripts/agent-guard.sh tier close --task <id>' <<<"$PK_OUT" \
+  || fail "two open packets, close hint: $PK_OUT"
+grep -qF 'TIER: small ok (measured small, 1 file)' <<<"$PK_OUT" || fail "the active task keeps its tier line: $PK_OUT"
+# 4. Packets of other branches and older packets with no tier record: one count line.
+python3 - "$pk" <<'PY' || fail "cannot write the other packets"
+import json, os, sys
+root = sys.argv[1]
+os.makedirs(os.path.join(root, ".agents/tasks/far"), exist_ok=True)
+with open(os.path.join(root, ".agents/tasks/far/tier.json"), "w") as handle:
+    json.dump({"schema": "harness-tier/v1", "task_id": "far", "branch": "feature/elsewhere", "base_ref": None,
+               "start_commit": "0" * 40, "declared": "large", "suggested": None, "suggestion_inputs": {},
+               "reason": None, "coding_started_tier": None, "coding_started_at": None, "status": "open",
+               "closed_at": None, "closed_by": None,
+               "history": [{"at": "2026-11-07T09:00:00Z", "event": "set", "tier": "large"}]}, handle)
+os.makedirs(os.path.join(root, ".agents/tasks/legacy"), exist_ok=True)
+with open(os.path.join(root, ".agents/tasks/legacy/state.json"), "w") as handle:
+    json.dump({"status": "awaiting_user", "phase": "resolution", "updated_at": "2026-10-25T03:00:00Z"}, handle)
+PY
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "a push with other open packets must pass (got $PK_RC): $PK_OUT"
+grep -qxF 'agent-guard: note: 2 other packets are not closed; list them: scripts/agent-guard.sh tier list' <<<"$PK_OUT" \
+  || fail "other packets count: $PK_OUT"
+# The session check (no --committed) stays as it was: no packet lines.
+pk_session="$(cd "$pk" && scripts/agent-guard.sh pre-final 2>&1)" || fail "pre-final in a session: $pk_session"
+if grep -qE 'still open|not closed' <<<"$pk_session"; then fail "packet lines belong to the push only: $pk_session"; fi
+# 5. A failing verification warns; the push is not refused.
+pk_verify false
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "a failing verification must not refuse the push (got $PK_RC): $PK_OUT"
+grep -qF 'verification failed in advisory mode' <<<"$PK_OUT" || fail "failing verification warning: $PK_OUT"
+grep -qE '^agent-guard: verification did not pass; the push goes ahead \(context_pack=.*\)$' <<<"$PK_OUT" \
+  || fail "the push must say that verification did not pass: $PK_OUT"
+if grep -qF 'pre-final ok' <<<"$PK_OUT"; then fail "a failed verification is not 'pre-final ok': $PK_OUT"; fi
+# 6. Nothing could run: a warning too.
+pk_verify 'run <placeholder>'
+pk_push
+[[ "$PK_RC" -eq 0 ]] || fail "an unverified push must not be refused (got $PK_RC): $PK_OUT"
+grep -qF 'no verification command ran in advisory mode (unverified)' <<<"$PK_OUT" || fail "unverified warning: $PK_OUT"
+grep -qF 'agent-guard: verification did not pass; the push goes ahead' <<<"$PK_OUT" \
+  || fail "an unverified push must say that verification did not pass: $PK_OUT"
+pk_verify true
+# 7. A kit local-only file in the pushed commits still refuses the push.
+pk_git add -f AGENTS.md
+pk_git commit -q -m "kit file by mistake"
+pk_push
+[[ "$PK_RC" -ne 0 ]] || fail "a kit local-only file must refuse the push: $PK_OUT"
+grep -qF 'harness-kit files are local-only and cannot be pushed' <<<"$PK_OUT" || fail "local-only refusal: $PK_OUT"
+
+# ---- push: the packets of the branches the push names ---------------------------
+# git gives the pre-push hook one line per ref it sends: "<local ref> <local
+# id> <remote ref> <remote id>". The packets named are the ones of those
+# branches, also when another branch is checked out or HEAD is detached.
+pr="$(fresh_target)"
+pr_remote="$(mktemp -d "$TMP_ROOT/pr-remote.XXXXXX")"
+git init -q --bare "$pr_remote" || fail "git init --bare failed"
+pr_git() { git -C "$pr" "$@" || fail "git $* failed in the pushed-refs target"; }
+pr_tier() {
+  (cd "$pr" && scripts/agent-guard.sh tier "$@") >/dev/null 2>"$TMP_ROOT/pr-tier.err" \
+    || fail "pushed-refs tier $*: $(cat "$TMP_ROOT/pr-tier.err")"
+}
+python3 - "$pr/docs/superpowers/specs/project-tech-stack.json" <<'PY' || fail "cannot write pushed-refs verification[]"
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc["verification"] = [{"command": "true", "purpose": "test", "source": "test"}]
+json.dump(doc, open(sys.argv[1], "w"), indent=2)
+PY
+pr_git remote add origin "$pr_remote"
+pr_git push -q origin main
+(cd "$pr" && scripts/agent-guard.sh preflight >/dev/null 2>&1 && bash scripts/install-git-hooks.sh >/dev/null) \
+  || fail "the hook install failed in the pushed-refs target"
+pr_git checkout -q -b feature/pc
+printf 'export const c1 = 1;\n' >"$pr/src/c1.ts"
+pr_git add src/c1.ts
+pr_git commit -q -m c1
+pr_tier set small --task packet-c
+pr_git checkout -q -b feature/pa main
+printf 'export const a1 = 1;\n' >"$pr/src/a1.ts"
+pr_git add src/a1.ts
+pr_git commit -q -m a1
+pr_tier set small --task packet-a
+pr_a="$(git -C "$pr" rev-parse feature/pa)"
+pr_c="$(git -C "$pr" rev-parse feature/pc)"
+pr_zero=0000000000000000000000000000000000000000
+PR_RC=0
+PR_OUT=""
+pr_hook() { # pr_hook <line>...: runs the hook with the lines git would give it
+  PR_RC=0
+  (cd "$pr" && { [[ $# -eq 0 ]] || printf '%s\n' "$@"; } | bash scripts/githooks/pre-push >"$TMP_ROOT/pr-push.out" 2>&1) || PR_RC=$?
+  PR_OUT="$(cat "$TMP_ROOT/pr-push.out")"
+  [[ "$PR_RC" -eq 0 ]] || fail "the push check must not refuse the push (got $PR_RC): $PR_OUT"
+}
+pr_named() { # pr_named <task>...: exactly these packets are named
+  local want got
+  want="$(printf '%s\n' "$@" | sort)"
+  got="$(sed -n 's/^  - \([a-z0-9-]*\) (.*$/\1/p' <<<"$PR_OUT" | sort)"
+  [[ "$got" == "$want" ]] || fail "named packets: expected [$(tr '\n' ' ' <<<"$want")] got [$(tr '\n' ' ' <<<"$got")]: $PR_OUT"
+}
+# 1. Another branch is pushed than the one checked out (feature/pa): its packet is named.
+pr_hook "refs/heads/feature/pc $pr_c refs/heads/feature/pc $pr_zero"
+grep -qxF 'agent-guard: warn: 1 packet on the pushed branch is still open:' <<<"$PR_OUT" || fail "pushed branch warning: $PR_OUT"
+pr_named packet-c
+grep -qE '^  - packet-c \(small, phase analysis, last change [0-9]{4}-[0-9]{2}-[0-9]{2}\)$' <<<"$PR_OUT" || fail "pushed branch packet line: $PR_OUT"
+grep -qxF '  close it when the user says the task is done: scripts/agent-guard.sh tier close --task packet-c' <<<"$PR_OUT" \
+  || fail "pushed branch close hint: $PR_OUT"
+grep -qxF 'agent-guard: note: 1 other packet is not closed; list it: scripts/agent-guard.sh tier list' <<<"$PR_OUT" \
+  || fail "the checked-out branch's packet counts as another one: $PR_OUT"
+# 2. Two branches in one push: both packets, each with its branch.
+pr_hook "refs/heads/feature/pa $pr_a refs/heads/feature/pa $pr_zero" "refs/heads/feature/pc $pr_c refs/heads/feature/pc $pr_zero"
+grep -qxF 'agent-guard: warn: 2 packets on the pushed branches are still open:' <<<"$PR_OUT" || fail "two pushed branches: $PR_OUT"
+grep -qE '^  - packet-a \(small, phase analysis, branch feature/pa, last change [0-9-]{10}\)$' <<<"$PR_OUT" || fail "two pushed branches, first: $PR_OUT"
+grep -qE '^  - packet-c \(small, phase analysis, branch feature/pc, last change [0-9-]{10}\)$' <<<"$PR_OUT" || fail "two pushed branches, second: $PR_OUT"
+if grep -qF 'not closed' <<<"$PR_OUT"; then fail "no other packet is left: $PR_OUT"; fi
+# 3. git push origin HEAD: the local side is HEAD, the checked-out branch.
+pr_hook "HEAD $pr_a refs/heads/feature/pa $pr_zero"
+pr_named packet-a
+# 4. The checked-out branch pushed under another name: still its packet.
+pr_hook "HEAD $pr_a refs/heads/review/pa $pr_zero"
+pr_named packet-a
+# 5. A tag alone names no branch: no packet is named, both are counted.
+pr_hook "refs/tags/v1 $pr_a refs/tags/v1 $pr_zero"
+pr_named
+if grep -qF 'still open' <<<"$PR_OUT"; then fail "a tag push names no packet: $PR_OUT"; fi
+grep -qxF 'agent-guard: note: 2 other packets are not closed; list them: scripts/agent-guard.sh tier list' <<<"$PR_OUT" \
+  || fail "a tag push counts the open packets: $PR_OUT"
+# The same when the tag is made from HEAD or from a branch: the push sends a
+# tag and updates no branch.
+pr_hook "HEAD $pr_a refs/tags/from-head $pr_zero"
+pr_named
+pr_hook "refs/heads/feature/pc $pr_c refs/tags/from-branch $pr_zero"
+pr_named
+grep -qxF 'agent-guard: note: 2 other packets are not closed; list them: scripts/agent-guard.sh tier list' <<<"$PR_OUT" \
+  || fail "a tag made from a branch counts the open packets: $PR_OUT"
+# A branch and a tag in one push: the branch's packet only.
+pr_hook "refs/heads/feature/pc $pr_c refs/heads/feature/pc $pr_zero" "HEAD $pr_a refs/tags/from-head $pr_zero"
+pr_named packet-c
+# A review ref (Gerrit's refs/for/main) carries the branch's work: its packet is named.
+pr_hook "HEAD $pr_a refs/for/main $pr_zero"
+pr_named packet-a
+# 6. A branch that is deleted sends no commit: only the pushed branch counts.
+pr_hook "(delete) $pr_zero refs/heads/feature/pa $pr_a" "refs/heads/feature/pc $pr_c refs/heads/feature/pc $pr_zero"
+pr_named packet-c
+# 7. No line (the hook run by hand): the checked-out branch.
+pr_hook
+pr_named packet-a
+# 8. Detached HEAD: the remote branch names the packet; a commit id on the local side too.
+pr_git checkout -q --detach feature/pc
+pr_hook "HEAD $pr_c refs/heads/feature/pc $pr_zero"
+pr_named packet-c
+pr_hook "$pr_c $pr_c refs/heads/feature/pc $pr_zero"
+pr_named packet-c
+pr_hook
+pr_named
+# 9. The measure reads the same lines from the file the hook names.
+printf 'refs/heads/feature/pc %s refs/heads/feature/pc %s\n' "$pr_c" "$pr_zero" >"$TMP_ROOT/pr-refs"
+pr_measure="$(cd "$pr" && AGENT_GUARD_PREPUSH_REFS="$TMP_ROOT/pr-refs" python3 -I scripts/agent-tier.py measure --committed 2>/dev/null)" \
+  || fail "measure --committed with pushed refs"
+python3 -c 'import json, sys
+m = json.loads(sys.argv[1])
+assert [(item["task"], item["branch"]) for item in m["open_related"]] == [("packet-c", "feature/pc")] and m["open_other"] == 1, m' "$pr_measure" \
+  || fail "measure --committed with pushed refs: $pr_measure"
+# 10. A real push of another branch than the checked-out one.
+pr_git checkout -q feature/pa
+pr_rc=0
+git -C "$pr" push -q origin feature/pc >"$TMP_ROOT/pr-real.out" 2>&1 || pr_rc=$?
+[[ "$pr_rc" -eq 0 ]] || fail "a real push of another branch must pass (got $pr_rc): $(cat "$TMP_ROOT/pr-real.out")"
+grep -qE '^  - packet-c \(' "$TMP_ROOT/pr-real.out" || fail "the real push must name the pushed branch's packet: $(cat "$TMP_ROOT/pr-real.out")"
+if grep -qE '^  - packet-a \(' "$TMP_ROOT/pr-real.out"; then fail "the real push named the checked-out branch's packet: $(cat "$TMP_ROOT/pr-real.out")"; fi
+git -C "$pr_remote" rev-parse --verify -q refs/heads/feature/pc >/dev/null || fail "the real push did not reach the remote"
+# 11. A real push of HEAD to a tag names no packet.
+pr_rc=0
+git -C "$pr" push -q origin HEAD:refs/tags/from-head >"$TMP_ROOT/pr-real.out" 2>&1 || pr_rc=$?
+[[ "$pr_rc" -eq 0 ]] || fail "a real push of HEAD to a tag must pass (got $pr_rc): $(cat "$TMP_ROOT/pr-real.out")"
+if grep -qF 'still open' "$TMP_ROOT/pr-real.out"; then fail "a real push to a tag named a packet: $(cat "$TMP_ROOT/pr-real.out")"; fi
+git -C "$pr_remote" rev-parse --verify -q refs/tags/from-head >/dev/null || fail "the real tag push did not reach the remote"
 
 # ---- onboarding: risk_paths guide and hint -----------------------------------
 ob="$(fresh_target)"

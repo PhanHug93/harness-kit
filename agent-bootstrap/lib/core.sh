@@ -693,6 +693,31 @@ harness_fill_workflow_placeholder() {
   printf '%s\n' "${content//__WORKFLOW_PRESET__/$WORKFLOW_PRESET}" > "$file"
 }
 
+harness_json_merge() {
+  # path base new merged: true when the three-way merge is clean and its
+  # result parses as JSON with no key twice in one object; $merged then holds
+  # it. The merge works on lines: when both sides add the same key in
+  # different places it repeats the key, and a parser would keep the last one
+  # and drop the other side's value without a word.
+  local path="$1" base="$2" new="$3" merged="$4"
+  if ! command -v git >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+    return 1
+  fi
+  git merge-file -p -L local -L previous-kit -L new-kit "$path" "$base" "$new" >"$merged" 2>/dev/null || return 1
+  python3 -I -S -c '
+import json, sys
+
+
+def once(pairs):
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("a key is repeated")
+    return dict(pairs)
+
+
+json.load(open(sys.argv[1], encoding="utf-8"), object_pairs_hook=once)' "$merged" >/dev/null 2>&1
+}
+
 harness_upgrade_decision() {
   # Prints update (no local edits), kept (kit output unchanged), merge (clean
   # three-way merge in $4) or candidate (conflict, or no usable baseline).
@@ -707,6 +732,10 @@ harness_upgrade_decision() {
   elif cmp -s "$new" "$base"; then
     # The kit output did not change: local edits are kept, JSON included.
     printf 'kept\n'
+  elif [[ "$relpath" == ".claude/settings.json" ]] && harness_json_merge "$path" "$base" "$new" "$merged"; then
+    # Projects edit this file by hand (their own hooks, permissions), and
+    # the kit changes it too: a clean merge that is still JSON is taken.
+    printf 'merge\n'
   elif [[ "$relpath" == *.json ]]; then
     # Structured (often machine-owned) files are never merged line by line:
     # an edited one with a kit change gets a candidate, as before baselines.

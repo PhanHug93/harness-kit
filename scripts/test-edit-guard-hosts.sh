@@ -184,6 +184,54 @@ cp "$work/policy.saved" "$policy"
 
 # 6. NotebookEdit is guarded.
 has "$(cat "$target/.claude/settings.json")" '"matcher": "Edit|Write|MultiEdit|NotebookEdit"' "settings matcher"
+mkdir -p "$target/src/deep"
+# Claude Code runs a hook command in the session's current directory, which a
+# `cd` moves: every command in settings.json must start the hook from a
+# subdirectory too (CLAUDE_PROJECT_DIR is the project root), and the edit
+# guard must still block there.
+settings_commands="$(python3 -I -S -c 'import json, sys
+hooks = json.load(open(sys.argv[1]))["hooks"]
+for event in hooks:
+    for group in hooks[event]:
+        for hook in group["hooks"]:
+            print(event + "\t" + hook["command"])' "$target/.claude/settings.json")"
+[[ "$(grep -c . <<<"$settings_commands")" -eq 4 ]] || fail "settings.json: four hook commands expected: $settings_commands"
+while IFS=$'\t' read -r event command; do
+  case "$event" in
+    PreToolUse) input="$(python3 -I -S -c 'import json, sys; print(json.dumps({"session_id": "sub1", "tool_name": "Edit", "tool_input": {"file_path": sys.argv[1]}}))' "$target/AGENTS.md")" ;;
+    *) input='{"session_id":"sub1","stop_hook_active":true}' ;;
+  esac
+  RC=0
+  (cd "$target/src/deep" && printf '%s' "$input" | env -u AGENT_WORKSPACE_CONTEXT -u AGENT_HOST_SESSION_ID \
+    CLAUDE_PROJECT_DIR="$target" CLAUDE_CONFIG_DIR="$claude_home" CODEX_HOME="$codex_home" \
+    sh -c "$command" >"$work/sub.out" 2>"$work/sub.err") || RC=$?
+  [[ "$RC" -ne 126 && "$RC" -ne 127 ]] || fail "$event hook does not start from a subdirectory (rc=$RC): $command: $(cat "$work/sub.err")"
+  if [[ "$event" == PreToolUse ]]; then
+    # The guard judged the path: it blocks (2), or passes an edit that an
+    # earlier case of this suite acknowledged (0).
+    [[ "$RC" -eq 2 || "$RC" -eq 0 ]] || fail "the edit guard from a subdirectory: rc=$RC: $(cat "$work/sub.out" "$work/sub.err")"
+    grep -qF 'protected_path=true' "$work/sub.out" "$work/sub.err" \
+      || fail "the edit guard must judge a protected file from a subdirectory (rc=$RC): $(cat "$work/sub.out" "$work/sub.err")"
+  else
+    [[ "$RC" -eq 0 ]] || fail "$event hook from a subdirectory: rc=$RC: $(cat "$work/sub.err")"
+  fi
+done <<<"$settings_commands"
+# A settings.json kept from an older kit still has the relative path: the
+# verifier warns, because those hooks stop after the agent changes directory.
+cp "$target/.claude/settings.json" "$work/settings.keep"
+# shellcheck disable=SC2016  # a literal $CLAUDE_PROJECT_DIR
+python3 -I -S -c 'import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+open(path, "w", encoding="utf-8").write(text.replace("\\\"$CLAUDE_PROJECT_DIR\\\"/scripts/", "./scripts/"))' "$target/.claude/settings.json"
+grep -qF '"command": "./scripts/agent-hook.sh claude-pretool"' "$target/.claude/settings.json" || fail "fixture: the relative path was not written"
+relative_warns="$({ cd "$target" && scripts/verify-ai-deps.sh --json 2>/dev/null; } | python3 -I -S -c 'import json, sys
+print(sum(1 for c in json.load(sys.stdin)["checks"] if c.get("status") == "warn" and "relative path" in c.get("label", "")))' || true)"
+[[ "$relative_warns" == 1 ]] || fail "the verifier must warn about relative hook paths (got: $relative_warns)"
+cp "$work/settings.keep" "$target/.claude/settings.json"
+relative_warns="$({ cd "$target" && scripts/verify-ai-deps.sh --json 2>/dev/null; } | python3 -I -S -c 'import json, sys
+print(sum(1 for c in json.load(sys.stdin)["checks"] if c.get("status") == "warn" and "relative path" in c.get("label", "")))' || true)"
+[[ "$relative_warns" == 0 ]] || fail "the generated settings.json must not get the relative-path warning"
 claude nb-protected NotebookEdit notebook_path "$target/.claude/commands/x.ipynb"
 blocked nb-protected "DENIED: protected path"
 claude nb-inside NotebookEdit notebook_path "$target/src/n.ipynb"

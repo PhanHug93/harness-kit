@@ -258,6 +258,8 @@ TIER_DETAILS=""
 # still stops on an error inside it: 0 pass (or advisory), 1 fail, 2 error,
 # 3 budget exhausted, 4 unverified.
 VERIFY_CODE=0
+# true once a verification problem was only a warning (advisory mode).
+VERIFY_ADVISORY_PROBLEM=false
 # Set only by `baseline` (never inherited from the environment).
 BASELINE_KEY=""
 BASELINE_TOOLCHAIN=""
@@ -2017,6 +2019,7 @@ no_verification_ran() {
     return 4
   fi
   GATE_STATUS=warn
+  VERIFY_ADVISORY_PROBLEM=true
   warn "no verification command ran in advisory mode (unverified); gate_status=warn"
   return 0
 }
@@ -2420,6 +2423,7 @@ PY
     return 0
   fi
   GATE_STATUS=warn
+  VERIFY_ADVISORY_PROBLEM=true
   case "$code" in
     2) warn "verification could not run (error); gate_status=warn" ;;
     4) warn "no verification command ran in advisory mode (unverified); gate_status=warn" ;;
@@ -2477,6 +2481,34 @@ def skip(why):
     sys.exit(0)
 
 
+def open_packets(m):
+    """The push names the packets still open on the pushed branches and counts
+    the other ones. A warning: it never changes the exit code."""
+    related = [item for item in m.get("open_related") or [] if isinstance(item, dict) and isinstance(item.get("task"), str)]
+    other = m.get("open_other") if isinstance(m.get("open_other"), int) else 0
+    if related:
+        one = len(related) == 1
+        # One push can send several branches: each packet then says which.
+        several = len({item.get("branch") if isinstance(item.get("branch"), str) else None for item in related}) > 1
+        warn(f"{plural(len(related), 'packet')} on the pushed {'branches' if several else 'branch'} "
+             f"{'is' if one else 'are'} still open:")
+        for item in related:
+            facts = [item["tier"] if item.get("tier") in TIERS else "no tier"]
+            if isinstance(item.get("phase"), str) and item["phase"]:
+                facts.append(f"phase {one_line(item['phase'])}")
+            if several and isinstance(item.get("branch"), str) and item["branch"]:
+                facts.append(f"branch {one_line(item['branch'])}")
+            if isinstance(item.get("last"), str) and item["last"]:
+                facts.append(f"last change {one_line(item['last'])}")
+            print(f"  - {item['task']} ({', '.join(facts)})", file=sys.stderr)
+        lead = "close it when the user says the task is done" if one else "close each one when the user says its task is done"
+        print(f"  {lead}: scripts/agent-guard.sh tier close --task {related[0]['task'] if one else '<id>'}",
+              file=sys.stderr, flush=True)
+    if other > 0:
+        print(f"agent-guard: note: {plural(other, 'other packet')} {'is' if other == 1 else 'are'} not closed; "
+              f"list {'it' if other == 1 else 'them'}: scripts/agent-guard.sh tier list", file=sys.stderr, flush=True)
+
+
 def valid(m):
     return (isinstance(m, dict) and m.get("tier") in TIERS and m.get("status") in ("open", "stale", "none")
             and isinstance(m.get("counted_files"), int) and isinstance(m.get("partial"), bool)
@@ -2510,6 +2542,12 @@ try:
     m = json.loads(run.stdout.decode("utf-8", "surrogateescape"))
 except ValueError:
     m = None
+if isinstance(m, dict) and os.environ.get("TIER_COMMITTED") == "true":
+    open_packets(m)
+if isinstance(m, dict) and m.get("skipped") is True:
+    # A push with no declared tier: nothing was measured.
+    print("none")
+    sys.exit(0)
 if not valid(m):
     skip("the measure printed no valid result")
 
@@ -2531,7 +2569,15 @@ size = plural(m["counted_files"], "file") + (", partial" if partial else "")
 details, kind = [], ""
 if m["status"] == "none" or declared is None:
     status, summary = "none", ""
-    warn(f"no tier declared; measured: {measured} ({size}); run scripts/agent-guard.sh tier suggest")
+    # What the count starts from: a base far in the past explains a large count
+    # (set tier_base in project-tech-stack.json when branches start elsewhere).
+    since, ref = "", m["base"].get("ref")
+    if m["base"].get("kind") == "merge-base" and isinstance(ref, str) and isinstance(m.get("base_date"), str):
+        for prefix in ("refs/remotes/", "refs/heads/"):
+            if ref.startswith(prefix):
+                ref = ref[len(prefix):]
+        since = f"; since {one_line(ref)}, {one_line(m['base_date'])}"
+    warn(f"no tier declared; measured: {measured} ({size}{since}); run scripts/agent-guard.sh tier suggest")
 elif m["status"] == "stale":
     why = one_line(m.get("stale_reason") or "unknown")
     status, summary = "stale", f"TIER: stale ({why}; measured {measured})"
@@ -2761,7 +2807,10 @@ pre_final() {
   if [[ "$TIER_STATUS" == "exceeded" && "$GATE_STATUS" == "pass" ]]; then
     GATE_STATUS=warn
   fi
-  if [[ "$code" -eq 0 ]]; then
+  if [[ "$code" -eq 0 && "$committed" == "true" && "$VERIFY_ADVISORY_PROBLEM" == "true" ]]; then
+    # The pre-push hook: say plainly that the push is not held back.
+    printf 'agent-guard: verification did not pass; the push goes ahead (context_pack=%s)\n' "$(context_pack_display)"
+  elif [[ "$code" -eq 0 ]]; then
     printf 'agent-guard: pre-final ok (context_pack=%s)\n' "$(context_pack_display)"
   fi
   tier_close_out "$code"
@@ -3104,6 +3153,7 @@ tier_synopsis() {
     "tier suggest [--task <id>] [--by @seat] [--paths <file>...] [--lines N] [--data] [--access] [--dependency] [--unclear] [--handoff]" \
     "tier set <small|medium|large> --task <id> [--reason TEXT] [--base <ref>] [--by @seat] [--recorded-by @seat] [--answer keep|switch|scope]" \
     "tier show [--task <id>] [--pr-line]" \
+    "tier list" \
     "tier close --task <id>" \
     "tier stats [--since YYYY-MM-DD] [--json]"; do
     printf '%sscripts/agent-guard.sh %s\n' "$1" "$line"

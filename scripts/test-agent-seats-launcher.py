@@ -194,7 +194,10 @@ def install_hook_stub(target: Path, hook_log: Path) -> None:
         "if [[ \"$1\" == codex-preflight ]]; then\n"
         "  printf '%s\\n' \"$*\" >> \"$HOOK_CAPTURE_FILE\"\n"
         "  printf '%s\\n' \"$*\" >> \"$HOOK_PREFLIGHT_CAPTURE_FILE\"\n"
-        "  if [[ \"${2:-}\" != --check-only ]]; then\n"
+        # The stub marks a pack that is already there. A full-flow launch
+        # creates .agents/state before any test seeds a pack; a mark written
+        # then would be a pack the guard cannot read.
+        "  if [[ \"${2:-}\" != --check-only && -e \"$HOOK_CONTEXT_PACK_FILE\" ]]; then\n"
         "    printf 'mutated by non-check-only preflight\\n' > \"$HOOK_CONTEXT_PACK_FILE\"\n"
         "  fi\n"
         "  exit 0\n"
@@ -434,12 +437,25 @@ def test_launch_matrix(target: Path, env: Dict[str, str], codex_log: Path, hook_
     args = captured_args(codex_log)
     check(arg_value(args, "-s") == "read-only", "supervised launch changed sandbox behavior")
     check(arg_value(args, "-a") == "on-request", "supervised launch changed approval behavior")
+    check("--add-dir" not in args and not any(value.startswith("sandbox_workspace_write.writable_roots=") for value in args),
+          "a read-only launch must not name writable folders")
 
     result = invoke(target, ["@build", "--full-flow"], env)
     check(result.returncode == 0, "full-flow launch failed")
     args = captured_args(codex_log)
     check(arg_value(args, "-s") == "workspace-write", "full-flow launch changed sandbox behavior")
     check(arg_value(args, "-a") == "never", "full-flow launch changed approval behavior")
+    # Codex keeps .agents/ read-only in its workspace sandbox: the launcher adds
+    # the packet and state folders as writable ones, and nothing else there.
+    # It adds them (--add-dir): an override of
+    # sandbox_workspace_write.writable_roots would replace the folders the
+    # user's own Codex config makes writable.
+    check(not any(value.startswith("sandbox_workspace_write.writable_roots=") for value in args),
+          f"full-flow launch must not replace the user's writable roots: {args}")
+    named = [Path(args[index + 1]).resolve() for index, value in enumerate(args[:-1]) if value == "--add-dir"]
+    check(named == [(target / ".agents" / name).resolve() for name in ("tasks", "state")],
+          f"full-flow launch must add .agents/tasks and .agents/state as writable folders: {args}")
+    check(all(item.is_dir() for item in named), "the launcher must create the writable folders")
 
     for seat, flow_flag in (
         ("@gate", "--supervised"),
