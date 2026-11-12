@@ -6,7 +6,7 @@ This folder is the whole Harness Kit as one copyable bundle. The version is in
 Install, reinstall or update a project from its root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.10.1/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.12.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Offline, from a copy of this folder (`--source-dir` is the folder that holds

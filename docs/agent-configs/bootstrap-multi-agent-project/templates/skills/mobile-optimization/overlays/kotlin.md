@@ -1,72 +1,23 @@
-# Kotlin Overlay — how to fix what the catalog flags
+# Kotlin Overlay — where the catalog shows up on Android
 
-Apply only when the detector reports an Android/Kotlin stack. Patterns to *find* live in `catalog.md`; this file shows the *fix*.
+Load only for an Android/Kotlin stack. `catalog.md` says what to look for and what must stay true; this file says where that shows up on Android. It holds no recipes: choose the idiom, then state the behavior you kept.
 
-## One-pass loop with conditional sort
+## Hot paths
+- List binding and item composition: assign prepared values only. No sorting, filtering, formatting, decoding, I/O or new background work there.
+- Text input callbacks run on every keystroke: no regex compile and no needless string copies there. Keep a copy that later work reads: the input buffer changes after the callback.
+- App start and screen start: no blocking I/O, no repeated parsing.
 
-```kotlin
-val result = ArrayList<Item>(source.size)
-var sorted = true
-var last = Long.MIN_VALUE
+## Choices that change behavior, not only speed
+- How an index is built decides which element wins when a key repeats. Check it against the original lookup.
+- "Blank" depends on the trim: Kotlin's `trim()` and `isBlank()` test the same characters; Java's `String.trim()` tests a different set.
+- A shared formatter must be safe across threads; not every JVM formatter is.
+- A data-class `copy()` may be what isolates a caller from later mutation: keep it when fields change, when nested objects are mutable, or when the value crosses a cache, UI or network boundary.
 
-for (item in source) {
-    if (item.key.isBlank()) continue
-    if (!item.isEligible) continue
-    val updated = item.copy(status = Status.PENDING.code)
-    if (updated.timestamp < last) sorted = false
-    last = updated.timestamp
-    result.add(updated)
-}
-if (!sorted && result.size > 1) result.sortBy { it.timestamp }
-```
+## Lifetime and threads
+- Background work belongs to a screen or view-model lifetime and stops with it. No global scope, no blocking the calling thread.
+- Collect UI state only while the screen is started.
+- A reference to a view must not outlive the view. A Fragment can live longer than its view.
+- CPU work and blocking I/O use different thread pools; neither runs on main.
 
-Replaces `filter/filter/map/sortedBy` chains: one scan, no intermediate lists, in-place sort only when input was actually unordered. Keep the sorted-tracking only when input is usually sorted — it adds state.
-
-## Membership and lookup
-
-```kotlin
-val ids = selectedIdsList.toHashSet()          // O(1) membership
-val byId = users.associateBy { it.id }          // repeated key lookups
-```
-
-## Cached regex
-
-```kotlin
-private val amountRegex: Regex by lazy { Regex("^\\d+(\\.\\d{1,2})?$") }
-```
-
-`Regex(...)` compiles a Pattern per call — expensive per keystroke. For extremely hot validation, a manual parser beats regex. In input paths prefer `CharSequence` and avoid `toString()` until required.
-
-## `copy()` rules
-
-Keep `copy()` when: fields change, mutation isolation is required, nested objects are mutable, the value crosses cache/UI/network boundaries, or defensive copy is part of the API contract. Remove it only with a written immutability/ownership justification — and say so in Trade-offs.
-
-## Logging
-
-```kotlin
-Timber.d("payload=%s", payload)   // args formatted only if loggable
-```
-
-Interpolated strings (`"payload=$payload"`) are built before the call regardless of log level. Never log secrets, tokens, keys, PIN, or biometric payloads.
-
-## RecyclerView bind path
-
-Forbidden in `onBindViewHolder`: sorting, filtering, formatter creation, network/database calls, bitmap decode, heavy parsing, launching untracked coroutines. Precompute a display model instead:
-
-```kotlin
-data class RowUiModel(val id: Long, val title: String, val dateText: String)
-```
-
-Build it in ViewModel/use case; bind only assigns. Use ListAdapter/DiffUtil and stable IDs for large updates.
-
-## Coroutines and lifecycle
-
-```kotlin
-viewLifecycleOwner.lifecycleScope.launch {
-    repeatOnLifecycle(Lifecycle.State.STARTED) {
-        viewModel.uiState.collect(::render)
-    }
-}
-```
-
-No `runBlocking` in app code; no `GlobalScope`. `Dispatchers.Default` for CPU work, `Dispatchers.IO` for blocking I/O — do not shove everything onto IO. Clear Fragment ViewBinding in `onDestroyView`.
+## Logs
+- Never log secrets, tokens, keys, PIN or biometric data, not even to measure.

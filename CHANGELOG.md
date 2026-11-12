@@ -1,5 +1,71 @@
 # Changelog
 
+## 2026.11.12.1 — Mobile skill as design with a review mode, evidence principle
+
+- **Mobile optimization skill: design instead of recipes.** The catalog and
+  the two overlays no longer say which API to call. Each catalog line names
+  what to look for, where the fix goes and what must stay true. The overlays
+  name where that shows up on Android and on iOS and which choices change
+  behavior. Their code examples are gone; the two worked examples stay.
+  - Why: two API recipes were wrong by the language. The lookup recipe
+    (`associateBy`, `Dictionary(uniqueKeysWithValues:)`) changed which
+    element wins when a key repeats, and the Swift form stops the app
+    ("Duplicate values for key"). The Swift blank check
+    `allSatisfy(\.isWhitespace)` is not the same test as a trim: it differs
+    on a zero-width space (U+200B), on a combining mark after a space, and on
+    a newline when the code trimmed `.whitespaces`.
+  - The catalog now states the rule in both cases: the same element must win
+    when a key repeats and a repeated key must not crash; a blank test treats
+    the same characters as blank as the original.
+  - A shared regex or formatter must be safe across threads and is never
+    changed after creation.
+  - The Kotlin overlay keeps one language fact, because a trial run got it
+    wrong without it: Kotlin's `trim()` and `isBlank()` test the same
+    characters, Java's `String.trim()` tests a different set.
+  - Merging passes has a stated condition: if a callback may change the
+    data, each read keeps its original moment. The Kotlin worked example
+    names that assumption under Trade-offs.
+  - The Patch step leaves the idiom to the agent; it must keep the listed
+    invariants.
+  - The Swift worked example no longer says "only the final sort allocates".
+- **Mobile optimization skill: a review mode.** Asked to review, or not
+  allowed to edit, the skill stops after the scan and reports findings
+  (where, the cost, the fix in words). It writes no patch and no test and
+  runs no gate; it lists the tests to write. A catalog action that moves
+  code to another file is a finding unless that file is in scope.
+- **Mobile optimization skill: the gate runs once, no fixed scope.** The
+  Validate step runs the targeted test and compiles the edited module. The
+  project gate (`scripts/agent-guard.sh pre-final --run-verify`) runs once at
+  hand-off, by whoever AGENTS.md names: the agent or the host (the Codex
+  launcher, the Claude Stop hook). The skill no longer adds
+  `--verify-scope fast`. The Claude command `optimize-code` follows the
+  skill's mode instead of always patching. A project that already installed
+  the skill gets the new text with `--add-skill mobile-optimization`; the
+  default update keeps the installed copy.
+- **Evidence principle in AGENTS.md.** "No success claim without fresh
+  verification or a clear reason it was not run" became three sentences:
+  claim only what your evidence covers (what was checked, how, on which code
+  version); after a related change, say if the earlier result still holds;
+  keep apart what you ran, read and left unchecked. The infra-only
+  AGENTS.md has them too. "Skipped or unavailable checks never pass" stays
+  in the seat contracts.
+- **doubt-driven.** Each finding gives where, trigger, evidence, effect and
+  fix. `contract-misread` is defined. No substantive finding is a valid
+  result. With no fresh reviewer, the result is called a self-review. The
+  list of decisions lives in the description only.
+- **agentmemory skill.** `memory_smart_search` passes `targetLayer: memory`
+  first: the default also returns raw tool observations. `memory_profile`
+  is for an agent that is new to the project.
+- **Plans.** A plan written with `superpowers:writing-plans` drops the
+  `REQUIRED SUB-SKILL` header. A plan or a skill never widens a seat's
+  rights or the Git rules.
+- **Budgets.** The agent docs hold 7,942 words; the ceiling moves from 7,900
+  to 7,942 for the text above. On-demand kit text is 5,203 tokens, exactly
+  the unchanged ceiling of 5,203. To pay for those tokens, AGENTS.md no
+  longer repeats two notes of the agentmemory skill ("Claude Code and
+  Codex", "It is advisory; current files win"), and its rtk line is shorter:
+  "Run git directly; rtk is retired."
+
 ## 2026.11.10.1 — Open packets at push, tier_base, and host fixes for Claude and Codex
 
 - **A push names the packets that are still open.**
