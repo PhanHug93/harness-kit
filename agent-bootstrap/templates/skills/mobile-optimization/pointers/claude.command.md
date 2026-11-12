@@ -1,3 +1,3 @@
-Optimize the Kotlin/Swift code given in $ARGUMENTS (or the file/selection under discussion).
+Optimize or review the Kotlin/Swift code given in $ARGUMENTS (or the file/selection under discussion).
 
-Read `.agents/skills/mobile-optimization/SKILL.md` first and follow its Process and Response Format: lock Behavior Invariants and a characterization test before patching, scan with `catalog.md`, apply the minimal language-overlay patch, then validate with the project verify gate. Load only the matching overlay/few-shot.
+Read `.agents/skills/mobile-optimization/SKILL.md` first and follow its Process and Response Format, including its mode: a review reports findings only. Load only the matching overlay/few-shot.

@@ -160,9 +160,11 @@ Supported hosts: Claude Code and Codex only, for now.
 
 One call each, no near-identical repeats in a session:
 
-- `memory_profile`: the files and topics the project touches most.
+- `memory_profile`: the files and topics the project touches most. Only when
+  new to the project.
 - `memory_lesson_recall` with the task type ("migration", "release", "tests").
-- `memory_smart_search` for earlier decisions on the area.
+- `memory_smart_search` for earlier decisions on the area. Pass
+  `targetLayer: memory` first: the default also returns raw tool observations.
 - `memory_file_history` before editing config, auth, build or release files.
 - No task given: `memory_next` for the top unblocked follow-up.
 
@@ -254,10 +256,8 @@ decision through an adversarial review BEFORE it stands, while course-correction
 is still cheap.
 
 ## When to use
-Only for non-trivial decisions: branching logic, module/contract boundaries,
-data/schema/migration choices, security or privacy claims, or irreversible
-operations. Do NOT apply to trivial edits, copy changes, or mechanical work —
-if you doubt every keystroke, you ship nothing.
+Only for the decisions the description names. Not for trivial edits, copy
+changes or mechanical work.
 
 ## Procedure (bounded to 3 cycles)
 1. CLAIM — state the decision in one sentence.
@@ -265,19 +265,21 @@ if you doubt every keystroke, you ship nothing.
    reviewer WITHOUT your reasoning. If you hand over conclusions, you get back
    validation of your conclusions.
 3. DOUBT — the reviewer's prompt is: "Find what is wrong with this artifact.
-   Assume the author is overconfident." Not a validation request.
+   Assume the author is overconfident." Each finding gives where (file:line),
+   trigger, evidence, effect and fix.
 4. RECONCILE — re-read the artifact yourself against each finding. Classify by
-   precedence: contract-misread > actionable > trade-off > noise. Do not
-   rubber-stamp the reviewer.
-5. STOP — resolve substantive findings or revise the decision. Unresolved
-   substantive findings after 3 cycles mean the artifact is not ready.
+   precedence: contract-misread (the artifact answers a different contract
+   than the one given) > actionable > trade-off > noise. Do not rubber-stamp
+   the reviewer.
+5. STOP — resolve substantive findings or revise the decision. No substantive
+   finding is a valid result: say so and stop. Unresolved substantive findings
+   after 3 cycles mean the artifact is not ready.
 
 ## Notes
 - The reviewer lacks your context — disagreement is information, not a verdict.
-- In multi-agent setups the fresh reviewer can be a separate agent/model; offer
-  cross-model review rather than silently skipping it.
-- Do NOT add this skill to a persona's `skills:` frontmatter (avoid
-  orchestration auto-application).
+- The fresh reviewer can be a separate agent/model; offer cross-model review
+  rather than silently skipping it. With no fresh reviewer, say the result is
+  a self-review, not an independent one.
 
 Adapted from addyosmani/agent-skills (MIT).
 EOF
@@ -407,7 +409,9 @@ Run git directly (\`git ...\`); the kit no longer uses rtk.
 - Conventional Commits; no agent names/trailers.
 
 Default seat posture is project-local full-flow. Do not
-revert unrelated user work.
+revert unrelated user work. Claim only what your evidence covers: what was
+checked, how, on which code version. After a related change, say if the
+earlier result still holds. Keep apart what you ran, read and left unchecked.
 EOF
 
   write_user_owned_file "$TARGET_DIR/docs/agent-configs/project-agent-context.md" <<EOF
@@ -637,8 +641,8 @@ large (all seats).
 
 ## Agentmemory
 
-Long-term memory across sessions and seats (Claude Code and Codex): follow
-\`.agents/skills/agentmemory-mcp/SKILL.md\`. It is advisory; current files win.
+Long-term memory across sessions and seats: follow
+\`.agents/skills/agentmemory-mcp/SKILL.md\`.
 
 ## Collaboration
 
@@ -744,7 +748,7 @@ local-only secret/permission file changes.
 
 ## Git Workflow
 
-Run git directly (\`git ...\`); the kit no longer uses rtk.
+Run git directly; rtk is retired.
 
 - Override host defaults: \`feature/<slug>\` (features), \`bugfix/<slug>\` (fixes); no \`codex/\` or agent/AI names.
 - Never force-push main/dev/develop, even with --force-with-lease or APIs.
@@ -758,8 +762,10 @@ Run git directly (\`git ...\`); the kit no longer uses rtk.
 - Other force/rewrite actions need explicit approval.
 - Conventional Commits; no agent names/trailers.
 
-Never silently revert user work or hide uncertainty. No success claim without
-fresh verification or a clear reason it was not run.
+Never silently revert user work or hide uncertainty. Claim only what your
+evidence covers: what was checked, how, on which code version. After a related
+change, say if the earlier result still holds. Keep apart what you ran, read
+and left unchecked.
 
 ## Project-Specific Conventions
 
@@ -994,7 +1000,9 @@ behaviour the user sees) blocks and returns the packet to `@spec`. A
 `technical` finding (files, races, test design, migration steps,
 performance) is resolved in the plan and listed in `resolved_in_plan`. The
 plan is `docs/superpowers/plans/<topic>/plan.md` or
-`.agents/tasks/<task-id>/plan.md`; skip writing-plans' execution-method choice.
+`.agents/tasks/<task-id>/plan.md`; skip writing-plans' execution-method choice
+and `REQUIRED SUB-SKILL` header. A plan or a skill never widens a seat's
+rights or the Git rules.
 
 ### `verify-review.md`
 

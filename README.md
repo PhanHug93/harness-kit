@@ -5,7 +5,7 @@ predictable AI-assisted workflow to an existing project. It writes local
 instructions, agent seats, onboarding helpers and checks into your project. It
 does not change your application code.
 
-Current release: [`2026.11.10.1`](agent-bootstrap/VERSION)
+Current release: [`2026.11.12.1`](agent-bootstrap/VERSION)
 
 ## What you get
 
@@ -41,11 +41,11 @@ lock: no script stops `@build` from starting early.
 
 ## Install
 
-From the project root. This installs release `2026.11.10.1`:
+From the project root. This installs release `2026.11.12.1`:
 
 ```bash
 cd /path/to/project
-curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.10.1/agent-bootstrap/harness-kit-one-shot.sh | bash
+curl -fsSL https://raw.githubusercontent.com/PhanHug93/harness-kit/v2026.11.12.1/agent-bootstrap/harness-kit-one-shot.sh | bash
 ```
 
 Options go after `| bash -s --`: `--to latest` installs the newest release,
@@ -264,7 +264,7 @@ What the seats do with it:
 | Memories | decisions and facts, with the reason | "pinned agentmemory 0.9.31 because 0.9.30 changed auth" |
 | Lessons | do-not-repeat rules that grow stronger when repeated | `@verify` finds a fragile test and saves the rule |
 | Actions | follow-up work outside the current task | the closing seat files "hook takes 1.8 s; fix separately" |
-| Profile | the files and topics the project touches most | a new session reads it before starting |
+| Profile | the files and topics the project touches most | an agent new to the project reads it first |
 
 The task packet in `.agents/tasks/` still owns the current task; memory is
 advisory and never holds secrets.

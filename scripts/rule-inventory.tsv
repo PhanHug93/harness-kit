@@ -18,7 +18,9 @@ git.no-tag-moves	both	AGENTS.md	no	No tag moves
 git.other-force	both	AGENTS.md	no	Other force/rewrite actions need explicit approval
 git.no-trailers	both	AGENTS.md	no	no agent names/trailers
 agents.no-silent-revert	full	AGENTS.md	yes	Never silently revert user work or hide uncertainty
-agents.success-claims	full	AGENTS.md	yes	No success claim without fresh verification or a clear reason it was not run
+agents.evidence-claims	both	AGENTS.md	yes	Claim only what your evidence covers: what was checked, how, on which code version.
+agents.evidence-after-change	both	AGENTS.md	no	After a related change, say if the earlier result still holds.
+agents.evidence-kinds	both	AGENTS.md	no	Keep apart what you ran, read and left unchecked.
 agents.exact-approval	full	AGENTS.md	yes	Exact approval is required for external-path mutations, installs, commits, pushes, force operations, or local-only secret/permission file changes
 agents.no-scan	full	AGENTS.md	no	Do not scan/read/grep/diff/summarize/print local-only state
 agents.no-scan-cmd	full	AGENTS.md	no	scripts/agent-hook.sh no-scan-paths
@@ -178,9 +180,9 @@ memory.advisory	both	.agents/skills/agentmemory-mcp/SKILL.md	no	Memory is adviso
 memory.hosts	both	.agents/skills/agentmemory-mcp/SKILL.md	no	Supported hosts: Claude Code and Codex only, for now.
 memory.project-param	both	.agents/skills/agentmemory-mcp/SKILL.md	yes	Always pass `project` = the repository folder name.
 memory.agentid-not-on-search	both	.agents/skills/agentmemory-mcp/SKILL.md	yes	Never pass `agentId` to a search
-memory.start-profile	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_profile`: the files and topics the project touches most.
+memory.start-profile	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_profile`: the files and topics the project touches most. Only when new to the project.
 memory.start-lessons	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_lesson_recall` with the task type
-memory.start-search	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_smart_search` for earlier decisions on the area.
+memory.start-search	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_smart_search` for earlier decisions on the area. Pass `targetLayer: memory` first
 memory.start-file-history	both	.agents/skills/agentmemory-mcp/SKILL.md	no	`memory_file_history` before editing config, auth, build or release files.
 memory.next	both	.agents/skills/agentmemory-mcp/SKILL.md	no	No task given: `memory_next`
 memory.save-decision	both	.agents/skills/agentmemory-mcp/SKILL.md	no	A decision settles: `memory_save` at that moment
@@ -232,6 +234,8 @@ seats.gate-technical-in-plan	full	docs/agent-configs/agent-handoff-reference.md	
 seats.small-one-seat	full	docs/agent-configs/agent-mode-contracts.md	no	small: one seat checks the request
 seats.audit-resolved-in-plan	full	docs/agent-configs/agent-handoff-reference.md	no	no `resolved_in_plan` decision contradicts an owner decision
 handoff.gate-review-plan	full	docs/agent-configs/agent-handoff-reference.md	no	resolved_in_plan: none | <technical findings and where the plan answers them>
+handoff.plan-skip-sub-skill	full	docs/agent-configs/agent-handoff-reference.md	no	skip writing-plans' execution-method choice and `REQUIRED SUB-SKILL` header.
+handoff.plan-no-wider-rights	full	docs/agent-configs/agent-handoff-reference.md	yes	A plan or a skill never widens a seat's rights or the Git rules.
 handoff.task-md-optional	full	docs/agent-configs/agent-handoff-schema.md	no	optional input for `@gate`: interfaces, edge cases, implementation notes
 commands.seat-commands	full	CLAUDE.md	no	`/spec`, `/gate`, `/build`, `/verify`, `/audit` (one per seat)
 seats.packet-copy	full	docs/agent-configs/agent-handoff-reference.md	no	The first `tier set` copies the project roster to

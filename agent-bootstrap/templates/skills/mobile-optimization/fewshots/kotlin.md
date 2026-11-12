@@ -45,7 +45,7 @@ fun partitionSyncableRecords(
 ## Output
 
 ### Mode Detected
-Kotlin code-level optimization for domain logic.
+`implement`: Kotlin code-level optimization for domain logic.
 
 ### Behavior Invariants
 - Blank date keys are ignored.
@@ -134,6 +134,7 @@ fun partitionSyncableRecords(
 
 ### Trade-offs / Risks
 - Conditional-sort tracking adds state; keep only if input is usually sorted.
+- `today` is now read during the scan; the original read it after every `legacyPredicate` call. The result is the same only if the predicate does not change the records: assumed here, not proven. If it may, keep the second lookup.
 - Removing `copy()` would save more, but requires proof that `DailyRecord` is immutable and never shared across mutation boundaries — not proven here, so copies stay.
 
 ### Tests To Protect Behavior

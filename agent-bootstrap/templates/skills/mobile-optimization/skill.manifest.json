@@ -28,7 +28,7 @@
     "note": "always_on = pointer surfaces only; content loads on invocation"
   },
   "loop_integration": {
-    "validate_step": "scripts/agent-guard.sh pre-final --run-verify --verify-scope fast"
+    "validate_step": "scripts/agent-guard.sh pre-final --run-verify"
   },
   "provenance": "Adapted from user-supplied mobile optimization pack; identity-sanitized, deduplicated, and rule-reviewed before templating."
 }

@@ -39,13 +39,13 @@ Blanket rule: outside a known hot path, with no measurement, prefer answering "m
 
 0. **Record usage (best effort)** — if `scripts/agent-guard.sh` exists, run
    `scripts/agent-guard.sh skill-note mobile-optimization`; continue if unavailable.
-1. **Detect scope** — language, platform, code path class (table above), risk level.
-2. **Lock behavior** — list invariants per the contract; write or extend the characterization test.
-3. **Scan** — walk `catalog.md`; note only the patterns that actually apply.
-4. **Patch** — apply the minimal fix per the language overlay.
-5. **Validate** — run the targeted test command, then the project gate:
-   `scripts/agent-guard.sh pre-final --run-verify --verify-scope fast`
-   A red gate means the task is not complete. Do not report success on red.
+1. **Detect scope and mode** — language, platform, code path class (table above), risk level. Mode is `review` when asked to review or when you may not edit; otherwise `implement`.
+2. **Lock behavior** — list invariants per the contract; in `implement` mode, write or extend the characterization test.
+3. **Scan** — walk `catalog.md`; note only the patterns that actually apply. A catalog action that moves code to another file is a finding, not a patch, unless that file is in the stated scope.
+   Review mode stops here: report findings only (no patch, no test, no gate).
+4. **Patch** — apply the minimal fix. The idiom is your choice; it must keep the invariants of step 2.
+5. **Validate** — run the targeted test and compile the edited module. The project gate (`scripts/agent-guard.sh pre-final --run-verify`) runs once at hand-off, by whoever `AGENTS.md` names: you or the host.
+   Say what ran and what was skipped. A red result means the task is not complete. Do not report success on red.
 
 ## Response format (exact section order)
 
@@ -57,3 +57,5 @@ Blanket rule: outside a known hot path, with no measurement, prefer answering "m
 ### Trade-offs / Risks
 ### Tests To Protect Behavior
 ### Optional Further Optimization
+
+`Mode Detected` names the mode (`review` or `implement`), the language and the code path class. Review mode leaves out Optimized Code and Why This Is Faster: each bottleneck gives where (file:line), the cost and the fix in words. A missing behavior test is a finding, and Tests To Protect Behavior lists the tests to write.

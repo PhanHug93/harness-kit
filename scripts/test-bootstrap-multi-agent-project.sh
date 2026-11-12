@@ -653,6 +653,8 @@ assert_mobile_optimization_stack_selection() {
   need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" "Characterization test before patch" "$label mobile skill contract"
   need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" "skill-note mobile-optimization" "$label mobile skill usage telemetry"
   need_contains "$(cat "$target/.agents/skills/mobile-optimization/catalog.md")" "Security — never \"optimize\" into these" "$label mobile catalog"
+  need_contains "$(cat "$target/.agents/skills/mobile-optimization/SKILL.md")" 'Mode is `review` when asked to review or when you may not edit' "$label mobile skill review mode"
+  need_contains "$(cat "$target/.agents/skills/mobile-optimization/catalog.md")" "The same element must win when a key repeats" "$label mobile catalog names the lookup invariant"
 
   while [[ "$#" -gt 0 && "$1" != "--absent" ]]; do
     expected_file="$1"
@@ -2455,6 +2457,7 @@ need_not_contains "$(sed -n '1,20p' "$TMP_DIR/.agents/skills/agentmemory-mcp/SKI
 [[ -f "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md" ]] || fail "full bootstrap did not generate doubt-driven skill"
 need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "CLAIM" "doubt-driven procedure"
 need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "addyosmani/agent-skills (MIT)" "doubt-driven attribution"
+need_contains "$(cat "$TMP_DIR/.agents/skills/doubt-driven/SKILL.md")" "a self-review, not an independent one" "doubt-driven names a self-review"
 need_contains "$(cat "$TMP_DIR/docs/agent-configs/llm-council-agent-workflow.md")" "doubt-driven" "council references doubt-driven"
 need_not_contains "$(cat "$TMP_DIR/AGENTS.md")" "agents must read and apply:" "AGENTS must not eagerly load all workflow docs"
 need_not_contains "$(cat "$TMP_DIR/CLAUDE.md")" "Read \`AGENTS.md\` first, then apply:" "CLAUDE must not eagerly load all workflow docs"

@@ -10,8 +10,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 INVENTORY="$ROOT_DIR/scripts/rule-inventory.tsv"
 # 10,353 words before the 2026-11 rewrite; the RECOVERY restore recipe (about 300
-# words, run by scripts/test-agent-retirement.py) stays verbatim.
-WORD_CEILING=7900
+# words, run by scripts/test-agent-retirement.py) stays verbatim. 7,900 until
+# the 2026-11 skill text fixes (evidence principle, doubt-driven findings,
+# agentmemory search layer, plan header rule: +43 words, owner decision).
+WORD_CEILING=7942
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/rule-inventory.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 

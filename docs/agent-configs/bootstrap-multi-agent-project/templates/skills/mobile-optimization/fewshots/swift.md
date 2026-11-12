@@ -16,7 +16,7 @@ func normalizeNames(_ names: [String]) -> [String] {
 ## Output
 
 ### Mode Detected
-Swift collection/string optimization.
+`implement`: Swift collection/string optimization.
 
 ### Behavior Invariants
 - Names are trimmed; empty names removed; names lowercased; duplicates removed; output sorted.
@@ -43,11 +43,11 @@ func normalizeNames(_ names: [String]) -> [String] {
 ```
 
 ### Why This Is Faster
-- One pass normalizes and deduplicates via `Set`; only the final sort allocates.
+- One pass normalizes and deduplicates via `Set`; the four intermediate arrays are gone. Trimming, lowercasing and the set still allocate.
 
 ### Trade-offs / Risks
 - `lowercased()` performs locale-independent Unicode case mapping. If business rules require locale-specific casing (e.g., Turkish dotless i), switch to `lowercased(with:)` explicitly — that changes behavior and must be called out.
-- `trimmingCharacters` stays because the output requires trimmed values (contrast with blank-only checks, where `allSatisfy(\.isWhitespace)` avoids the allocation).
+- `trimmingCharacters` stays because the output requires trimmed values.
 
 ### Tests To Protect Behavior
 - Empty list; whitespace-only names; duplicates differing only by case; Unicode names.
